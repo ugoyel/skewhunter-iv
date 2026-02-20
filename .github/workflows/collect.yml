@@ -1,20 +1,18 @@
-name: Skew Hunter IV Collector
+name: Skew Hunter — IV + Paper Trader
 
 on:
   schedule:
-    # Every 3 minutes Mon–Fri 9:15 AM to 3:30 PM IST
-    # IST = UTC+5:30, so 9:15 IST = 3:45 UTC, 15:30 IST = 10:00 UTC
     - cron: '*/3 3-10 * * 1-5'
-  workflow_dispatch:   # Manual trigger button
+  workflow_dispatch:
 
 jobs:
-  collect-and-chart:
+  run:
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -30,6 +28,9 @@ jobs:
       - name: Collect IV data
         run: python collector.py
 
+      - name: Run paper trader
+        run: python paper_trade.py
+
       - name: Build chart
         run: python chart.py
 
@@ -37,6 +38,6 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add iv_data.csv index.html
-          git diff --staged --quiet || git commit -m "IV update $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git add iv_data.csv trades.csv trade_state.json index.html
+          git diff --staged --quiet || git commit -m "Update $(date -u '+%Y-%m-%d %H:%M UTC')"
           git push
