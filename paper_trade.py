@@ -285,4 +285,4 @@ elif in_window and not state['in_trade']:
         save_state(new_state)
         print(f"  🟢 NEW SIGNAL: {signal} {strike} @ ₹{prem}")
         print(f"     SL:₹{sl_price} | Target:₹{tgt_price} | Lots:{lots} | Qty:{lots*NIFTY_LOT}")
-        print(f"     Max Risk:₹{round((prem-sl_price)*NIFTY_LOT*
+        print(f"     Max Risk:₹{round((prem-sl_price)*NIFTY_LOT*lots, 2)}")
