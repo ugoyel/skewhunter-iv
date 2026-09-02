@@ -34,10 +34,15 @@ jobs:
       - name: Build chart
         run: python chart.py
 
+      - name: Build mobile app feed
+        run: python app_data.py
+
       - name: Commit and push
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add iv_data.csv trades.csv trade_state.json index.html
+          for f in iv_data.csv trades.csv trade_state.json index.html app_data.json; do
+            [ -f "$f" ] && git add "$f"
+          done
           git diff --staged --quiet || git commit -m "Update $(date -u '+%Y-%m-%d %H:%M UTC')"
           git push

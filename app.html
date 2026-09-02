@@ -1,0 +1,1071 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Skew Hunter</title>
+<meta name="description" content="NIFTY implied-volatility skew and paper-trading dashboard.">
+
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f9f9f7">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d0d0d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Skew Hunter">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
+
+<style>
+/* ── Design tokens ───────────────────────────────────────────────────────
+   Light on :root; the dark steps are chosen for the dark surface (not an
+   automatic flip) and declared under both the OS media query and the
+   explicit theme stamp, so the in-app toggle wins in either direction. */
+:root {
+  color-scheme: light;
+  --plane:#f9f9f7; --surface:#fcfcfb; --raised:#ffffff;
+  --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --ring:rgba(11,11,11,.10); --wash:rgba(11,11,11,.04);
+  --ce:#2a78d6;          /* series 1 — calls / call-side skew */
+  --pe:#eb6834;          /* series 2 — puts / put-side skew   */
+  --good:#0ca30c; --bad:#d03b3b; --warn:#fab219;
+  --good-text:#006300; --bad-text:#d03b3b;   /* ≥4.5:1 on this surface */
+  --shadow:0 1px 2px rgba(11,11,11,.05), 0 1px 8px rgba(11,11,11,.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --plane:#0d0d0d; --surface:#1a1a19; --raised:#201f1e;
+    --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10); --wash:rgba(255,255,255,.05);
+    --ce:#3987e5; --pe:#d95926;
+    --good:#0ca30c; --bad:#d03b3b;
+    --good-text:#0ca30c; --bad-text:#e66767;
+    --shadow:none;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --plane:#0d0d0d; --surface:#1a1a19; --raised:#201f1e;
+  --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10); --wash:rgba(255,255,255,.05);
+  --ce:#3987e5; --pe:#d95926;
+  --good:#0ca30c; --bad:#d03b3b;
+  --good-text:#0ca30c; --bad-text:#e66767;
+  --shadow:none;
+}
+
+* { box-sizing:border-box; }
+html, body { margin:0; padding:0; }
+body {
+  background:var(--plane); color:var(--ink);
+  font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing:antialiased;
+  padding:0 0 max(24px, env(safe-area-inset-bottom));
+  overscroll-behavior-y:contain;
+}
+.wrap { max-width:560px; margin:0 auto; padding:0 12px; }
+
+/* ── Header ─────────────────────────────────────────────────────────── */
+header {
+  position:sticky; top:0; z-index:30;
+  background:color-mix(in srgb, var(--plane) 88%, transparent);
+  backdrop-filter:saturate(1.4) blur(12px);
+  border-bottom:1px solid var(--ring);
+  padding-top:env(safe-area-inset-top);
+}
+.bar { display:flex; align-items:center; gap:8px; padding:10px 12px; }
+.brand { display:flex; align-items:center; gap:8px; min-width:0; }
+.brand h1 { font-size:15px; font-weight:650; margin:0; letter-spacing:-.01em; white-space:nowrap; }
+.brand img { width:22px; height:22px; border-radius:6px; }
+.spacer { flex:1; }
+.pill {
+  display:inline-flex; align-items:center; gap:5px;
+  font-size:11px; font-weight:600; color:var(--ink-2);
+  border:1px solid var(--ring); border-radius:999px; padding:3px 8px;
+  background:var(--surface); white-space:nowrap;
+}
+.dot { width:7px; height:7px; border-radius:50%; background:var(--muted); flex:none; }
+.pill.live .dot { background:var(--good); animation:pulse 2.4s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+.iconbtn {
+  appearance:none; border:1px solid var(--ring); background:var(--surface); color:var(--ink-2);
+  width:34px; height:34px; border-radius:10px; font-size:15px; cursor:pointer; flex:none;
+  display:inline-flex; align-items:center; justify-content:center;
+}
+.iconbtn:active { background:var(--wash); }
+
+/* ── Cards ──────────────────────────────────────────────────────────── */
+.card {
+  background:var(--surface); border:1px solid var(--ring); border-radius:14px;
+  padding:14px; margin:12px 0; box-shadow:var(--shadow);
+}
+.card h2 { font-size:13.5px; font-weight:650; margin:0; letter-spacing:-.005em; }
+.card .sub { font-size:11.5px; color:var(--muted); margin:2px 0 0; }
+
+/* ── Hero ───────────────────────────────────────────────────────────── */
+.hero .label { font-size:11.5px; color:var(--muted); text-transform:none; }
+.hero .value { font-size:44px; font-weight:650; letter-spacing:-.02em; line-height:1.05; margin:2px 0 0; }
+.delta { font-size:14px; font-weight:600; margin-top:4px; display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+.up { color:var(--good-text); } .down { color:var(--bad-text); } .flat { color:var(--ink-2); }
+
+/* ── Stat tiles ─────────────────────────────────────────────────────── */
+.tiles { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-top:12px; }
+@media (min-width:420px) { .tiles { grid-template-columns:repeat(4,1fr); } }
+.tile { background:var(--raised); border:1px solid var(--ring); border-radius:11px; padding:9px 10px; }
+.tile .k { font-size:10.5px; color:var(--muted); display:flex; align-items:center; gap:5px; }
+.tile .k i { width:8px; height:8px; border-radius:2px; flex:none; display:inline-block; }
+.tile .v { font-size:19px; font-weight:640; letter-spacing:-.01em; margin-top:3px; }
+.tile .n { font-size:10.5px; color:var(--muted); margin-top:1px; }
+
+/* ── Position ───────────────────────────────────────────────────────── */
+.pos-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.chip {
+  font-size:11px; font-weight:650; border-radius:7px; padding:3px 7px; white-space:nowrap;
+  border:1px solid var(--ring); background:var(--raised); color:var(--ink-2); flex:none;
+}
+.chip.ce { color:var(--ce); border-color:color-mix(in srgb, var(--ce) 40%, transparent); }
+.chip.pe { color:var(--pe); border-color:color-mix(in srgb, var(--pe) 40%, transparent); }
+.legs { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:10px; }
+.legs div { min-width:0; }
+.legs .k { font-size:10.5px; color:var(--muted); }
+.legs .v { font-size:14px; font-weight:600; font-variant-numeric:tabular-nums; margin-top:1px; }
+.track { height:6px; border-radius:3px; background:var(--wash); margin-top:12px; position:relative; overflow:hidden; }
+.track i { position:absolute; top:0; bottom:0; border-radius:3px; }
+.track-legend { display:flex; justify-content:space-between; font-size:10.5px; color:var(--muted); margin-top:4px; font-variant-numeric:tabular-nums; }
+
+/* ── Filter row (scopes everything below it) ────────────────────────── */
+.filters { display:flex; gap:6px; align-items:center; padding:2px 0 0; overflow-x:auto; scrollbar-width:none; }
+.filters::-webkit-scrollbar { display:none; }
+.seg {
+  appearance:none; cursor:pointer; white-space:nowrap;
+  font:inherit; font-size:12px; font-weight:600;
+  border:1px solid var(--ring); background:var(--surface); color:var(--ink-2);
+  border-radius:9px; padding:6px 11px;
+}
+.seg[aria-pressed="true"] { background:var(--ink); color:var(--plane); border-color:var(--ink); }
+
+/* ── Charts ─────────────────────────────────────────────────────────── */
+.chart-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+.legend { display:flex; flex-wrap:wrap; gap:10px; margin:8px 0 2px; }
+.legend span { display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--ink-2); }
+.legend i { width:12px; height:2px; border-radius:1px; display:inline-block; }
+.legend i.sw { width:9px; height:9px; border-radius:2px; }
+.plot { position:relative; margin-top:6px; touch-action:pan-y; }
+.plot svg { display:block; width:100%; }
+.plot text.end { paint-order:stroke fill; stroke:var(--surface); stroke-width:3px; stroke-linejoin:round; }
+.plot.stale { opacity:.55; transition:opacity .15s; }
+.tip {
+  position:absolute; pointer-events:none; z-index:5; opacity:0; transition:opacity .1s;
+  background:var(--raised); border:1px solid var(--ring); border-radius:9px;
+  padding:7px 9px; box-shadow:0 4px 16px rgba(0,0,0,.18); min-width:112px;
+}
+.tip.on { opacity:1; }
+.tip .when { font-size:10.5px; color:var(--muted); margin-bottom:4px; }
+.tip .row { display:flex; align-items:baseline; gap:6px; font-size:12px; }
+.tip .row + .row { margin-top:2px; }
+.tip .row i { width:10px; height:2px; border-radius:1px; flex:none; }
+.tip .row b { font-weight:650; font-variant-numeric:tabular-nums; }
+.tip .row s { text-decoration:none; color:var(--muted); font-size:11px; }
+.ghost { font-size:12px; color:var(--muted); padding:22px 0; text-align:center; }
+
+table.data { width:100%; border-collapse:collapse; font-size:12px; font-variant-numeric:tabular-nums; }
+table.data th, table.data td { text-align:right; padding:5px 6px; border-bottom:1px solid var(--grid); white-space:nowrap; }
+table.data th:first-child, table.data td:first-child { text-align:left; }
+table.data th { color:var(--muted); font-weight:600; position:sticky; top:0; background:var(--surface); }
+.scroll { max-height:260px; overflow:auto; margin-top:8px; border:1px solid var(--ring); border-radius:9px; }
+.linkbtn {
+  appearance:none; background:none; border:0; cursor:pointer; padding:2px 0;
+  font:inherit; font-size:11.5px; font-weight:600; color:var(--ink-2); text-decoration:underline;
+  text-underline-offset:2px; flex:none;
+}
+
+/* ── Trades ─────────────────────────────────────────────────────────── */
+.trade { display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--grid); }
+.trade:last-child { border-bottom:0; }
+.trade .who { min-width:0; flex:1; }
+.trade .t1 { font-size:12.5px; font-weight:600; display:flex; align-items:center; gap:6px; }
+.trade .t2 { font-size:11px; color:var(--muted); margin-top:2px; font-variant-numeric:tabular-nums; }
+.trade .amt { text-align:right; font-size:14px; font-weight:650; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.trade .amt s { display:block; text-decoration:none; font-size:10.5px; font-weight:500; color:var(--muted); }
+
+/* ── Footer / banners ───────────────────────────────────────────────── */
+footer { font-size:11.5px; color:var(--muted); padding:4px 2px 0; }
+footer p { margin:6px 0; }
+.banner {
+  display:flex; align-items:center; gap:10px; margin:12px 0;
+  background:var(--raised); border:1px solid var(--ring); border-radius:12px; padding:10px 12px;
+  font-size:12.5px;
+}
+.banner button {
+  appearance:none; cursor:pointer; font:inherit; font-size:12px; font-weight:650;
+  border:0; border-radius:8px; padding:7px 11px; background:var(--ink); color:var(--plane); flex:none;
+}
+[hidden] { display:none !important; }
+:focus-visible { outline:2px solid var(--ce); outline-offset:2px; border-radius:6px; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation:none !important; transition:none !important; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap bar">
+    <div class="brand">
+      <img src="icons/icon-192.png" alt="">
+      <h1>Skew Hunter</h1>
+    </div>
+    <div class="spacer"></div>
+    <span class="pill" id="status"><span class="dot"></span><span id="status-text">Loading…</span></span>
+    <button class="iconbtn" id="theme" type="button" aria-label="Switch colour theme" title="Switch colour theme">◐</button>
+  </div>
+</header>
+
+<main class="wrap" id="app">
+  <div class="ghost" id="boot">Loading dashboard…</div>
+</main>
+
+<noscript>
+  <div class="wrap"><div class="card">This dashboard needs JavaScript. The raw data is in
+  <code>iv_data.csv</code> and <code>trades.csv</code> in the repository.</div></div>
+</noscript>
+
+<script>
+(() => {
+'use strict';
+
+const DATA_URL   = 'app_data.json';
+const REFRESH_MS = 60000;
+const IST        = 'Asia/Kolkata';
+const NS         = 'http://www.w3.org/2000/svg';
+
+/* ── Formatting ───────────────────────────────────────────────────── */
+const fTime  = new Intl.DateTimeFormat('en-IN', {timeZone:IST, hour:'2-digit', minute:'2-digit', hour12:false});
+const fDay   = new Intl.DateTimeFormat('en-IN', {timeZone:IST, day:'2-digit', month:'short'});
+const fStamp = new Intl.DateTimeFormat('en-IN', {timeZone:IST, day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', hour12:false});
+
+const isNum = v => typeof v === 'number' && isFinite(v);
+const num   = (v, d = 2) => isNum(v) ? v.toLocaleString('en-IN', {minimumFractionDigits:d, maximumFractionDigits:d}) : '—';
+const pct   = v => isNum(v) ? num(v, 2) + '%' : '—';
+const signed = (v, d = 0) => !isNum(v) ? '—' : (v > 0 ? '+' : v < 0 ? '−' : '') + num(Math.abs(v), d);
+const rupees = (v, d = 0) => isNum(v) ? '₹' + num(v, d) : '—';
+const signedRupees = (v, d = 0) => !isNum(v) ? '—'
+  : (v > 0 ? '+' : v < 0 ? '−' : '') + '₹' + num(Math.abs(v), d);
+const arrow = v => !isNum(v) || v === 0 ? '' : v > 0 ? '▲' : '▼';
+const dirClass = v => !isNum(v) || v === 0 ? 'flat' : v > 0 ? 'up' : 'down';
+
+// Open interest is easier to read in the Indian lakh/crore scale than in millions.
+function oi(v) {
+  if (!isNum(v)) return '—';
+  if (Math.abs(v) >= 1e7) return num(v / 1e7, 2) + ' Cr';
+  if (Math.abs(v) >= 1e5) return num(v / 1e5, 2) + ' L';
+  return num(v, 0);
+}
+
+const parseT = s => { const d = new Date(s); return isNaN(d) ? null : d; };
+
+// "Live" is a fact about the clock, not about the file: the feed is committed to
+// git, so a flag baked into it would still read Live hours after the close.
+const istParts = new Intl.DateTimeFormat('en-GB', {timeZone:IST, weekday:'short', hour:'2-digit', minute:'2-digit', hourCycle:'h23'});
+function marketOpenNow() {
+  const p = Object.fromEntries(istParts.formatToParts(new Date()).map(x => [x.type, x.value]));
+  if (p.weekday === 'Sat' || p.weekday === 'Sun') return false;
+  const mins = (+p.hour) * 60 + (+p.minute);
+  return mins >= 9 * 60 + 15 && mins <= 15 * 60 + 30;   // 09:15–15:30 IST
+}
+const label = (s, daily) => { const d = parseT(s); if (!d) return String(s); return daily ? fDay.format(d) : fTime.format(d); };
+
+function text(tag, cls, value) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (value !== undefined) n.textContent = value;   // never innerHTML — values come from a data file
+  return n;
+}
+function frag(...nodes) { const f = document.createDocumentFragment(); nodes.forEach(n => n && f.appendChild(n)); return f; }
+function svgEl(tag, attrs) {
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) if (attrs[k] !== undefined && attrs[k] !== null) n.setAttribute(k, attrs[k]);
+  return n;
+}
+const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+/* ── Scales ───────────────────────────────────────────────────────── */
+function niceTicks(lo, hi, count) {
+  if (!(hi > lo)) { const c = lo || 0; return [c]; }
+  const raw = (hi - lo) / Math.max(1, count);
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= raw) || 10 * mag;
+  const out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-6; v += step) out.push(+v.toFixed(10));
+  return out;
+}
+
+/* ── Chart ────────────────────────────────────────────────────────────
+   One engine for every plot in the app. `kind` picks the mark:
+     line       — 1–2 series, 2px stroke, end dot, direct end label
+     diverging  — one series split at zero; fill colour carries the sign.
+                  Dense runs draw as an area and sparse runs as columns, so a
+                  bar is never thinner than the gap that should separate it —
+                  unless `area` is set, which keeps a running total a curve.
+   Every instance gets the crosshair + tooltip layer and a table twin.     */
+class Chart {
+  constructor(host, cfg) {
+    this.host = host; this.cfg = cfg;
+    this.plot = text('div', 'plot');
+    this.svg = svgEl('svg', {tabindex:'0', role:'img', 'aria-label':cfg.title});
+    this.tip = text('div', 'tip');
+    this.plot.append(this.svg, this.tip);
+    host.appendChild(this.plot);
+
+    this.cursor = null;
+    this.svg.addEventListener('pointermove', e => this.point(e));
+    this.svg.addEventListener('pointerdown', e => this.point(e));
+    this.svg.addEventListener('pointerleave', () => this.clear());
+    this.svg.addEventListener('blur', () => this.clear());
+    this.svg.addEventListener('keydown', e => {
+      const n = this.cfg.labels.length;
+      if (!n) return;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const step = e.key === 'ArrowRight' ? 1 : -1;
+        this.cursor = Math.max(0, Math.min(n - 1, (this.cursor === null ? (step > 0 ? -1 : n) : this.cursor) + step));
+        this.draw();
+      } else if (e.key === 'Escape') { this.clear(); }
+    });
+
+    this.ro = new ResizeObserver(() => this.draw());
+    this.ro.observe(this.plot);
+  }
+
+  update(cfg) { Object.assign(this.cfg, cfg); this.cursor = null; this.draw(); }
+
+  point(e) {
+    const n = this.cfg.labels.length;
+    if (!n || !this.geom) return;
+    const box = this.svg.getBoundingClientRect();
+    const x = e.clientX - box.left;
+    const {padL, plotW} = this.geom;
+    const idx = n === 1 ? 0 : Math.round((x - padL) / plotW * (n - 1));
+    const next = Math.max(0, Math.min(n - 1, idx));
+    if (next !== this.cursor) { this.cursor = next; this.draw(); }
+  }
+  clear() { if (this.cursor !== null) { this.cursor = null; this.draw(); } }
+
+  draw() {
+    const {labels, series, kind, fmt, height = 152, daily, zero} = this.cfg;
+    const W = Math.max(240, Math.round(this.plot.clientWidth || this.host.clientWidth || 300));
+    const H = height;
+    this.svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    this.svg.setAttribute('height', H);
+    while (this.svg.firstChild) this.svg.removeChild(this.svg.firstChild);
+
+    this.svg.appendChild(svgEl('rect', {width:W, height:H, fill:'transparent'}));
+
+    if (!labels.length || !series.some(s => s.values.some(isNum))) {
+      const t = svgEl('text', {x:W/2, y:H/2, 'text-anchor':'middle', fill:cssVar('--muted'), 'font-size':12});
+      t.textContent = this.cfg.empty || 'No data for this range yet';
+      this.svg.appendChild(t); this.geom = null; return;
+    }
+
+    // Domain
+    let lo = Infinity, hi = -Infinity;
+    for (const s of series) for (const v of s.values) if (isNum(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    if (zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+    if (lo === hi) { lo -= 1; hi += 1; }
+    const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
+
+    const ticks = niceTicks(lo, hi, 3);
+    const tickText = ticks.map(t => fmt.axis(t));
+    const padL = Math.max(26, ...tickText.map(t => t.length * 6.4 + 8));
+    // Line charts label their endpoint in the right gutter; measure it first so
+    // the label is never clipped and never overlaps the line.
+    const endText = kind === 'diverging' ? []
+      : series.map(s => { const v = s.values.filter(isNum).pop(); return isNum(v) ? fmt.end(v) : ''; }).filter(Boolean);
+    const padR = 10 + (endText.length ? Math.max(...endText.map(t => t.length * 6.2)) + 9 : 0);
+    const padT = 10, padB = 18;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    const n = labels.length;
+    const X = i => padL + (n === 1 ? plotW / 2 : plotW * i / (n - 1));
+    const Y = v => padT + plotH * (1 - (v - lo) / (hi - lo));
+    this.geom = {padL, plotW, X, Y};
+
+    // Gridlines — solid hairlines, one step off the surface
+    for (const t of ticks) {
+      const y = Y(t);
+      this.svg.appendChild(svgEl('line', {x1:padL, x2:W - padR, y1:y, y2:y, stroke:cssVar('--grid'), 'stroke-width':1}));
+      const lab = svgEl('text', {x:padL - 6, y:y + 3.5, 'text-anchor':'end', fill:cssVar('--muted'), 'font-size':10});
+      lab.setAttribute('font-variant-numeric', 'tabular-nums');
+      lab.textContent = fmt.axis(t);
+      this.svg.appendChild(lab);
+    }
+    if (zero && lo < 0 && hi > 0) {
+      this.svg.appendChild(svgEl('line', {x1:padL, x2:W - padR, y1:Y(0), y2:Y(0), stroke:cssVar('--axis'), 'stroke-width':1}));
+    }
+
+    kind === 'diverging' ? this.drawDiverging(X, Y, plotW, n) : this.drawLines(X, Y, padT + plotH);
+
+    // X labels — first, last and up to two inside; never dense enough to collide
+    const slots = n <= 2 ? [0, n - 1] : [0, Math.round((n - 1) / 3), Math.round(2 * (n - 1) / 3), n - 1];
+    for (const i of [...new Set(slots)]) {
+      const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
+      const t = svgEl('text', {x:X(i), y:H - 5, 'text-anchor':anchor, fill:cssVar('--muted'), 'font-size':10});
+      t.textContent = label(labels[i], daily);
+      this.svg.appendChild(t);
+    }
+
+    this.drawCursor(X, Y, padT, plotH, W);
+  }
+
+  drawLines(X, Y, bottom) {
+    const {series} = this.cfg;
+    const ends = [];
+    for (const s of series) {
+      const pts = s.values.map((v, i) => isNum(v) ? [X(i), Y(v)] : null);
+      const runs = []; let run = [];
+      for (const p of pts) { if (p) run.push(p); else if (run.length) { runs.push(run); run = []; } }
+      if (run.length) runs.push(run);
+      if (s.fill) {
+        for (const r of runs) if (r.length > 1) {
+          this.svg.appendChild(svgEl('path', {
+            d:`M${r[0][0]},${bottom}` + r.map(p => `L${p[0]},${p[1]}`).join('') +
+              `L${r[r.length - 1][0]},${bottom}Z`,
+            fill:s.color, 'fill-opacity':.10, stroke:'none'    // a wash, never a block
+          }));
+        }
+      }
+      for (const r of runs) {
+        this.svg.appendChild(svgEl('path', {
+          d:'M' + r.map(p => `${p[0]},${p[1]}`).join('L'),
+          fill:'none', stroke:s.color, 'stroke-width':2,
+          'stroke-linejoin':'round', 'stroke-linecap':'round',
+          'stroke-dasharray':s.dash || undefined
+        }));
+      }
+      const last = pts.filter(Boolean).pop();
+      if (last) {
+        this.svg.appendChild(svgEl('circle', {cx:last[0], cy:last[1], r:4, fill:s.color,
+          stroke:cssVar('--surface'), 'stroke-width':2}));   // 2px surface ring
+        ends.push({s, x:last[0], y:last[1], v:s.values.filter(isNum).pop()});
+      }
+    }
+    // Direct end labels — but only when they'd separate. Converging lines fall
+    // back to the legend + tooltip rather than stacking detached labels.
+    const collide = ends.length > 1 && ends.some((a, i) => ends.some((b, j) => j > i && Math.abs(a.y - b.y) < 13));
+    if (!collide) for (const e of ends) {
+      const t = svgEl('text', {x:e.x + 8, y:e.y + 3.6, 'text-anchor':'start', class:'end',
+        fill:cssVar('--ink-2'), 'font-size':10.5, 'font-weight':650});
+      t.textContent = this.cfg.fmt.end(e.v);
+      this.svg.appendChild(t);
+    }
+  }
+
+  drawDiverging(X, Y, plotW, n) {
+    const s = this.cfg.series[0];
+    const pos = s.posColor, neg = s.negColor, y0 = Y(0);
+    const band = plotW / Math.max(1, n - 1);
+
+    if (n <= 60 && !this.cfg.area) {
+      // Sparse: columns, ≤24px thick, with at least a 2px surface gap between them
+      const w = Math.max(2, Math.min(24, band - 2));
+      const r = Math.min(4, w / 2);
+      s.values.forEach((v, i) => {
+        if (!isNum(v) || v === 0) return;
+        const y = Y(v), up = v > 0;
+        const top = up ? y : y0, h = Math.abs(y - y0);
+        const x = X(i) - w / 2;
+        // Rounded data-end, square at the baseline.
+        const d = up
+          ? `M${x},${top + h}V${top + r}q0,-${r} ${r},-${r}h${w - 2 * r}q${r},0 ${r},${r}V${top + h}Z`
+          : `M${x},${top}V${top + h - r}q0,${r} ${r},${r}h${w - 2 * r}q${r},0 ${r},-${r}V${top}Z`;
+        this.svg.appendChild(svgEl('path', {d, fill:up ? pos : neg}));
+      });
+      return;
+    }
+
+    // Dense: a diverging area, split at the zero crossing so the fill colour
+    // always matches the sign of the value beneath it.
+    const pts = [];
+    s.values.forEach((v, i) => { if (isNum(v)) pts.push([X(i), v]); });
+    const runs = []; let cur = null;
+    for (let i = 0; i < pts.length; i++) {
+      const [x, v] = pts[i], sign = v >= 0 ? 1 : -1;
+      if (!cur || cur.sign !== sign) {
+        if (cur && i > 0) {
+          const [px, pv] = pts[i - 1];
+          const t = pv === v ? 0 : pv / (pv - v);
+          const cx = px + (x - px) * t;
+          cur.pts.push([cx, 0]);
+          runs.push(cur);
+          cur = {sign, pts:[[cx, 0]]};
+        } else { cur = {sign, pts:[]}; }
+      }
+      cur.pts.push([x, v]);
+    }
+    if (cur && cur.pts.length) runs.push(cur);
+
+    for (const r of runs) {
+      if (r.pts.length < 2) continue;
+      const d = `M${r.pts[0][0]},${y0}` + r.pts.map(p => `L${p[0]},${Y(p[1])}`).join('') +
+                `L${r.pts[r.pts.length - 1][0]},${y0}Z`;
+      this.svg.appendChild(svgEl('path', {d, fill:r.sign > 0 ? pos : neg, 'fill-opacity':.32, stroke:'none'}));
+    }
+    for (const r of runs) {
+      if (r.pts.length < 2) continue;
+      this.svg.appendChild(svgEl('path', {
+        d:'M' + r.pts.map(p => `${p[0]},${Y(p[1])}`).join('L'),
+        fill:'none', stroke:r.sign > 0 ? pos : neg, 'stroke-width':2,
+        'stroke-linejoin':'round', 'stroke-linecap':'round'
+      }));
+    }
+
+    // On a sparse curve every vertex is a real event (a closed trade), so mark
+    // them — with the 2px surface ring that keeps them legible over the line.
+    if (pts.length <= 40) for (const [x, v] of pts) {
+      this.svg.appendChild(svgEl('circle', {cx:x, cy:Y(v), r:4,
+        fill:v >= 0 ? pos : neg, stroke:cssVar('--surface'), 'stroke-width':2}));
+    }
+  }
+
+  drawCursor(X, Y, padT, plotH, W) {
+    const i = this.cursor;
+    if (i === null || i >= this.cfg.labels.length) { this.tip.classList.remove('on'); return; }
+    const x = X(i);
+    this.svg.appendChild(svgEl('line', {x1:x, x2:x, y1:padT, y2:padT + plotH,
+      stroke:cssVar('--axis'), 'stroke-width':1}));
+    for (const s of this.cfg.series) {
+      const v = s.values[i];
+      if (!isNum(v)) continue;
+      this.svg.appendChild(svgEl('circle', {cx:x, cy:Y(v), r:4.5,
+        fill:s.color || (v >= 0 ? s.posColor : s.negColor),
+        stroke:cssVar('--surface'), 'stroke-width':2}));
+    }
+
+    while (this.tip.firstChild) this.tip.removeChild(this.tip.firstChild);
+    this.tip.appendChild(text('div', 'when', (() => {
+      const d = parseT(this.cfg.labels[i]);
+      return d ? (this.cfg.daily ? fDay.format(d) : fStamp.format(d)) : String(this.cfg.labels[i]);
+    })()));
+    for (const s of this.cfg.series) {
+      const v = s.values[i];
+      const row = text('div', 'row');
+      const key = text('i');
+      key.style.background = s.color || (isNum(v) && v >= 0 ? s.posColor : s.negColor);
+      row.append(key, text('b', null, this.cfg.fmt.tip(v)), text('s', null, s.label));
+      this.tip.appendChild(row);
+    }
+    this.tip.classList.add('on');
+    const tw = this.tip.offsetWidth || 120;
+    const box = this.plot.clientWidth || W;
+    this.tip.style.left = Math.max(2, Math.min(box - tw - 2, (x / W) * box - tw / 2)) + 'px';
+    this.tip.style.top = '2px';
+  }
+}
+
+/* ── Chart card: title, legend, plot and its table twin ──────────────── */
+function chartCard(cfg) {
+  const card = text('section', 'card');
+  const head = text('div', 'chart-head');
+  const titles = text('div');
+  titles.append(text('h2', null, cfg.title), text('p', 'sub', cfg.subtitle));
+  const toggle = text('button', 'linkbtn', 'Table');
+  toggle.type = 'button';
+  toggle.setAttribute('aria-expanded', 'false');
+  head.append(titles, toggle);
+  card.appendChild(head);
+
+  // A legend is always present for ≥2 series; a single series is named by the title.
+  const legend = text('div', 'legend');
+  card.appendChild(legend);
+
+  const chart = new Chart(card, cfg);
+  const tableWrap = text('div', 'scroll');
+  tableWrap.hidden = true;
+  card.appendChild(tableWrap);
+
+  toggle.addEventListener('click', () => {
+    const show = tableWrap.hidden;
+    tableWrap.hidden = !show;
+    chart.plot.hidden = show;
+    toggle.textContent = show ? 'Chart' : 'Table';
+    toggle.setAttribute('aria-expanded', String(show));
+    if (show) buildTable();
+  });
+
+  function buildTable() {
+    while (tableWrap.firstChild) tableWrap.removeChild(tableWrap.firstChild);
+    const t = text('table', 'data');
+    const thead = text('thead'), hr = text('tr');
+    hr.appendChild(text('th', null, cfg.daily ? 'Session' : 'Time'));
+    cfg.series.forEach(s => hr.appendChild(text('th', null, s.label)));
+    thead.appendChild(hr); t.appendChild(thead);
+    const tb = text('tbody');
+    cfg.labels.forEach((lab, i) => {
+      const tr = text('tr');
+      tr.appendChild(text('td', null, (() => {
+        const d = parseT(lab);
+        return d ? (cfg.daily ? fDay.format(d) : fStamp.format(d)) : String(lab);
+      })()));
+      cfg.series.forEach(s => tr.appendChild(text('td', null, cfg.fmt.tip(s.values[i]))));
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb); tableWrap.appendChild(t);
+  }
+
+  function paintLegend() {
+    while (legend.firstChild) legend.removeChild(legend.firstChild);
+    const keys = cfg.legend || (cfg.series.length > 1
+      ? cfg.series.map(s => ({label:s.label, color:s.color, mark:'line'}))
+      : []);
+    for (const k of keys) {
+      const item = text('span');
+      const swatch = text('i', k.mark === 'swatch' ? 'sw' : null);
+      swatch.style.background = k.color;
+      item.append(swatch, document.createTextNode(k.label));
+      legend.appendChild(item);
+    }
+    legend.hidden = !legend.childNodes.length;
+  }
+  paintLegend();
+
+  return {
+    card, chart,
+    update(next) {
+      Object.assign(cfg, next);
+      paintLegend();
+      chart.update(cfg);
+      if (!tableWrap.hidden) buildTable();
+    }
+  };
+}
+
+/* ── Ranges ─────────────────────────────────────────────────────────── */
+const RANGES = [
+  {id:'today', label:'Today',  src:'series', sessions:1,  daily:false},
+  {id:'week',  label:'1 week', src:'series', sessions:7,  daily:false},
+  {id:'month', label:'1 month',src:'daily',  sessions:22, daily:true},
+  {id:'all',   label:'All',    src:'daily',  sessions:0,  daily:true},
+];
+let activeRange = RANGES[0].id;
+
+function slice(data, range) {
+  const src = data[range.src] || {t:[]};
+  const t = src.t || [];
+  if (!t.length) return {labels:[], fields:{}, daily:range.daily, from:null, to:null};
+
+  let start = 0;
+  if (range.sessions > 0) {
+    const days = [...new Set(t.map(v => String(v).slice(0, 10)))];
+    const keep = new Set(days.slice(-range.sessions));
+    start = t.findIndex(v => keep.has(String(v).slice(0, 10)));
+    if (start < 0) start = 0;
+  }
+  const labels = t.slice(start);
+  const fields = {};
+  for (const k of Object.keys(src)) if (k !== 't') fields[k] = (src[k] || []).slice(start);
+  return {labels, fields, daily:range.daily,
+          from:String(labels[0]).slice(0, 10), to:String(labels[labels.length - 1]).slice(0, 10)};
+}
+
+/* ── Number formats per chart ───────────────────────────────────────── */
+const FMT = {
+  spot : {axis:v => num(v, 0), end:v => num(v, 0), tip:v => isNum(v) ? num(v, 2) : '—'},
+  iv   : {axis:v => num(v, 1), end:v => pct(v),    tip:v => pct(v)},
+  skew : {axis:v => num(v, 1), end:v => num(v, 2), tip:v => isNum(v) ? signed(v, 2) : '—'},
+  oi   : {axis:v => oi(v),     end:v => oi(v),     tip:v => oi(v)},
+  pnl  : {axis:v => isNum(v) ? (Math.abs(v) >= 1000 ? signed(v / 1000, 0) + 'k' : signed(v, 0)) : '—',
+          end:v => signedRupees(v), tip:v => signedRupees(v)},
+};
+
+/* ── App ────────────────────────────────────────────────────────────── */
+const app = document.getElementById('app');
+const statusPill = document.getElementById('status');
+const statusText = document.getElementById('status-text');
+let state = {data:null, cards:null, error:null};
+
+function build() {
+  app.replaceChildren();
+
+  // Hero + tiles
+  const top = text('section', 'card hero');
+  top.append(
+    text('p', 'label', 'NIFTY 50 spot'),
+    text('div', 'value'),
+    text('div', 'delta'),
+    text('div', 'tiles'),
+  );
+  app.appendChild(top);
+
+  const position = text('section', 'card');
+  app.appendChild(position);
+
+  const filters = text('div', 'filters');
+  filters.setAttribute('role', 'group');
+  filters.setAttribute('aria-label', 'Time range — applies to every chart below');
+  for (const r of RANGES) {
+    const b = text('button', 'seg', r.label);
+    b.type = 'button';
+    b.setAttribute('aria-pressed', String(r.id === activeRange));
+    b.addEventListener('click', () => {
+      activeRange = r.id;
+      [...filters.children].forEach(c => c.setAttribute('aria-pressed', String(c === b)));
+      paint();
+    });
+    filters.appendChild(b);
+  }
+  app.appendChild(filters);
+
+  const blank = {labels:[], series:[]};
+  const cards = {
+    spot: chartCard({title:'NIFTY spot', subtitle:'Underlying price', fmt:FMT.spot, height:150,
+      series:[{key:'spot', label:'Spot', color:cssVar('--ink'), fill:true}], ...blank}),
+    iv: chartCard({title:'Implied volatility — OTM call vs OTM put', subtitle:'The two legs the skew is measured across',
+      fmt:FMT.iv, height:160, series:[
+        {key:'ce_iv', label:'Call IV', color:cssVar('--ce')},
+        {key:'pe_iv', label:'Put IV',  color:cssVar('--pe')}], ...blank}),
+    skew: chartCard({title:'IV skew', subtitle:'Call IV minus put IV — above zero is call-side, below is put-side',
+      fmt:FMT.skew, height:150, kind:'diverging', zero:true,
+      series:[{key:'skew', label:'Skew', posColor:cssVar('--ce'), negColor:cssVar('--pe')}],
+      legend:[{label:'Call-side (positive)', color:cssVar('--ce'), mark:'swatch'},
+              {label:'Put-side (negative)',  color:cssVar('--pe'), mark:'swatch'}], ...blank}),
+    pnl: chartCard({title:'Paper-trading P&L', subtitle:'Cumulative, closed trades only — above the zero line is profit',
+      fmt:FMT.pnl, height:150, kind:'diverging', area:true, zero:true,
+      series:[{key:'pnl', label:'Cumulative P&L', posColor:cssVar('--good'), negColor:cssVar('--bad')}],
+      legend:[{label:'Profit', color:cssVar('--good'), mark:'swatch'},
+              {label:'Loss',   color:cssVar('--bad'),  mark:'swatch'}], ...blank}),
+    oi: chartCard({title:'Open interest — call vs put', subtitle:'Contracts outstanding at the OTM strikes',
+      fmt:FMT.oi, height:150, series:[
+        {key:'ce_oi', label:'Call OI', color:cssVar('--ce')},
+        {key:'pe_oi', label:'Put OI',  color:cssVar('--pe')}], ...blank}),
+  };
+  for (const k of ['spot', 'iv', 'skew', 'pnl', 'oi']) app.appendChild(cards[k].card);
+
+  const trades = text('section', 'card');
+  app.appendChild(trades);
+
+  const install = text('div', 'banner');
+  install.hidden = true;
+  app.appendChild(install);
+
+  const foot = text('footer');
+  foot.append(
+    text('p', null, 'Live NIFTY option-chain data from NSE, collected every 3 minutes during market hours (09:15–15:30 IST) and pushed by GitHub Actions. Times are IST.'),
+    text('p', null, 'Paper trading only — simulated positions on a notional ₹5,00,000 book. Nothing here is investment advice or a live order.'),
+  );
+  app.appendChild(foot);
+
+  state.cards = {top, position, cards, trades, install, filters};
+}
+
+function paintHero(d) {
+  const {top} = state.cards;
+  const L = d.latest || {};
+  top.querySelector('.value').textContent = isNum(L.spot) ? num(L.spot, 2) : '—';
+
+  const delta = top.querySelector('.delta');
+  delta.className = 'delta ' + dirClass(L.spot_change);
+  delta.replaceChildren(
+    text('span', null, [arrow(L.spot_change), signed(L.spot_change, 2), `(${signed(L.spot_change_pct, 2)}%)`].filter(Boolean).join(' ')),
+    text('span', 'flat', 'since open'),
+  );
+
+  const skewSide = !isNum(L.skew) ? '—' : L.skew > 0 ? 'Call-side' : L.skew < 0 ? 'Put-side' : 'Flat';
+  const tiles = [
+    {k:'Call IV', c:cssVar('--ce'), v:pct(L.ce_iv), n:isNum(L.otm_ce) ? `${num(L.otm_ce, 0)} CE` : ''},
+    {k:'Put IV',  c:cssVar('--pe'), v:pct(L.pe_iv), n:isNum(L.otm_pe) ? `${num(L.otm_pe, 0)} PE` : ''},
+    {k:'IV skew', c:isNum(L.skew) && L.skew < 0 ? cssVar('--pe') : cssVar('--ce'),
+     v:isNum(L.skew) ? signed(L.skew, 2) : '—', n:skewSide},
+    {k:'Book',    c:null, v:signedRupees(d.summary && d.summary.total_pnl),
+     n:d.summary ? `${d.summary.trades} trades · ${num(d.summary.win_rate, 1)}% won` : ''},
+  ];
+  const grid = top.querySelector('.tiles');
+  grid.replaceChildren(...tiles.map(t => {
+    const tile = text('div', 'tile');
+    const k = text('div', 'k');
+    if (t.c) { const sw = text('i'); sw.style.background = t.c; k.appendChild(sw); }
+    k.appendChild(document.createTextNode(t.k));
+    const v = text('div', 'v', t.v);
+    if (t.k === 'Book') v.className = 'v ' + dirClass(d.summary && d.summary.total_pnl);
+    tile.append(k, v, text('div', 'n', t.n));
+    return tile;
+  }));
+}
+
+function paintPosition(d) {
+  const card = state.cards.position;
+  const p = d.open_position;
+  card.replaceChildren();
+
+  if (!p) {
+    card.append(text('h2', null, 'No open position'),
+      text('p', 'sub', d.trades && d.trades.length
+        ? 'The paper trader is flat. It looks for an entry between 10:15 and 14:15 IST.'
+        : 'The paper trader has not opened a position yet.'));
+    return;
+  }
+
+  const head = text('div', 'pos-head');
+  const left = text('div');
+  const title = text('h2', null, 'Open position');
+  const sub = text('p', 'sub', `Entered ${p.entry_at || '—'} on ${p.entry_date || '—'} · ${p.lots} lot${p.lots === 1 ? '' : 's'} · ${num(p.qty, 0)} qty`);
+  left.append(title, sub);
+  const chip = text('span', 'chip ' + (String(p.signal).includes('CE') ? 'ce' : 'pe'),
+    `${p.signal} ${num(p.strike, 0)}`);
+  head.append(left, chip);
+  card.appendChild(head);
+
+  const legs = text('div', 'legs');
+  const cells = [
+    ['Entry', rupees(p.entry, 2)],
+    ['Now', rupees(p.current, 2)],
+    ['Stop', rupees(p.sl, 2)],
+    ['Target', rupees(p.target, 2)],
+  ];
+  legs.replaceChildren(...cells.map(([k, v]) => {
+    const c = text('div');
+    c.append(text('div', 'k', k), text('div', 'v', v));
+    return c;
+  }));
+  card.appendChild(legs);
+
+  const un = text('div', 'delta ' + dirClass(p.unrealised));
+  un.style.marginTop = '10px';
+  un.append(text('span', null, `${arrow(p.unrealised)} ${signedRupees(p.unrealised)}`.trim()),
+            text('span', 'flat', 'unrealised'));
+  card.appendChild(un);
+
+  // Where the premium sits between stop and target — a meter, not a chart.
+  if (isNum(p.sl) && isNum(p.target) && isNum(p.current) && p.target > p.sl) {
+    const at = Math.max(0, Math.min(1, (p.current - p.sl) / (p.target - p.sl)));
+    const track = text('div', 'track');
+    const fill = text('i');
+    fill.style.left = '0'; fill.style.width = (at * 100).toFixed(1) + '%';
+    fill.style.background = isNum(p.unrealised) && p.unrealised < 0 ? cssVar('--bad') : cssVar('--good');
+    track.appendChild(fill);
+    const legend = text('div', 'track-legend');
+    legend.append(text('span', null, `Stop ${rupees(p.sl, 2)}`), text('span', null, `Target ${rupees(p.target, 2)}`));
+    card.append(track, legend);
+  }
+}
+
+function paintTrades(d) {
+  const card = state.cards.trades;
+  card.replaceChildren();
+  const s = d.summary || {};
+  card.append(text('h2', null, 'Closed trades'),
+    text('p', 'sub', s.trades
+      ? `${s.trades} trades · ${s.wins} won, ${s.losses} lost · ${num(s.win_rate, 1)}% win rate · book ${rupees(s.capital)} (${signed(s.roi_pct, 2)}% ROI)`
+      : 'No trades closed yet.'));
+
+  const list = (d.trades || []).slice().reverse().slice(0, 25);
+  for (const t of list) {
+    const row = text('div', 'trade');
+    const who = text('div', 'who');
+    const t1 = text('div', 't1');
+    const chip = text('span', 'chip ' + (String(t.signal).includes('CE') ? 'ce' : 'pe'), t.signal);
+    t1.append(chip, document.createTextNode(num(t.strike, 0)));
+    const t2 = text('div', 't2',
+      `${t.date} · ${t.entry_at}→${t.exit_at} · ${rupees(t.entry, 2)}→${rupees(t.exit, 2)} · ${t.reason}`);
+    who.append(t1, t2);
+    const amt = text('div', 'amt ' + dirClass(t.pnl));
+    amt.append(document.createTextNode(`${arrow(t.pnl)} ${signedRupees(t.pnl)}`.trim()),
+               text('s', null, `${t.lots} lot${t.lots === 1 ? '' : 's'}`));
+    row.append(who, amt);
+    card.appendChild(row);
+  }
+}
+
+// Cumulative P&L across the trades that closed inside the visible range.
+function pnlSeries(d, view) {
+  if (!view.from || !view.to) return {labels:[], values:[]};
+  const inRange = (d.trades || []).filter(t => t.date >= view.from && t.date <= view.to);
+  if (!inRange.length) return {labels:[], values:[]};
+  const labels = [view.from], values = [0];
+  let running = 0;
+  for (const t of inRange) { running += isNum(t.pnl) ? t.pnl : 0; labels.push(t.date); values.push(running); }
+  return {labels, values};
+}
+
+function paint() {
+  const d = state.data;
+  if (!d) return;
+  const range = RANGES.find(r => r.id === activeRange) || RANGES[0];
+  const view = slice(d, range);
+  const {cards} = state.cards;
+
+  const pick = key => (view.fields[key] || []);
+  cards.spot.update({labels:view.labels, daily:view.daily,
+    series:[{key:'spot', label:'Spot', color:cssVar('--ink'), fill:true, values:pick('spot')}]});
+  cards.iv.update({labels:view.labels, daily:view.daily, series:[
+    {key:'ce_iv', label:'Call IV', color:cssVar('--ce'), values:pick('ce_iv')},
+    {key:'pe_iv', label:'Put IV',  color:cssVar('--pe'), values:pick('pe_iv')}]});
+  cards.skew.update({labels:view.labels, daily:view.daily, series:[
+    {key:'skew', label:'Skew', posColor:cssVar('--ce'), negColor:cssVar('--pe'), values:pick('skew')}]});
+  cards.oi.update({labels:view.labels, daily:view.daily, series:[
+    {key:'ce_oi', label:'Call OI', color:cssVar('--ce'), values:pick('ce_oi')},
+    {key:'pe_oi', label:'Put OI',  color:cssVar('--pe'), values:pick('pe_oi')}]});
+
+  const p = pnlSeries(d, view);
+  cards.pnl.update({labels:p.labels, daily:true, empty:'No trades closed in this range', series:[
+    {key:'pnl', label:'Cumulative P&L', posColor:cssVar('--good'), negColor:cssVar('--bad'), values:p.values}]});
+
+  paintHero(d);
+  paintPosition(d);
+  paintTrades(d);
+}
+
+function setStatus(d, fetching) {
+  // Freshness is measured against the newest tick, not the time the feed was
+  // built — a run that collects nothing still rebuilds the feed.
+  const at = d && d.latest ? parseT(d.latest.timestamp) : (d && parseT(d.generated_at));
+  const fresh = at && (Date.now() - at.getTime()) < 12 * 60 * 1000;
+  const live = marketOpenNow() && !!fresh;
+
+  statusPill.className = 'pill' + (live ? ' live' : '');
+  if (fetching) { statusText.textContent = 'Updating…'; return; }
+  if (!at) { statusText.textContent = 'No data'; statusPill.title = ''; return; }
+  statusText.textContent = live ? 'Live · ' + fTime.format(at) : fStamp.format(at);
+  statusPill.title = 'Latest data point: ' + fStamp.format(at) + ' IST'
+    + (marketOpenNow() ? '' : ' · market closed');
+}
+
+function showError(message) {
+  app.replaceChildren();
+  const card = text('section', 'card');
+  card.append(text('h2', null, 'Could not load the dashboard'), text('p', 'sub', message));
+  const retry = text('button', 'seg', 'Try again');
+  retry.type = 'button';
+  retry.style.marginTop = '10px';
+  retry.addEventListener('click', () => load());
+  card.appendChild(retry);
+  app.appendChild(card);
+  state.cards = null;
+}
+
+function showEmpty() {
+  app.replaceChildren();
+  const card = text('section', 'card');
+  card.append(text('h2', null, 'Waiting for the first data point'),
+    text('p', 'sub', 'The collector writes iv_data.csv during market hours (09:15–15:30 IST, weekdays). ' +
+      'Once the workflow has run once, this dashboard fills in automatically.'));
+  app.appendChild(card);
+  state.cards = null;
+}
+
+let loading = false;
+async function load() {
+  if (loading) return;
+  loading = true;
+  document.querySelectorAll('.plot').forEach(p => p.classList.add('stale'));  // keep the frame, no skeleton flash
+  setStatus(state.data, true);
+  try {
+    const res = await fetch(DATA_URL + '?t=' + Date.now(), {cache:'no-store'});
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    state.data = data;
+    if (!data.latest) { showEmpty(); }
+    else {
+      if (!state.cards) build();
+      paint();
+    }
+    setStatus(data, false);
+  } catch (err) {
+    if (state.data) { setStatus(state.data, false); }   // keep the last good render
+    else { showError(navigator.onLine
+      ? 'Could not read app_data.json. If this is a fresh deployment, wait for the collector workflow to run once.'
+      : 'You are offline and no cached data is available yet.'); }
+  } finally {
+    loading = false;
+    document.querySelectorAll('.plot').forEach(p => p.classList.remove('stale'));
+  }
+}
+
+/* ── Theme ──────────────────────────────────────────────────────────── */
+const THEMES = ['system', 'light', 'dark'];
+const metaLight = document.querySelector('meta[name="theme-color"][media*="light"]');
+const metaDark  = document.querySelector('meta[name="theme-color"][media*="dark"]');
+let themeMode = 'system';
+
+function applyTheme(mode) {
+  themeMode = THEMES.includes(mode) ? mode : 'system';
+  const root = document.documentElement;
+  if (themeMode === 'system') root.removeAttribute('data-theme');
+  else root.setAttribute('data-theme', themeMode);
+
+  // Both metas carry a media query, and the first match wins — so an explicit
+  // choice is applied by rewriting the pair rather than appending a third.
+  if (metaLight && metaDark) {
+    if (themeMode === 'system') { metaLight.content = '#f9f9f7'; metaDark.content = '#0d0d0d'; }
+    else { const plane = cssVar('--plane'); metaLight.content = plane; metaDark.content = plane; }
+  }
+  const btn = document.getElementById('theme');
+  btn.title = btn.ariaLabel = `Colour theme: ${themeMode}. Tap to change.`;
+  try { localStorage.setItem('sh-theme', themeMode); } catch (e) { /* private browsing */ }
+  if (state.cards) paint();   // charts re-read the CSS variables they draw with
+}
+
+let savedTheme = 'system';
+try { savedTheme = localStorage.getItem('sh-theme') || 'system'; } catch (e) { /* private browsing */ }
+applyTheme(savedTheme);
+document.getElementById('theme').addEventListener('click', () => {
+  applyTheme(THEMES[(THEMES.indexOf(themeMode) + 1) % THEMES.length]);
+});
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (state.cards) paint(); });
+
+/* ── Install prompt ─────────────────────────────────────────────────── */
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredPrompt = e;
+  if (!state.cards) return;
+  const banner = state.cards.install;
+  banner.replaceChildren(
+    text('span', null, 'Add Skew Hunter to your home screen for a full-screen app.'),
+  );
+  const btn = text('button', null, 'Install');
+  btn.type = 'button';
+  btn.addEventListener('click', async () => {
+    banner.hidden = true;
+    deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    deferredPrompt = null;
+  });
+  banner.appendChild(btn);
+  banner.hidden = false;
+});
+window.addEventListener('appinstalled', () => { if (state.cards) state.cards.install.hidden = true; });
+
+/* ── Service worker ─────────────────────────────────────────────────── */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      reg.addEventListener('updatefound', () => {
+        const sw = reg.installing;
+        if (!sw) return;
+        sw.addEventListener('statechange', () => {
+          if (sw.state === 'installed' && navigator.serviceWorker.controller && state.cards) {
+            const banner = state.cards.install;
+            banner.replaceChildren(text('span', null, 'A new version of the app is ready.'));
+            const btn = text('button', null, 'Reload');
+            btn.type = 'button';
+            btn.addEventListener('click', () => { sw.postMessage('skip-waiting'); });
+            banner.appendChild(btn);
+            banner.hidden = false;
+          }
+        });
+      });
+    }).catch(() => { /* offline support is optional */ });
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloading) return; reloading = true; location.reload();
+    });
+  });
+}
+
+/* ── Boot ───────────────────────────────────────────────────────────── */
+load();
+setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+window.addEventListener('online', () => load());
+})();
+</script>
+</body>
+</html>
