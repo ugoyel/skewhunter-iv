@@ -649,7 +649,7 @@ private fun CityWithDetour(city: String, detourKm: Int) {
             Spacer(Modifier.width(6.dp))
             val c = when {
                 detourKm < 10 -> CsTheme.colors.success
-                detourKm < 20 -> CsTheme.colors.warning
+                detourKm < 30 -> CsTheme.colors.warning
                 else -> CsTheme.colors.danger
             }
             Icon(Icons.Default.DirectionsWalk, null, tint = c, modifier = Modifier.size(16.dp))

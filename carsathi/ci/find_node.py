@@ -16,6 +16,6 @@ for node in ET.parse(path).iter("node"):
         x1, y1, x2, y2 = map(int, re.findall(r"\d+", node.get("bounds")))
         if x2 > x1 and y2 > y1:
             matches.append(((x1 + x2) // 2, (y1 + y2) // 2))
-if len(matches) <= index:
+if not matches or index >= len(matches) or -index > len(matches):
     sys.exit(1)
 print(*matches[index])

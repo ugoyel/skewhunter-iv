@@ -415,7 +415,7 @@ class DemoSeeder(
         )
         db.ratings().insert(RatingEntity(rideId = pastTripId, fromUserId = meId, toUserId = d1.id, stars = 5, comment = "Lovely ride, Arjun is a great host.", toRole = "DRIVER", createdAt = now - 19 * day))
         db.ratings().insert(RatingEntity(rideId = pastTripId, fromUserId = d1.id, toUserId = meId, stars = 5, comment = "Kabir was on time and great company.", toRole = "PASSENGER", createdAt = now - 19 * day))
-        wallet.record(meId, "PAYMENT", 302, "Booking Bengaluru → Mysuru", "UPI", pastBookingId)
+        wallet.record(meId, "PAYMENT", 302, "Booking Bengaluru → Mysuru", "UPI", pastBookingId, now - 24 * day)
 
         // 3) Upcoming booking: Delhi → Chandigarh with a chat
         val upcomingTrip = rides.buildRide(
@@ -428,7 +428,7 @@ class DemoSeeder(
             BookingEntity(rideId = upcomingTripId, passengerId = meId, seats = 1, fromCity = "Delhi", toCity = "Chandigarh", pricePerSeat = 420,
                 serviceFee = 34, total = 454, status = "CONFIRMED", paymentMethod = "UPI", createdAt = now - day),
         )
-        wallet.record(meId, "PAYMENT", 454, "Booking Delhi → Chandigarh", "UPI", upBookingId)
+        wallet.record(meId, "PAYMENT", 454, "Booking Delhi → Chandigarh", "UPI", upBookingId, now - day)
         val convId = db.chat().insertConversation(ConversationEntity(rideId = upcomingTripId, passengerId = meId, driverId = d2.id))
         db.chat().insertMessage(MessageEntity(conversationId = convId, senderId = meId, text = "Hi Rahul! Can I carry a small backpack and a laptop bag?", sentAt = now - 20 * 3_600_000L))
         db.chat().insertMessage(MessageEntity(conversationId = convId, senderId = d2.id, text = "Hi Kabir, sure — plenty of space. See you at Kashmere Gate at 17:30!", sentAt = now - 19 * 3_600_000L))
@@ -459,7 +459,7 @@ class DemoSeeder(
                 lastMessage = "Hi! Could you drop me at Mathura?", lastAt = now - 3_600_000L, unreadDriver = 1),
         )
 
-        wallet.record(meId, "PAYOUT", 900, "Payout · Delhi → Jaipur (2 passengers)", "Bank transfer", 0)
+        wallet.record(meId, "PAYOUT", 900, "Payout · Delhi → Jaipur (2 passengers)", "Bank transfer", 0, now - 8 * day)
         wallet.addMethod(meId, "UPI", "UPI · kabir@okaxis", "kabir@okaxis")
         db.alerts().insert(com.carsathi.app.data.db.AlertEntity(userId = meId, fromCity = "Mumbai", toCity = "Pune", dateEpochDay = -1, seats = 1))
 

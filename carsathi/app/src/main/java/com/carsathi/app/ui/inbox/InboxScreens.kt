@@ -165,7 +165,7 @@ fun ChatScreen(nav: NavHostController, conversationId: Long) {
     val vm: ChatViewModel = appViewModel { ChatViewModel(it, conversationId) }
     val messages by vm.messages.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
-    LaunchedEffect(messages.size) { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex) }
+    LaunchedEffect(messages.size) { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size) } // +1 for the safety banner item
     val quick = listOf("Hi! 👋", "I'm on my way", "Running 5 minutes late", "Where exactly is the pickup?", "Thank you!")
 
     Scaffold(

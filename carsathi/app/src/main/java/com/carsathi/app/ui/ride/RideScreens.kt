@@ -199,6 +199,15 @@ fun RideDetailScreen(nav: NavHostController, rideId: Long, fromName: String, toN
                     Box(Modifier.size(18.dp).clip(CircleShape).background(CarCatalog.colorOf(car.color)).then(Modifier.background(Color.Transparent)))
                 }
             }
+            if (!d.isMine && d.myBooking?.status == "CONFIRMED" && d.driver.phone.isNotBlank()) {
+                ThinDivider(Modifier.padding(horizontal = 20.dp))
+                MenuRow(
+                    "Call ${d.driver.firstName} · ${d.driver.phone}",
+                    icon = Icons.Default.Call,
+                    titleColor = BrandBlue,
+                    onClick = { dial(context, d.driver.phone) },
+                )
+            }
             if (!d.isMine) {
                 ThinDivider(Modifier.padding(horizontal = 20.dp))
                 MenuRow(
@@ -324,6 +333,13 @@ private fun ReportDialog(onDismiss: () -> Unit, onReport: (String) -> Unit) {
         },
         dismissButton = { if (!sent) TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+fun dial(context: Context, phone: String) {
+    try {
+        context.startActivity(Intent(Intent.ACTION_DIAL, android.net.Uri.parse("tel:" + phone.filter { it.isDigit() || it == '+' })))
+    } catch (_: android.content.ActivityNotFoundException) {
+    }
 }
 
 private fun shareRide(context: Context, d: RideDetail) {

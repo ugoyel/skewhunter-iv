@@ -228,6 +228,11 @@ fun ManageRideScreen(nav: NavHostController, rideId: Long) {
                         if ((d.ride.id to p.user.id) in rated) Tag("Rated", CsTheme.colors.success, Icons.Default.Check)
                         else TextButton(onClick = { nav.navigate(Routes.rate(d.ride.id, p.user.id)) }) { Text("Rate", color = BrandBlue) }
                     } else {
+                        if (p.user.phone.isNotBlank()) {
+                            IconButton(onClick = { com.carsathi.app.ui.ride.dial(context, p.user.phone) }) {
+                                Icon(Icons.Default.Call, "Call", tint = BrandBlue)
+                            }
+                        }
                         IconButton(onClick = { vm.chat(p.user.id) { nav.navigate(Routes.chat(it)) } }) {
                             Icon(Icons.Default.ChatBubbleOutline, "Message", tint = BrandBlue)
                         }

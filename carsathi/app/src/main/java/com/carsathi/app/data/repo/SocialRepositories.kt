@@ -131,9 +131,17 @@ class WalletRepository(private val db: AppDatabase) {
     fun observeTransactions(userId: Long): Flow<List<TransactionEntity>> = db.wallet().observeTransactions(userId)
     fun observeMethods(userId: Long): Flow<List<PaymentMethodEntity>> = db.wallet().observeMethods(userId)
 
-    suspend fun record(userId: Long, type: String, amount: Int, description: String, method: String = "", bookingId: Long = 0) {
+    suspend fun record(
+        userId: Long,
+        type: String,
+        amount: Int,
+        description: String,
+        method: String = "",
+        bookingId: Long = 0,
+        at: Long = System.currentTimeMillis(),
+    ) {
         db.wallet().insertTransaction(
-            TransactionEntity(userId = userId, type = type, amount = amount, description = description, method = method, bookingId = bookingId),
+            TransactionEntity(userId = userId, type = type, amount = amount, description = description, method = method, bookingId = bookingId, createdAt = at),
         )
     }
 
