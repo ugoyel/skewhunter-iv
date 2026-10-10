@@ -22,7 +22,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -110,7 +109,8 @@ private val tabItems = listOf(
 
 fun NavHostController.goToTab(route: String) {
     navigate(route) {
-        popUpTo(graph.findStartDestination().id) { saveState = true }
+        // Search is always the root of the signed-in back stack (start destination may be Welcome).
+        popUpTo(Routes.SEARCH) { saveState = true }
         launchSingleTop = true
         restoreState = true
     }

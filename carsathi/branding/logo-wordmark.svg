@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 120" width="1040" height="240">
+  <g transform="translate(6,6) scale(1)">
+    <rect width="108" height="108" rx="26" fill="#00AFF5"/>
+    <path d="M0,78 C30,66 70,92 108,74 L108,82 Q108,108 82,108 L26,108 Q0,108 0,82 Z" fill="#0098D6"/>
+    <path fill="#fff" d="M54,27 C46.3,27 40,33.1 40,40.7 C40,50.6 54,62 54,62 C54,62 68,50.6 68,40.7 C68,33.1 61.7,27 54,27 Z"/>
+    <circle cx="54" cy="40.8" r="6.3" fill="#00AFF5"/>
+    <path fill="#fff" d="M33,72 L33,66.5 C33,64.6 34.2,63 36,62.5 L40.5,61.3 L44.8,55.6 C45.6,54.6 46.8,54 48.1,54 L60.3,54 C61.6,54 62.8,54.6 63.6,55.6 L67.7,61.2 L72.2,62.4 C74,62.9 75,64.5 75,66.3 L75,72 C75,73.1 74.1,74 73,74 L35,74 C33.9,74 33,73.1 33,72 Z"/>
+    <path fill="#00AFF5" d="M45.2,61 L48.4,56.8 C48.6,56.5 48.9,56.4 49.3,56.4 L53,56.4 L53,61 Z"/>
+    <path fill="#00AFF5" d="M55,61 L55,56.4 L59.2,56.4 C59.6,56.4 59.9,56.5 60.1,56.8 L63.4,61 Z"/>
+    <circle cx="42" cy="69" r="5" fill="#054752"/><circle cx="42" cy="69" r="2" fill="#fff"/>
+    <circle cx="66" cy="69" r="5" fill="#054752"/><circle cx="66" cy="69" r="2" fill="#fff"/>
+  </g>
+  <text x="134" y="84" font-family="Helvetica, Arial, sans-serif" font-size="76" font-weight="900" letter-spacing="-2">
+    <tspan fill="#054752">car</tspan><tspan fill="#00AFF5">sathi</tspan>
+  </text>
+</svg>

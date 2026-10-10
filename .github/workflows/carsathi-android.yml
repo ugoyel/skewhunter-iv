@@ -63,3 +63,51 @@ jobs:
           **Install:** download \`carsathi.apk\` on your Android phone (Android 8.0+), open it and allow installing from this source.
 
           **Demo account:** demo@carsathi.in / carsathi123 — or sign up with your own email."
+
+  smoke-test:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: carsathi-apk
+          path: apk
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run app on emulator and capture screens
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash carsathi/ci/smoke.sh apk/carsathi.apk screenshots
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: carsathi-screenshots
+          path: screenshots
+
+      - name: Attach screenshots to release
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -d screenshots ]; then
+            (cd screenshots && zip -qr ../screenshots.zip .)
+            gh release upload carsathi-latest screenshots.zip --clobber
+          fi
