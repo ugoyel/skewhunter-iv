@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">carsathi</string>
+    <string name="notif_channel_name">Rides &amp; messages</string>
+    <string name="notif_channel_desc">Booking requests, confirmations and new messages</string>
+</resources>

@@ -1,0 +1,65 @@
+name: carsathi Android APK
+
+on:
+  push:
+    paths:
+      - 'carsathi/**'
+      - '.github/workflows/carsathi-android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: carsathi-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: carsathi
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build release APK
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleRelease
+
+      - name: Collect APK
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk carsathi.apk
+          ls -la carsathi.apk
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: carsathi-apk
+          path: carsathi/carsathi.apk
+
+      - name: Publish "carsathi-latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete carsathi-latest --cleanup-tag -y || true
+          gh release create carsathi-latest carsathi.apk \
+            --target "$GITHUB_SHA" \
+            --title "carsathi Android app — build ${{ github.run_number }}" \
+            --notes "Latest carsathi APK built from \`${GITHUB_REF_NAME}\` (${GITHUB_SHA::7}).
+
+          **Install:** download \`carsathi.apk\` on your Android phone (Android 8.0+), open it and allow installing from this source.
+
+          **Demo account:** demo@carsathi.in / carsathi123 — or sign up with your own email."

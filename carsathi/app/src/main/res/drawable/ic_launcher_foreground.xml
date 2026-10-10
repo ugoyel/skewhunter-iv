@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- location pin -->
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M54,27 C46.3,27 40,33.1 40,40.7 C40,50.6 54,62 54,62 C54,62 68,50.6 68,40.7 C68,33.1 61.7,27 54,27 Z" />
+    <path android:fillColor="#00AFF5"
+        android:pathData="M54,34.5 C57.6,34.5 60.4,37.3 60.4,40.8 C60.4,44.3 57.6,47.1 54,47.1 C50.4,47.1 47.6,44.3 47.6,40.8 C47.6,37.3 50.4,34.5 54,34.5 Z" />
+    <!-- car body -->
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M33,72 L33,66.5 C33,64.6 34.2,63 36,62.5 L40.5,61.3 L44.8,55.6 C45.6,54.6 46.8,54 48.1,54 L60.3,54 C61.6,54 62.8,54.6 63.6,55.6 L67.7,61.2 L72.2,62.4 C74,62.9 75,64.5 75,66.3 L75,72 C75,73.1 74.1,74 73,74 L35,74 C33.9,74 33,73.1 33,72 Z" />
+    <!-- windows -->
+    <path android:fillColor="#00AFF5"
+        android:pathData="M45.2,61 L48.4,56.8 C48.6,56.5 48.9,56.4 49.3,56.4 L53,56.4 L53,61 Z" />
+    <path android:fillColor="#00AFF5"
+        android:pathData="M55,61 L55,56.4 L59.2,56.4 C59.6,56.4 59.9,56.5 60.1,56.8 L63.4,61 Z" />
+    <!-- wheels -->
+    <path android:fillColor="#054752"
+        android:pathData="M42,69 m-5,0 a5,5 0 1,1 10,0 a5,5 0 1,1 -10,0" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M42,69 m-2,0 a2,2 0 1,1 4,0 a2,2 0 1,1 -4,0" />
+    <path android:fillColor="#054752"
+        android:pathData="M66,69 m-5,0 a5,5 0 1,1 10,0 a5,5 0 1,1 -10,0" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M66,69 m-2,0 a2,2 0 1,1 4,0 a2,2 0 1,1 -4,0" />
+</vector>
