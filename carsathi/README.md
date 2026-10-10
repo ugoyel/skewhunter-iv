@@ -16,7 +16,7 @@ carsathi is a BlaBlaCar-style Android app for sharing rides between cities. Driv
 | **Profile** | Photo (gallery picker), mini bio and travel preferences (chattiness, music, smoking, pets). Experience levels run from Newcomer to Ambassador. There's a public profile page and a member-since date |
 | **Verification** | Email code, phone OTP, and an ID upload (Aadhaar, DL, PAN, Passport, Voter ID) that earns a "Verified" badge |
 | **Vehicles** | Add, edit and delete cars. The flow is plate → brand → model → body type → colour → year → fuel |
-| **Car model database** | 33 brands and about 330 models for the Indian market (Maruti Suzuki, Hyundai, Tata, Mahindra, Toyota, Kia, MG, …), plus imports and an "other model" option |
+| **Car model database** | 33 brands and about 270 models for the Indian market (Maruti Suzuki, Hyundai, Tata, Mahindra, Toyota, Kia, MG, …), plus imports and an "other model" option |
 | **City database** | About 150 Indian cities with coordinates. These drive the distance, duration and price estimates |
 | **Publish a ride** | From and to with precise pickup and drop-off points, suggested stopovers along the route, date and time, choice of car, seats, "Max. 2 in the back", women-only rides, Instant Booking or manual approval, a recommended price with limits, a comment, and an optional return trip |
 | **Search** | Search by from, to, date and passengers, with recent searches and popular routes. Matching is segment-aware: a search can match a stopover, and the price is pro-rated for that part of the trip. Cities within 35 km also count, with a walking-distance indicator |

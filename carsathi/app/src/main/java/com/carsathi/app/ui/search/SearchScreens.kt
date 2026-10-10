@@ -103,6 +103,7 @@ fun SearchScreen(nav: NavHostController) {
     var showDate by remember { mutableStateOf(false) }
     var showSeats by remember { mutableStateOf(false) }
 
+    Box(Modifier.fillMaxSize()) {
     Column(
         Modifier
             .fillMaxSize()
@@ -236,6 +237,9 @@ fun SearchScreen(nav: NavHostController) {
             "My ride alerts",
         ) { nav.navigate(Routes.ALERTS) }
         Spacer(Modifier.height(24.dp))
+    }
+        // Solid brand-coloured status bar so content never scrolls under the clock/icons
+        Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(BrandBlue))
     }
 
     when (picker) {

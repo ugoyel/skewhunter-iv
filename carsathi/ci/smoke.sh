@@ -73,7 +73,7 @@ tap "You're driving" && {
 }
 
 # ---------------------------------------------------------------- inbox
-tap "Inbox"; shot inbox
+tap "=Inbox"; shot inbox
 tap "Rahul" && {
   tap "Write a message" && type_text "Thanks, see you there"
   tap "Send"
@@ -83,13 +83,13 @@ tap "Rahul" && {
 }
 
 # ---------------------------------------------------------------- profile
-tap "Profile"; shot profile
-tap "Account"; shot account
+tap "=Profile"; shot profile
+tap "=Account"; shot account
 tap "Payments & refunds" && { shot transactions; back; }
-tap "About you"
+tap "=About you"
 
 # ---------------------------------------------------------------- publish a full ride
-tap "Publish"; shot publish-from
+tap "=Publish"; shot publish-from
 tap "Delhi"; shot publish-pickup
 tap "Kashmere Gate ISBT"; next
 tap "Jaipur"
@@ -114,7 +114,7 @@ back
 tap "Notifications" && { shot notifications; back; }
 
 # ---------------------------------------------------------------- sign out and sign up a new member
-tap "Profile"; tap "Account"
+tap "=Profile"; tap "=Account"
 scroll
 tap "=Log out" && WAIT=4 tap "=Log out" -1
 shot logged-out
@@ -130,7 +130,7 @@ tap "I accept the Terms"
 shot signup-terms
 WAIT=6 tap "Create my account"
 shot new-member-home
-tap "Profile"; shot new-member-profile
+tap "=Profile"; shot new-member-profile
 
 echo "---- crash buffer ----"
 adb logcat -d -b crash | tee "$OUT/crash.txt"
