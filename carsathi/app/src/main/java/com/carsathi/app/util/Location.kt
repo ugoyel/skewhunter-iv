@@ -19,6 +19,9 @@ import com.carsathi.app.data.catalog.CityCatalog
 import com.carsathi.app.data.catalog.Geo
 import com.carsathi.app.data.model.PickedPlace
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -57,11 +60,23 @@ object LocationHelper {
             .mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
             .maxByOrNull { it.time }
         if (last != null && System.currentTimeMillis() - last.time < 5 * 60_000L) return LocResult.Found(last.latitude, last.longitude)
-        for (provider in enabled) {
-            val fresh = withTimeoutOrNull(12_000L) { requestOnce(context, lm, provider) }
-            if (fresh != null) return LocResult.Found(fresh.latitude, fresh.longitude)
-        }
+        val fresh = withTimeoutOrNull(15_000L) { firstFix(context, lm, enabled) }
+        if (fresh != null) return LocResult.Found(fresh.latitude, fresh.longitude)
         return last?.let { LocResult.Found(it.latitude, it.longitude) } ?: LocResult.Unavailable
+    }
+
+    /** Asks every enabled provider at once and returns the first real fix (GPS or network, whichever is faster). */
+    private suspend fun firstFix(context: Context, lm: LocationManager, providers: List<String>): Location? = coroutineScope {
+        val results = Channel<Location?>(Channel.UNLIMITED)
+        val jobs = providers.map { p -> launch { results.send(requestOnce(context, lm, p)) } }
+        var remaining = providers.size
+        var found: Location? = null
+        while (remaining > 0 && found == null) {
+            found = results.receive()
+            remaining--
+        }
+        jobs.forEach { it.cancel() }
+        found
     }
 
     @SuppressLint("MissingPermission")

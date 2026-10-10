@@ -27,7 +27,10 @@ adb install -r "$APK" || exit 1
 adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS || true
 adb shell pm grant $PKG android.permission.ACCESS_FINE_LOCATION || true
 adb shell pm grant $PKG android.permission.ACCESS_COARSE_LOCATION || true
-gps() { adb emu geo fix 77.2195 28.6328 > /dev/null 2>&1; sleep 1; adb emu geo fix 77.2196 28.6329 > /dev/null 2>&1; sleep 1; }  # Connaught Place, Delhi
+gps() {  # simulated GPS fix at Connaught Place, Delhi
+  adb shell settings put secure location_mode 3 || true
+  for i in 1 2 3; do echo "geo fix: $(adb emu geo fix 77.2195 28.6328 2>&1 | tr '\n' ' ')"; sleep 1; done
+}
 adb logcat -c
 adb shell am start -W -n $PKG/.MainActivity
 sleep 10
@@ -40,7 +43,7 @@ shot search-home
 # ---------------------------------------------------------------- current location + exact points
 gps
 tap "Leaving from"; shot city-picker-current-location
-WAIT=8 tap "Use current location"
+WAIT=16 tap "Use current location"
 shot search-from-current-location
 tap "Going to"; tap "Jaipur"
 shot dropoff-point-picker
@@ -102,7 +105,7 @@ tap "=About you"
 # ---------------------------------------------------------------- publish a full ride
 tap "=Publish"; shot publish-from
 gps
-WAIT=8 tap "Use current location"
+WAIT=16 tap "Use current location"
 shot publish-pickup-current-location
 tap "Choose on the map" && {
   sleep 8; shot map-pin-picker

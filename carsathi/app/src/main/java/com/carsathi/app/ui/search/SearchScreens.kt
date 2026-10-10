@@ -150,9 +150,9 @@ fun SearchScreen(nav: NavHostController) {
             ) {
                 Box {
                     Column {
-                        SearchField(Icons.Outlined.Circle, vm.from?.city?.name, "Leaving from", vm.from?.takeUnless { it.isCityOnly }?.address) { picker = "from" }
+                        SearchField(Icons.Outlined.Circle, vm.from?.city?.name, "Leaving from", vm.from?.takeUnless { it.isCityOnly }?.address, reserveEnd = true) { picker = "from" }
                         ThinDivider(Modifier.padding(start = 56.dp, end = 64.dp))
-                        SearchField(Icons.Outlined.Circle, vm.to?.city?.name, "Going to", vm.to?.takeUnless { it.isCityOnly }?.address) { picker = "to" }
+                        SearchField(Icons.Outlined.Circle, vm.to?.city?.name, "Going to", vm.to?.takeUnless { it.isCityOnly }?.address, reserveEnd = true) { picker = "to" }
                         ThinDivider(Modifier.padding(horizontal = 16.dp))
                         Row {
                             Box(Modifier.weight(1f)) { SearchField(Icons.Default.CalendarMonth, Fmt.date(vm.date), "Date") { showDate = true } }
@@ -293,14 +293,22 @@ private val popularRoutes = listOf(
 )
 
 @Composable
-private fun SearchField(icon: ImageVector, value: String?, placeholder: String, detail: String? = null, onClick: () -> Unit) {
+private fun SearchField(
+    icon: ImageVector,
+    value: String?,
+    placeholder: String,
+    detail: String? = null,
+    reserveEnd: Boolean = false,
+    onClick: () -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, tint = CsTheme.colors.subtle, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(16.dp))
-        Column(Modifier.padding(end = 40.dp)) {
+        // Leave room for the swap button on the "from" / "to" rows
+        Column(Modifier.padding(end = if (reserveEnd) 40.dp else 0.dp)) {
             Text(
                 value ?: placeholder,
                 style = MaterialTheme.typography.titleMedium,

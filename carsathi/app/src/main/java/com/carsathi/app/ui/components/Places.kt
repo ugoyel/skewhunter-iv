@@ -142,7 +142,7 @@ fun UseCurrentLocation(
             }
             LocResult.Denied -> "Allow location access to use your current location (Settings → Apps → carsathi → Permissions)."
             LocResult.Disabled -> "Your phone's location is turned off. Turn on Location and try again."
-            LocResult.Unavailable -> "We couldn't find your location right now. Try again, or choose a city."
+            LocResult.Unavailable -> "We couldn't get a GPS fix. Move near a window or outdoors and try again, or choose a city."
         }
     }
     val busy = requester.loading || resolving
