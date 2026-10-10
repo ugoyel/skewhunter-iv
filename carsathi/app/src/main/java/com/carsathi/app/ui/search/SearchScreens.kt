@@ -23,6 +23,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -33,6 +35,7 @@ import com.carsathi.app.data.catalog.City
 import com.carsathi.app.data.catalog.CityCatalog
 import com.carsathi.app.data.db.SearchHistoryEntity
 import com.carsathi.app.data.db.UserEntity
+import com.carsathi.app.data.model.PickedPlace
 import com.carsathi.app.data.model.RideCardModel
 import com.carsathi.app.data.repo.SearchQuery
 import com.carsathi.app.ui.appViewModel
@@ -53,8 +56,8 @@ import java.time.LocalDate
 
 class SearchViewModel(private val c: AppContainer) : ViewModel() {
     val uid = c.session.userId
-    var from by mutableStateOf<City?>(null)
-    var to by mutableStateOf<City?>(null)
+    var from by mutableStateOf<PickedPlace?>(null)
+    var to by mutableStateOf<PickedPlace?>(null)
     var date by mutableStateOf(LocalDate.now())
     var seats by mutableIntStateOf(1)
     var error by mutableStateOf<String?>(null)
@@ -78,13 +81,13 @@ class SearchViewModel(private val c: AppContainer) : ViewModel() {
         error = when {
             f == null -> "Where are you leaving from?"
             t == null -> "Where are you going?"
-            f == t -> "Departure and destination must be different"
+            f.city.name == t.city.name -> "Departure and destination must be in different cities"
             else -> null
         }
-        if (f == null || t == null || f == t) return
+        if (f == null || t == null || f.city.name == t.city.name) return
         viewModelScope.launch {
-            c.rides.recordSearch(uid, SearchQuery(f, t, date, seats))
-            go(Routes.results(f.name, t.name, date.toEpochDay(), seats))
+            c.rides.recordSearch(uid, SearchQuery(f.city, t.city, date, seats))
+            go(Routes.results(f, t, date.toEpochDay(), seats))
         }
     }
 
@@ -100,6 +103,7 @@ fun SearchScreen(nav: NavHostController) {
     val unread by vm.unreadNotifications.collectAsStateWithLifecycle()
     val user by vm.user.collectAsStateWithLifecycle()
     var picker by remember { mutableStateOf<String?>(null) }
+    var exactFor by remember { mutableStateOf<Pair<String, City>?>(null) }
     var showDate by remember { mutableStateOf(false) }
     var showSeats by remember { mutableStateOf(false) }
 
@@ -146,9 +150,9 @@ fun SearchScreen(nav: NavHostController) {
             ) {
                 Box {
                     Column {
-                        SearchField(Icons.Outlined.Circle, vm.from?.name, "Leaving from") { picker = "from" }
+                        SearchField(Icons.Outlined.Circle, vm.from?.city?.name, "Leaving from", vm.from?.takeUnless { it.isCityOnly }?.address) { picker = "from" }
                         ThinDivider(Modifier.padding(start = 56.dp, end = 64.dp))
-                        SearchField(Icons.Outlined.Circle, vm.to?.name, "Going to") { picker = "to" }
+                        SearchField(Icons.Outlined.Circle, vm.to?.city?.name, "Going to", vm.to?.takeUnless { it.isCityOnly }?.address) { picker = "to" }
                         ThinDivider(Modifier.padding(horizontal = 16.dp))
                         Row {
                             Box(Modifier.weight(1f)) { SearchField(Icons.Default.CalendarMonth, Fmt.date(vm.date), "Date") { showDate = true } }
@@ -161,7 +165,8 @@ fun SearchScreen(nav: NavHostController) {
                                 .fillMaxWidth()
                                 .height(56.dp)
                                 .background(BrandBlue)
-                                .clickable { vm.search { nav.navigate(it) } },
+                                .clickable { vm.search { nav.navigate(it) } }
+                                .semantics { contentDescription = "Search rides" },
                             contentAlignment = Alignment.Center,
                         ) {
                             Text("Search", color = Color.White, style = MaterialTheme.typography.labelLarge)
@@ -192,7 +197,7 @@ fun SearchScreen(nav: NavHostController) {
                     icon = Icons.Default.History,
                     onClick = {
                         val date = LocalDate.ofEpochDay(h.dateEpochDay).let { if (it.isBefore(LocalDate.now())) LocalDate.now() else it }
-                        vm.from = CityCatalog.find(h.fromCity); vm.to = CityCatalog.find(h.toCity); vm.date = date; vm.seats = h.seats
+                        vm.from = CityCatalog.find(h.fromCity)?.let { PickedPlace.cityOnly(it) }; vm.to = CityCatalog.find(h.toCity)?.let { PickedPlace.cityOnly(it) }; vm.date = date; vm.seats = h.seats
                         vm.search { nav.navigate(it) }
                     },
                 )
@@ -205,7 +210,7 @@ fun SearchScreen(nav: NavHostController) {
             items(popularRoutes) { (f, t) ->
                 Card(
                     onClick = {
-                        vm.from = CityCatalog.find(f); vm.to = CityCatalog.find(t)
+                        vm.from = CityCatalog.find(f)?.let { PickedPlace.cityOnly(it) }; vm.to = CityCatalog.find(t)?.let { PickedPlace.cityOnly(it) }
                         vm.search { nav.navigate(it) }
                     },
                     shape = RoundedCornerShape(16.dp),
@@ -243,8 +248,33 @@ fun SearchScreen(nav: NavHostController) {
     }
 
     when (picker) {
-        "from" -> CityPickerDialog("Leaving from", { picker = null }, { vm.from = it; vm.error = null; picker = null }, history.map { it.fromCity })
-        "to" -> CityPickerDialog("Going to", { picker = null }, { vm.to = it; vm.error = null; picker = null }, history.map { it.toCity })
+        "from" -> CityPickerDialog(
+            "Leaving from", { picker = null },
+            { city -> picker = null; vm.error = null; exactFor = "from" to city },
+            history.map { it.fromCity },
+            onCurrentLocation = { place -> vm.from = place; vm.error = null; picker = null },
+        )
+        "to" -> CityPickerDialog(
+            "Going to", { picker = null },
+            { city -> picker = null; vm.error = null; exactFor = "to" to city },
+            history.map { it.toCity },
+        )
+    }
+    exactFor?.let { (side, city) ->
+        val current = if (side == "from") vm.from else vm.to
+        val setPlace: (PickedPlace) -> Unit = { if (side == "from") vm.from = it else vm.to = it }
+        MeetingPointDialog(
+            city = city,
+            title = if (side == "from") "Pickup point in ${city.name}" else "Drop-off point in ${city.name}",
+            selected = current?.takeIf { it.city.name == city.name },
+            onDismiss = {
+                // Keep the city even if no exact point was chosen
+                if (current?.city?.name != city.name) setPlace(PickedPlace.cityOnly(city))
+                exactFor = null
+            },
+            onDone = { setPlace(it); exactFor = null },
+            showCurrentLocation = side == "from",
+        )
     }
     if (showDate) DatePickerSheet(vm.date, { showDate = false }, { vm.date = it }, maxDate = LocalDate.now().plusMonths(3))
     if (showSeats) {
@@ -263,19 +293,30 @@ private val popularRoutes = listOf(
 )
 
 @Composable
-private fun SearchField(icon: ImageVector, value: String?, placeholder: String, onClick: () -> Unit) {
+private fun SearchField(icon: ImageVector, value: String?, placeholder: String, detail: String? = null, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, tint = CsTheme.colors.subtle, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(16.dp))
-        Text(
-            value ?: placeholder,
-            style = MaterialTheme.typography.titleMedium,
-            color = if (value == null) CsTheme.colors.subtle else CsTheme.colors.heading,
-            maxLines = 1,
-        )
+        Column(Modifier.padding(end = 40.dp)) {
+            Text(
+                value ?: placeholder,
+                style = MaterialTheme.typography.titleMedium,
+                color = if (value == null) CsTheme.colors.subtle else CsTheme.colors.heading,
+                maxLines = 1,
+            )
+            if (detail != null) {
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = BrandBlue,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 
@@ -320,7 +361,15 @@ data class ResultFilters(
     val count: Int get() = times.size + listOf(instantOnly, maxTwoInBack, verifiedOnly, womenOnly, smokingOk, petsOk).count { it }
 }
 
-class ResultsViewModel(private val c: AppContainer, fromName: String, toName: String, epochDay: Long, val seats: Int) : ViewModel() {
+class ResultsViewModel(
+    private val c: AppContainer,
+    fromName: String,
+    toName: String,
+    epochDay: Long,
+    val seats: Int,
+    val fromPoint: PickedPlace? = null,
+    val toPoint: PickedPlace? = null,
+) : ViewModel() {
     val from: City? = CityCatalog.find(fromName)
     val to: City? = CityCatalog.find(toName)
     var date by mutableStateOf(LocalDate.ofEpochDay(epochDay))
@@ -341,7 +390,7 @@ class ResultsViewModel(private val c: AppContainer, fromName: String, toName: St
         viewModelScope.launch {
             c.seeded.first { it }
             viewer = c.users.get(c.session.userId)
-            val q = SearchQuery(f, t, date, seats)
+            val q = SearchQuery(f, t, date, seats, fromExact = fromPoint?.asCity(), toExact = toPoint?.asCity())
             results = c.rides.search(q, viewer)
             otherDates = if (results.isEmpty()) c.rides.countsAround(q, viewer) else emptyList()
             loading = false
@@ -386,8 +435,16 @@ class ResultsViewModel(private val c: AppContainer, fromName: String, toName: St
 }
 
 @Composable
-fun SearchResultsScreen(nav: NavHostController, fromName: String, toName: String, epochDay: Long, seats: Int) {
-    val vm: ResultsViewModel = appViewModel { ResultsViewModel(it, fromName, toName, epochDay, seats) }
+fun SearchResultsScreen(
+    nav: NavHostController,
+    fromName: String,
+    toName: String,
+    epochDay: Long,
+    seats: Int,
+    fromPoint: PickedPlace? = null,
+    toPoint: PickedPlace? = null,
+) {
+    val vm: ResultsViewModel = appViewModel { ResultsViewModel(it, fromName, toName, epochDay, seats, fromPoint, toPoint) }
     var showFilters by remember { mutableStateOf(false) }
     var showDate by remember { mutableStateOf(false) }
     val visible = vm.visible()
@@ -401,6 +458,13 @@ fun SearchResultsScreen(nav: NavHostController, fromName: String, toName: String
                         IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = BrandBlue) }
                         Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { nav.popBackStack() }.padding(4.dp)) {
                             Text("$fromName → $toName", style = MaterialTheme.typography.titleMedium, color = CsTheme.colors.heading, maxLines = 1)
+                            val exact = listOfNotNull(
+                                fromPoint?.takeUnless { it.isCityOnly }?.let { "From ${it.address}" },
+                                toPoint?.takeUnless { it.isCityOnly }?.let { "to ${it.address}" },
+                            ).joinToString(" ")
+                            if (exact.isNotBlank()) {
+                                Text(exact, style = MaterialTheme.typography.bodySmall, color = BrandBlue, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            }
                             Text("${Fmt.date(vm.date)}, $seats passenger${if (seats > 1) "s" else ""}", style = MaterialTheme.typography.bodySmall, color = CsTheme.colors.subtle)
                         }
                         BadgedBox(badge = { if (vm.filters.count > 0) Badge { Text(vm.filters.count.toString()) } }) {

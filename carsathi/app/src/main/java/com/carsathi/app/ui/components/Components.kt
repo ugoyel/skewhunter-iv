@@ -50,6 +50,7 @@ import com.carsathi.app.data.catalog.City
 import com.carsathi.app.data.catalog.CityCatalog
 import com.carsathi.app.data.db.UserEntity
 import com.carsathi.app.data.model.RideCardModel
+import com.carsathi.app.data.model.PickedPlace
 import com.carsathi.app.data.model.RidePoint
 import com.carsathi.app.data.model.initials
 import com.carsathi.app.ui.theme.BrandBlue
@@ -709,7 +710,13 @@ fun Itinerary(points: List<RidePoint>, departureAt: Long, boardIndex: Int = 0, a
 
 /** Full screen city search, like BlaBlaCar's "Leaving from" / "Going to" search. */
 @Composable
-fun CityPickerDialog(title: String, onDismiss: () -> Unit, onPick: (City) -> Unit, recent: List<String> = emptyList()) {
+fun CityPickerDialog(
+    title: String,
+    onDismiss: () -> Unit,
+    onPick: (City) -> Unit,
+    recent: List<String> = emptyList(),
+    onCurrentLocation: ((PickedPlace) -> Unit)? = null,
+) {
     var query by remember { mutableStateOf("") }
     val focus = remember { FocusRequester() }
     val results = remember(query) { CityCatalog.search(query) }
@@ -732,6 +739,14 @@ fun CityPickerDialog(title: String, onDismiss: () -> Unit, onPick: (City) -> Uni
                 )
                 LaunchedEffect(Unit) { focus.requestFocus() }
                 LazyColumn(Modifier.fillMaxSize().imePadding()) {
+                    if (onCurrentLocation != null && query.isBlank()) {
+                        item {
+                            Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                                UseCurrentLocation(onPlace = onCurrentLocation, onUseNearestCity = onPick)
+                            }
+                            ThinDivider(Modifier.padding(horizontal = 20.dp))
+                        }
+                    }
                     val recentCities = if (query.isBlank()) recent.mapNotNull { CityCatalog.find(it) }.distinct().take(4) else emptyList()
                     if (recentCities.isNotEmpty()) {
                         item { Text("Recent", style = MaterialTheme.typography.labelMedium, color = CsTheme.colors.subtle, modifier = Modifier.padding(start = 20.dp, top = 16.dp)) }

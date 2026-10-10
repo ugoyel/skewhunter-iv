@@ -25,6 +25,9 @@ next() { tap "=Next"; }
 
 adb install -r "$APK" || exit 1
 adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS || true
+adb shell pm grant $PKG android.permission.ACCESS_FINE_LOCATION || true
+adb shell pm grant $PKG android.permission.ACCESS_COARSE_LOCATION || true
+gps() { adb emu geo fix 77.2195 28.6328 > /dev/null 2>&1; sleep 1; adb emu geo fix 77.2196 28.6329 > /dev/null 2>&1; sleep 1; }  # Connaught Place, Delhi
 adb logcat -c
 adb shell am start -W -n $PKG/.MainActivity
 sleep 10
@@ -34,8 +37,16 @@ shot welcome
 WAIT=8 tap "Explore with the demo account"
 shot search-home
 
-tap "Jaipur" || tap "Pune"
-sleep 3
+# ---------------------------------------------------------------- current location + exact points
+gps
+tap "Leaving from"; shot city-picker-current-location
+WAIT=8 tap "Use current location"
+shot search-from-current-location
+tap "Going to"; tap "Jaipur"
+shot dropoff-point-picker
+tap "Sindhi Camp Bus Stand"
+shot search-with-exact-points
+WAIT=6 tap "=Search rides"
 shot results
 tap "Filter" && { shot filters; back; }
 tap "seat" || { tap "Next day"; shot results-next-day; tap "seat"; }
@@ -90,10 +101,21 @@ tap "=About you"
 
 # ---------------------------------------------------------------- publish a full ride
 tap "=Publish"; shot publish-from
-tap "Delhi"; shot publish-pickup
-tap "Kashmere Gate ISBT"; next
+gps
+WAIT=8 tap "Use current location"
+shot publish-pickup-current-location
+tap "Choose on the map" && {
+  sleep 8; shot map-pin-picker
+  WAIT=4 tap "Confirm this point"
+  shot publish-pickup-pinned
+}
+next
 tap "Jaipur"
-tap "Sindhi Camp Bus Stand"; next
+shot publish-dropoff-picker
+tap "Type the exact address" && type_text "MI Road"
+WAIT=4 tap "Set as the exact"
+shot publish-dropoff-typed
+next
 shot publish-stopovers; next
 shot publish-date; next
 shot publish-time; next

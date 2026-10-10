@@ -160,3 +160,15 @@ fun UserEntity.age(): Int? =
 
 fun UserEntity.initials(): String =
     (firstName.take(1) + lastName.take(1)).uppercase().ifBlank { "?" }
+
+/** A city plus the exact pickup / drop-off point chosen inside it. */
+data class PickedPlace(val city: City, val address: String, val lat: Double, val lng: Double) {
+    val isCityOnly: Boolean get() = address.isBlank() || address == city.name
+
+    /** The city carrying the exact coordinates of the chosen point. */
+    fun asCity(): City = city.copy(lat = lat, lng = lng)
+
+    companion object {
+        fun cityOnly(city: City) = PickedPlace(city, city.name, city.lat, city.lng)
+    }
+}

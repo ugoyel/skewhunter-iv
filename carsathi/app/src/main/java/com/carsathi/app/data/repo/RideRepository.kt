@@ -42,7 +42,15 @@ data class RideDraft(
     val comment: String,
 )
 
-data class SearchQuery(val from: City, val to: City, val date: LocalDate, val seats: Int)
+data class SearchQuery(
+    val from: City,
+    val to: City,
+    val date: LocalDate,
+    val seats: Int,
+    /** Exact pickup / drop-off points (city carrying precise coordinates), when the member chose one. */
+    val fromExact: City? = null,
+    val toExact: City? = null,
+)
 
 class RideRepository(
     private val db: AppDatabase,
@@ -103,7 +111,7 @@ class RideRepository(
             if (viewer != null && ride.driverId == viewer.id) return@mapNotNull null
             if (ride.womenOnly && viewer?.gender != "F") return@mapNotNull null
             val pts = ride.points()
-            val m = matchSegment(pts, q.from, q.to) ?: return@mapNotNull null
+            val m = matchSegment(pts, q.fromExact ?: q.from, q.toExact ?: q.to) ?: return@mapNotNull null
             val boardAt = pts[m.fromIndex].timeAt(ride.departureAt)
             if (boardAt < start || boardAt > end || boardAt < now) return@mapNotNull null
             Hit(ride, pts, m)

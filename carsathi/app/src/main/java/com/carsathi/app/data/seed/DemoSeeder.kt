@@ -316,11 +316,13 @@ class DemoSeeder(
                     val rec = Pricing.recommended(km)
                     val price = ((rec * (0.8 + rnd.nextDouble() * 0.35)) / 10).roundToInt() * 10
                     val maxSeats = car?.let { CarCatalog.seatsFor(it.bodyType) } ?: 3
+                    val fromPt = CityCatalog.meetingPoints(from).let { it[rnd.nextInt(it.size)] }
+                    val toPt = CityCatalog.meetingPoints(to).let { it[rnd.nextInt(it.size)] }
                     val draft = RideDraft(
-                        from = from,
-                        fromAddress = CityCatalog.pickupSuggestions(from.name).let { it[rnd.nextInt(it.size)] },
-                        to = to,
-                        toAddress = CityCatalog.pickupSuggestions(to.name).let { it[rnd.nextInt(it.size)] },
+                        from = from.copy(lat = fromPt.lat, lng = fromPt.lng),
+                        fromAddress = fromPt.label,
+                        to = to.copy(lat = toPt.lat, lng = toPt.lng),
+                        toAddress = toPt.label,
                         stopovers = via,
                         departureAt = departure,
                         seats = rnd.nextInt(2, maxSeats.coerceAtLeast(2) + 1),
@@ -389,7 +391,7 @@ class DemoSeeder(
         // 1) Past ride as driver: Delhi → Jaipur, two passengers who rated Kabir
         val pastRide = rides.buildRide(
             meId,
-            RideDraft(city("Delhi"), "Dhaula Kuan", city("Jaipur"), "Sindhi Camp Bus Stand", listOf(city("Gurugram")), at(-10, 7, 30),
+            RideDraft(CityCatalog.point("Delhi", "Dhaula Kuan"), "Dhaula Kuan", CityCatalog.point("Jaipur", "Sindhi Camp Bus Stand"), "Sindhi Camp Bus Stand", listOf(city("Gurugram")), at(-10, 7, 30),
                 3, true, true, false, 450, carId, "Leaving early to beat traffic."),
         )
         val pastRideId = db.rides().insert(pastRide)
@@ -405,7 +407,7 @@ class DemoSeeder(
         // 2) Past ride as passenger: Bengaluru → Mysuru, already rated
         val pastTrip = rides.buildRide(
             d1.id,
-            RideDraft(city("Bengaluru"), "Mysore Road Satellite Bus Stand", city("Mysuru"), "Mysuru Palace", emptyList(), at(-20, 9, 0),
+            RideDraft(CityCatalog.point("Bengaluru", "Mysore Road Satellite Bus Stand"), "Mysore Road Satellite Bus Stand", CityCatalog.point("Mysuru", "Mysuru Palace"), "Mysuru Palace", emptyList(), at(-20, 9, 0),
                 3, false, true, false, 280, db.cars().byOwner(d1.id).firstOrNull()?.id, ""),
         )
         val pastTripId = db.rides().insert(pastTrip)
@@ -420,7 +422,7 @@ class DemoSeeder(
         // 3) Upcoming booking: Delhi → Chandigarh with a chat
         val upcomingTrip = rides.buildRide(
             d2.id,
-            RideDraft(city("Delhi"), "Kashmere Gate ISBT", city("Chandigarh"), "ISBT Sector 43", listOf(city("Panipat"), city("Ambala")), at(3, 17, 30),
+            RideDraft(CityCatalog.point("Delhi", "Kashmere Gate ISBT"), "Kashmere Gate ISBT", CityCatalog.point("Chandigarh", "ISBT Sector 43"), "ISBT Sector 43", listOf(city("Panipat"), city("Ambala")), at(3, 17, 30),
                 3, true, false, false, 420, db.cars().byOwner(d2.id).firstOrNull()?.id, "Friday evening drive, one stop for snacks."),
         )
         val upcomingTripId = db.rides().insert(upcomingTrip)
@@ -440,7 +442,7 @@ class DemoSeeder(
         // 4) Upcoming ride as driver: Delhi → Agra, one confirmed passenger and one pending request
         val myRide = rides.buildRide(
             meId,
-            RideDraft(city("Delhi"), "Akshardham Metro Station", city("Agra"), "Taj Mahal East Gate", listOf(city("Mathura")), at(5, 8, 0),
+            RideDraft(CityCatalog.point("Delhi", "Akshardham Metro Station"), "Akshardham Metro Station", CityCatalog.point("Agra", "Taj Mahal East Gate"), "Taj Mahal East Gate", listOf(city("Mathura")), at(5, 8, 0),
                 3, true, false, false, 380, carId, "Weekend trip to Agra. Medium bag only please."),
         )
         val myRideId = db.rides().insert(myRide)

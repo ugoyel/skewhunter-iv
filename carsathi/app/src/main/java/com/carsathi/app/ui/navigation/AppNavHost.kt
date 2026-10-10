@@ -203,15 +203,21 @@ fun CarSathiRoot(startSignedIn: Boolean, openNotifications: Boolean) {
                     navArgument("to") { type = NavType.StringType },
                     navArgument("date") { type = NavType.LongType },
                     navArgument("seats") { type = NavType.IntType },
-                ),
+                ) + listOf("fa", "flat", "flng", "ta", "tlat", "tlng").map { k ->
+                    navArgument(k) { type = NavType.StringType; defaultValue = "" }
+                },
             ) { e ->
                 val a = e.arguments
+                val fromName = a?.getString("from").orEmpty()
+                val toName = a?.getString("to").orEmpty()
                 SearchResultsScreen(
                     nav,
-                    a?.getString("from").orEmpty(),
-                    a?.getString("to").orEmpty(),
+                    fromName,
+                    toName,
                     a?.getLong("date") ?: 0L,
                     a?.getInt("seats") ?: 1,
+                    Routes.place(fromName, a?.getString("fa"), a?.getString("flat"), a?.getString("flng")),
+                    Routes.place(toName, a?.getString("ta"), a?.getString("tlat"), a?.getString("tlng")),
                 )
             }
             composable(

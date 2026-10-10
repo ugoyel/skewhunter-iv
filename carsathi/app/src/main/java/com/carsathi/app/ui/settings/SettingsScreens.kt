@@ -385,7 +385,10 @@ fun AlertsScreen(nav: NavHostController) {
         }
     }
     when (picker) {
-        "from" -> CityPickerDialog("Leaving from", { picker = null }, { from = it; picker = null })
+        "from" -> CityPickerDialog(
+            "Leaving from", { picker = null }, { from = it; picker = null },
+            onCurrentLocation = { place -> from = place.city; picker = null },
+        )
         "to" -> CityPickerDialog("Going to", { picker = null }, { to = it; picker = null })
         "date" -> DatePickerSheet(date ?: LocalDate.now(), { picker = null }, { date = it }, maxDate = LocalDate.now().plusMonths(3))
     }

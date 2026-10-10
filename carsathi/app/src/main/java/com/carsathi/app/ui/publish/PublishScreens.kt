@@ -33,6 +33,7 @@ import com.carsathi.app.data.catalog.Pricing
 import com.carsathi.app.data.db.CarEntity
 import com.carsathi.app.data.db.RideEntity
 import com.carsathi.app.data.db.UserEntity
+import com.carsathi.app.data.model.PickedPlace
 import com.carsathi.app.data.repo.RideDraft
 import com.carsathi.app.ui.appViewModel
 import com.carsathi.app.ui.components.*
@@ -55,9 +56,9 @@ class PublishViewModel(private val c: AppContainer) : ViewModel() {
     val uid = c.session.userId
     var stepIndex by mutableIntStateOf(0)
     var from by mutableStateOf<City?>(null)
-    var fromAddress by mutableStateOf("")
+    var fromPoint by mutableStateOf<PickedPlace?>(null)
     var to by mutableStateOf<City?>(null)
-    var toAddress by mutableStateOf("")
+    var toPoint by mutableStateOf<PickedPlace?>(null)
     var stopovers by mutableStateOf<List<City>>(emptyList())
     var date by mutableStateOf(LocalDate.now().plusDays(1))
     var hour by mutableIntStateOf(8)
@@ -87,7 +88,7 @@ class PublishViewModel(private val c: AppContainer) : ViewModel() {
         get() {
             val f = from ?: return 0
             val t = to ?: return 0
-            return c.rides.routeKm(f, stopovers, t)
+            return c.rides.routeKm(fromPoint?.asCity() ?: f, stopovers, toPoint?.asCity() ?: t)
         }
 
     fun suggestedStopovers(): List<City> {
@@ -108,12 +109,16 @@ class PublishViewModel(private val c: AppContainer) : ViewModel() {
         error = null
         when (step) {
             Step.FROM -> if (from == null) { error = "Choose where you're leaving from"; return }
-            Step.PICKUP -> if (fromAddress.isBlank()) fromAddress = from?.name.orEmpty()
+            Step.PICKUP -> if (fromPoint?.city?.name != from?.name) {
+                error = "Choose, type or pin the exact pickup point"; return
+            }
             Step.TO -> {
                 if (to == null) { error = "Choose your destination"; return }
-                if (to == from) { error = "Destination must be different from departure"; return }
+                if (to?.name == from?.name) { error = "Destination must be different from departure"; return }
             }
-            Step.DROPOFF -> if (toAddress.isBlank()) toAddress = to?.name.orEmpty()
+            Step.DROPOFF -> if (toPoint?.city?.name != to?.name) {
+                error = "Choose, type or pin the exact drop-off point"; return
+            }
             Step.STOPOVERS -> Unit
             Step.DATE -> Unit
             Step.TIME -> if (departureMillis(date, hour, minute) < System.currentTimeMillis() + 30 * 60_000) {
@@ -136,12 +141,14 @@ class PublishViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     private fun publish(published: (Long) -> Unit) {
-        val f = from ?: return
-        val t = to ?: return
+        val fp = fromPoint ?: return
+        val tp = toPoint ?: return
+        val f = fp.asCity()
+        val t = tp.asCity()
         publishing = true
         viewModelScope.launch {
             val draft = RideDraft(
-                from = f, fromAddress = fromAddress, to = t, toAddress = toAddress, stopovers = stopovers,
+                from = f, fromAddress = fp.address, to = t, toAddress = tp.address, stopovers = stopovers,
                 departureAt = departureMillis(date, hour, minute), seats = seats, maxTwoInBack = maxTwoInBack,
                 instantBooking = instant, womenOnly = womenOnly, pricePerSeat = price, carId = carId, comment = comment,
             )
@@ -151,7 +158,7 @@ class PublishViewModel(private val c: AppContainer) : ViewModel() {
                 val back = c.rides.publish(
                     uid,
                     draft.copy(
-                        from = t, fromAddress = toAddress, to = f, toAddress = fromAddress, stopovers = stopovers.reversed(),
+                        from = t, fromAddress = tp.address, to = f, toAddress = fp.address, stopovers = stopovers.reversed(),
                         departureAt = departureMillis(returnDate, returnHour, returnMinute),
                     ),
                 )
@@ -211,33 +218,50 @@ fun PublishScreen(nav: NavHostController) {
                     InfoBanner("Tip: verify your phone number so passengers can trust and reach you.", Icons.Default.Phone)
                     Spacer(Modifier.height(12.dp))
                 }
-                CsTextField(cityQuery, { cityQuery = it }, "Enter the full address or city", leading = Icons.Default.Search, imeAction = ImeAction.Search, capitalizeWords = true)
+                if (vm.step == Step.FROM && cityQuery.isBlank()) {
+                    UseCurrentLocation(
+                        onPlace = { place -> vm.from = place.city; vm.fromPoint = place; vm.next {} },
+                        onUseNearestCity = { city -> vm.from = city; vm.fromPoint = null; vm.next {} },
+                    )
+                    ThinDivider()
+                    Spacer(Modifier.height(8.dp))
+                }
+                CsTextField(cityQuery, { cityQuery = it }, "Search a city", leading = Icons.Default.Search, imeAction = ImeAction.Search, capitalizeWords = true)
                 Spacer(Modifier.height(8.dp))
                 val selected = if (vm.step == Step.FROM) vm.from else vm.to
                 if (selected != null && cityQuery.isBlank()) {
                     CityOption(selected, true) { vm.next {} }
                 }
-                CityCatalog.search(cityQuery, 12).filter { it != selected }.forEach { city ->
+                CityCatalog.search(cityQuery, 12).filter { it.name != selected?.name }.forEach { city ->
                     CityOption(city, false) {
-                        if (vm.step == Step.FROM) vm.from = city else vm.to = city
+                        if (vm.step == Step.FROM) {
+                            if (vm.from?.name != city.name) vm.fromPoint = null
+                            vm.from = city
+                        } else {
+                            if (vm.to?.name != city.name) vm.toPoint = null
+                            vm.to = city
+                        }
                         vm.next {}
                     }
                 }
             }
             Step.PICKUP, Step.DROPOFF -> {
-                val city = (if (vm.step == Step.PICKUP) vm.from else vm.to)?.name.orEmpty()
-                val current = if (vm.step == Step.PICKUP) vm.fromAddress else vm.toAddress
-                val set: (String) -> Unit = { if (vm.step == Step.PICKUP) vm.fromAddress = it else vm.toAddress = it }
-                Text("Choose a meeting point that's easy to find and to stop at.", color = CsTheme.colors.subtle)
-                Spacer(Modifier.height(12.dp))
-                CityCatalog.pickupSuggestions(city).forEach { s ->
-                    ChoiceRow(s, current == s, { set(s) }, icon = Icons.Default.Place)
+                val pickup = vm.step == Step.PICKUP
+                val city = if (pickup) vm.from else vm.to
+                if (city != null) {
+                    Text(
+                        if (pickup) "Choose a spot in ${city.name} that's easy to find and safe to stop at."
+                        else "Where in ${city.name} will passengers get out?",
+                        color = CsTheme.colors.subtle,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    MeetingPointPicker(
+                        city = city,
+                        selected = if (pickup) vm.fromPoint else vm.toPoint,
+                        onSelect = { p -> if (pickup) vm.fromPoint = p else vm.toPoint = p; vm.error = null },
+                        showCurrentLocation = pickup,
+                    )
                 }
-                Spacer(Modifier.height(8.dp))
-                CsTextField(
-                    if (CityCatalog.pickupSuggestions(city).contains(current)) "" else current,
-                    set, "Or type a precise address", leading = Icons.Default.EditLocationAlt,
-                )
             }
             Step.STOPOVERS -> {
                 val suggested = vm.suggestedStopovers()
@@ -427,6 +451,10 @@ private fun RideSummary(vm: PublishViewModel) {
             Text("Your ride", style = MaterialTheme.typography.titleMedium, color = CsTheme.colors.heading)
             Spacer(Modifier.height(8.dp))
             Text("${vm.from?.name} → ${vm.to?.name}", style = MaterialTheme.typography.titleSmall, color = CsTheme.colors.heading)
+            Text(
+                "Pickup: ${vm.fromPoint?.address ?: "-"}\nDrop-off: ${vm.toPoint?.address ?: "-"}",
+                style = MaterialTheme.typography.bodySmall, color = CsTheme.colors.subtle,
+            )
             if (vm.stopovers.isNotEmpty()) Text("via ${vm.stopovers.joinToString { it.name }}", style = MaterialTheme.typography.bodySmall, color = CsTheme.colors.subtle)
             Text("${Fmt.dateLong(vm.date)} at %02d:%02d".format(vm.hour, vm.minute), style = MaterialTheme.typography.bodyMedium, color = CsTheme.colors.heading)
             Text("${vm.seats} seat${if (vm.seats > 1) "s" else ""} · ${Fmt.rupees(vm.price)} per seat · ${if (vm.instant) "Instant booking" else "Manual approval"}", style = MaterialTheme.typography.bodyMedium, color = CsTheme.colors.heading)

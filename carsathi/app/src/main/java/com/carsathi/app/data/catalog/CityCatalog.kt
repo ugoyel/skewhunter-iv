@@ -10,6 +10,9 @@ data class City(val name: String, val state: String, val lat: Double, val lng: D
     val label: String get() = "$name, $state"
 }
 
+/** A named pickup / drop-off spot inside a city. */
+data class MeetingPoint(val label: String, val lat: Double, val lng: Double)
+
 object CityCatalog {
     val cities: List<City> = listOf(
         // Delhi NCR
@@ -203,7 +206,7 @@ object CityCatalog {
         val total = Geo.distanceKm(a.lat, a.lng, b.lat, b.lng)
         if (total < 60) return emptyList()
         return cities.asSequence()
-            .filter { it != a && it != b }
+            .filter { it.name != a.name && it.name != b.name }
             .mapNotNull { c ->
                 val da = Geo.distanceKm(a.lat, a.lng, c.lat, c.lng)
                 val db = Geo.distanceKm(c.lat, c.lng, b.lat, b.lng)
@@ -215,32 +218,132 @@ object CityCatalog {
             .toList()
     }
 
-    fun pickupSuggestions(city: String): List<String> {
-        val special = landmarks[city].orEmpty()
-        return special + listOf(
-            "$city Railway Station",
-            "$city Bus Stand",
-            "$city City Centre",
-            "$city Airport",
-        )
+    /** Popular meeting points in [city] with their coordinates, plus generic central points. */
+    fun meetingPoints(city: City): List<MeetingPoint> {
+        val special = landmarks[city.name].orEmpty()
+        val generic = listOf(
+            MeetingPoint("${city.name} City Centre", city.lat, city.lng),
+            MeetingPoint("${city.name} Railway Station", city.lat, city.lng),
+            MeetingPoint("${city.name} Bus Stand", city.lat, city.lng),
+        ).filter { g -> special.none { it.label.equals(g.label, true) } }
+        return special + generic
     }
 
-    private val landmarks = mapOf(
-        "Delhi" to listOf("Kashmere Gate ISBT", "Anand Vihar ISBT", "Rajiv Chowk Metro, Connaught Place", "Dhaula Kuan", "Akshardham Metro Station"),
-        "Gurugram" to listOf("IFFCO Chowk Metro", "Cyber City", "Rajiv Chowk, Gurugram", "Huda City Centre Metro"),
-        "Noida" to listOf("Sector 18 Metro Station", "Botanical Garden Metro", "Pari Chowk, Greater Noida"),
-        "Mumbai" to listOf("Dadar East", "Andheri East (Western Express Hwy)", "Sion Circle", "Vashi Bridge", "Bandra Kurla Complex"),
-        "Pune" to listOf("Shivajinagar Bus Stand", "Hinjewadi Phase 1", "Swargate", "Wakad Bridge", "Chandni Chowk, Kothrud"),
-        "Bengaluru" to listOf("Majestic (Kempegowda Bus Station)", "Silk Board Junction", "Hebbal Flyover", "Electronic City Toll", "Mysore Road Satellite Bus Stand"),
-        "Chennai" to listOf("Koyambedu Bus Terminus", "Guindy", "Tambaram", "Chennai Central"),
-        "Hyderabad" to listOf("Miyapur Metro", "LB Nagar", "Hitech City", "Secunderabad Station", "Shamshabad (RGIA)"),
-        "Jaipur" to listOf("Sindhi Camp Bus Stand", "Ajmeri Gate", "Durgapura", "Malviya Nagar"),
-        "Chandigarh" to listOf("ISBT Sector 43", "ISBT Sector 17", "Tribune Chowk", "Zirakpur Flyover"),
-        "Kolkata" to listOf("Esplanade", "Ultadanga", "Salt Lake Sector V", "Howrah Bridge"),
-        "Ahmedabad" to listOf("Paldi", "Iskcon Cross Road", "Geeta Mandir Bus Stand", "Nehru Nagar"),
-        "Dehradun" to listOf("ISBT Dehradun", "Clock Tower (Ghanta Ghar)", "Rajpur Road"),
-        "Agra" to listOf("Idgah Bus Stand", "Taj Mahal East Gate", "Agra Cantt Station"),
-        "Mysuru" to listOf("Mysuru Palace", "Suburban Bus Stand", "Infosys Campus Gate"),
+    fun pickupSuggestions(city: String): List<String> =
+        find(city)?.let { c -> meetingPoints(c).map { it.label } } ?: listOf(city)
+
+    /** The city with its coordinates moved to the named meeting point (falls back to the city centre). */
+    fun point(cityName: String, label: String): City {
+        val c = find(cityName)!!
+        val p = meetingPoints(c).firstOrNull { it.label == label } ?: return c
+        return c.copy(lat = p.lat, lng = p.lng)
+    }
+
+    /** Closest catalogue city to a coordinate and its distance in km. */
+    fun nearest(lat: Double, lng: Double): Pair<City, Double> =
+        cities.map { it to Geo.distanceKm(lat, lng, it.lat, it.lng) }.minBy { it.second }
+
+    /** Closest known meeting point in [city] to a coordinate, if within [maxKm]. */
+    fun nearestMeetingPoint(city: City, lat: Double, lng: Double, maxKm: Double): MeetingPoint? =
+        landmarks[city.name].orEmpty()
+            .map { it to Geo.distanceKm(lat, lng, it.lat, it.lng) }
+            .filter { it.second <= maxKm }
+            .minByOrNull { it.second }?.first
+
+    private val landmarks: Map<String, List<MeetingPoint>> = mapOf(
+        "Delhi" to listOf(
+            MeetingPoint("Kashmere Gate ISBT", 28.6676, 77.2280),
+            MeetingPoint("Anand Vihar ISBT", 28.6469, 77.3159),
+            MeetingPoint("Rajiv Chowk Metro, Connaught Place", 28.6328, 77.2197),
+            MeetingPoint("Dhaula Kuan", 28.5918, 77.1615),
+            MeetingPoint("Akshardham Metro Station", 28.6185, 77.2795),
+            MeetingPoint("New Delhi Railway Station", 28.6430, 77.2194),
+            MeetingPoint("Saket Metro Station", 28.5206, 77.2015),
+        ),
+        "Gurugram" to listOf(
+            MeetingPoint("IFFCO Chowk Metro", 28.4723, 77.0724),
+            MeetingPoint("Cyber City", 28.4950, 77.0890),
+            MeetingPoint("Millennium City Centre (HUDA) Metro", 28.4593, 77.0727),
+            MeetingPoint("Rajiv Chowk, Gurugram", 28.4473, 77.0400),
+        ),
+        "Noida" to listOf(
+            MeetingPoint("Sector 18 Metro Station", 28.5708, 77.3261),
+            MeetingPoint("Botanical Garden Metro", 28.5641, 77.3341),
+            MeetingPoint("Pari Chowk, Greater Noida", 28.4652, 77.5110),
+        ),
+        "Mumbai" to listOf(
+            MeetingPoint("Dadar East", 19.0178, 72.8478),
+            MeetingPoint("Andheri East (Western Express Hwy)", 19.1136, 72.8697),
+            MeetingPoint("Sion Circle", 19.0434, 72.8626),
+            MeetingPoint("Vashi Bridge", 19.0771, 72.9986),
+            MeetingPoint("Bandra Kurla Complex", 19.0660, 72.8680),
+        ),
+        "Pune" to listOf(
+            MeetingPoint("Shivajinagar Bus Stand", 18.5308, 73.8475),
+            MeetingPoint("Hinjewadi Phase 1", 18.5913, 73.7389),
+            MeetingPoint("Swargate", 18.5018, 73.8636),
+            MeetingPoint("Wakad Bridge", 18.5980, 73.7650),
+            MeetingPoint("Chandni Chowk, Kothrud", 18.5095, 73.7880),
+        ),
+        "Bengaluru" to listOf(
+            MeetingPoint("Majestic (Kempegowda Bus Station)", 12.9767, 77.5713),
+            MeetingPoint("Silk Board Junction", 12.9172, 77.6229),
+            MeetingPoint("Hebbal Flyover", 13.0358, 77.5970),
+            MeetingPoint("Electronic City Toll", 12.8452, 77.6602),
+            MeetingPoint("Mysore Road Satellite Bus Stand", 12.9530, 77.5430),
+        ),
+        "Chennai" to listOf(
+            MeetingPoint("Koyambedu Bus Terminus", 13.0694, 80.1948),
+            MeetingPoint("Guindy", 13.0067, 80.2206),
+            MeetingPoint("Tambaram", 12.9249, 80.1000),
+            MeetingPoint("Chennai Central", 13.0827, 80.2752),
+        ),
+        "Hyderabad" to listOf(
+            MeetingPoint("Miyapur Metro", 17.4969, 78.3725),
+            MeetingPoint("LB Nagar", 17.3457, 78.5522),
+            MeetingPoint("Hitech City", 17.4435, 78.3772),
+            MeetingPoint("Secunderabad Station", 17.4337, 78.5016),
+            MeetingPoint("Shamshabad (RGIA)", 17.2403, 78.4294),
+        ),
+        "Jaipur" to listOf(
+            MeetingPoint("Sindhi Camp Bus Stand", 26.9239, 75.7997),
+            MeetingPoint("Ajmeri Gate", 26.9157, 75.8175),
+            MeetingPoint("Durgapura", 26.8530, 75.7930),
+            MeetingPoint("Malviya Nagar", 26.8549, 75.8243),
+        ),
+        "Chandigarh" to listOf(
+            MeetingPoint("ISBT Sector 43", 30.7224, 76.7486),
+            MeetingPoint("ISBT Sector 17", 30.7395, 76.7826),
+            MeetingPoint("Tribune Chowk", 30.7270, 76.8006),
+            MeetingPoint("Zirakpur Flyover", 30.6425, 76.8173),
+        ),
+        "Kolkata" to listOf(
+            MeetingPoint("Esplanade", 22.5646, 88.3513),
+            MeetingPoint("Ultadanga", 22.5886, 88.3906),
+            MeetingPoint("Salt Lake Sector V", 22.5726, 88.4339),
+            MeetingPoint("Howrah Bridge", 22.5851, 88.3468),
+        ),
+        "Ahmedabad" to listOf(
+            MeetingPoint("Paldi", 23.0120, 72.5622),
+            MeetingPoint("Iskcon Cross Road", 23.0260, 72.5070),
+            MeetingPoint("Geeta Mandir Bus Stand", 23.0137, 72.5913),
+            MeetingPoint("Nehru Nagar", 23.0210, 72.5480),
+        ),
+        "Dehradun" to listOf(
+            MeetingPoint("ISBT Dehradun", 30.2850, 78.0010),
+            MeetingPoint("Clock Tower (Ghanta Ghar)", 30.3245, 78.0418),
+            MeetingPoint("Rajpur Road", 30.3400, 78.0600),
+        ),
+        "Agra" to listOf(
+            MeetingPoint("Idgah Bus Stand", 27.1640, 77.9980),
+            MeetingPoint("Taj Mahal East Gate", 27.1730, 78.0480),
+            MeetingPoint("Agra Cantt Station", 27.1580, 77.9910),
+        ),
+        "Mysuru" to listOf(
+            MeetingPoint("Mysuru Palace", 12.3052, 76.6552),
+            MeetingPoint("Suburban Bus Stand", 12.3080, 76.6580),
+            MeetingPoint("Infosys Campus Gate", 12.3560, 76.5940),
+        ),
     )
 }
 

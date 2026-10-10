@@ -1,6 +1,8 @@
 package com.carsathi.app.ui.navigation
 
 import android.net.Uri
+import com.carsathi.app.data.catalog.CityCatalog
+import com.carsathi.app.data.model.PickedPlace
 
 object Routes {
     const val WELCOME = "welcome"
@@ -14,7 +16,7 @@ object Routes {
     const val INBOX = "inbox"
     const val PROFILE = "profile"
 
-    const val RESULTS = "results/{from}/{to}/{date}/{seats}"
+    const val RESULTS = "results/{from}/{to}/{date}/{seats}?fa={fa}&flat={flat}&flng={flng}&ta={ta}&tlat={tlat}&tlng={tlng}"
     const val RIDE = "ride/{rideId}?from={from}&to={to}&seats={seats}"
     const val BOOK = "book/{rideId}?from={from}&to={to}&seats={seats}"
     const val BOOKED = "booked/{rideId}/{status}"
@@ -48,6 +50,23 @@ object Routes {
     private fun enc(s: String) = Uri.encode(s)
 
     fun results(from: String, to: String, epochDay: Long, seats: Int) = "results/${enc(from)}/${enc(to)}/$epochDay/$seats"
+
+    /** Search results for exact pickup / drop-off points. */
+    fun results(from: PickedPlace, to: PickedPlace, epochDay: Long, seats: Int): String {
+        fun q(p: PickedPlace, prefix: String) =
+            if (p.isCityOnly) "" else "${prefix}a=${enc(p.address)}&${prefix}lat=${p.lat}&${prefix}lng=${p.lng}"
+        val params = listOf(q(from, "f"), q(to, "t")).filter { it.isNotEmpty() }.joinToString("&")
+        val base = results(from.city.name, to.city.name, epochDay, seats)
+        return if (params.isEmpty()) base else "$base?$params"
+    }
+
+    /** Rebuilds an exact place from navigation arguments (null when only the city was chosen). */
+    fun place(cityName: String, address: String?, lat: String?, lng: String?): PickedPlace? {
+        val city = CityCatalog.find(cityName) ?: return null
+        val la = lat?.toDoubleOrNull() ?: return null
+        val ln = lng?.toDoubleOrNull() ?: return null
+        return PickedPlace(city, address.orEmpty().ifBlank { city.name }, la, ln)
+    }
     fun ride(id: Long, from: String = "", to: String = "", seats: Int = 1) = "ride/$id?from=${enc(from)}&to=${enc(to)}&seats=$seats"
     fun book(id: Long, from: String, to: String, seats: Int) = "book/$id?from=${enc(from)}&to=${enc(to)}&seats=$seats"
     fun booked(rideId: Long, status: String) = "booked/$rideId/$status"
