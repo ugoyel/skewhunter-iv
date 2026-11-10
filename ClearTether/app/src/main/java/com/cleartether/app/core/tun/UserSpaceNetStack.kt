@@ -165,6 +165,9 @@ class UserSpaceNetStack(
         }
     }
 
+    /** Diagnostic dump of live TCP flows. */
+    fun debugFlows(): List<String> = flows.values.filter { !it.isClosed }.map { it.debugState() }
+
     internal fun handlePacket(data: ByteArray, length: Int) {
         val packet = IpPacket.parse(data, length) ?: return
         when (packet.protocol) {

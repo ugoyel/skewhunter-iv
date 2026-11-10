@@ -75,11 +75,19 @@ internal class TcpFlow(
     private var timerStartedAt = 0L
     private var retries = 0
     private var dupAcks = 0
+    /** NewReno recovery: while sndUna < [recoverUntil], every partial ACK retransmits the next hole. */
+    private var inRecovery = false
+    private var recoverUntil = 0
     private var clientFinReceived = false
     private var finSent = false
     private var finAcked = false
     private var resetSent = false
     private var lastAdvertisedWindow = RECEIVE_BUFFER
+
+    /** Out-of-order segments waiting for a hole to be filled (reassembly queue). */
+    private class Pending(val seq: Int, val data: ByteArray, val fin: Boolean)
+    private val outOfOrder = ArrayList<Pending>()
+    private var outOfOrderBytes = 0
 
     private val queuedForUpstream = AtomicInteger(0)
     private val toUpstream = Channel<ByteArray>(Channel.UNLIMITED)
@@ -178,6 +186,8 @@ internal class TcpFlow(
                 packet = rebuild(unacked.first())
                 rto = (rto * 2).coerceAtMost(MAX_RTO_MS)
                 timerStartedAt = now
+                inRecovery = true
+                recoverUntil = sndNxt
             }
         }
         packet?.let(sink::offer)
@@ -252,12 +262,22 @@ internal class TcpFlow(
             dupAcks = 0
             rto = INITIAL_RTO_MS
             timerStartedAt = clock()
-            windowSignal.trySend(Unit)
-        } else if (ack == sndUna && unacked.isNotEmpty() && tcp.payloadLength == 0 && !tcp.fin && tcp.window == previousWindow) {
-            if (++dupAcks == 3) {
-                replies += rebuild(unacked.first())
-                timerStartedAt = clock()
+            if (inRecovery) {
+                if (seqLt(ack, recoverUntil) && unacked.isNotEmpty()) {
+                    replies += rebuild(unacked.first()) // partial ACK: the next segment was lost too
+                } else {
+                    inRecovery = false
+                }
             }
+            windowSignal.trySend(Unit)
+        } else if (ack == sndUna && unacked.isNotEmpty() && tcp.payloadLength == 0 && !tcp.fin && !tcp.syn) {
+            if (++dupAcks == 3 && !inRecovery) {
+                replies += rebuild(unacked.first()) // fast retransmit
+                timerStartedAt = clock()
+                inRecovery = true
+                recoverUntil = sndNxt
+            }
+            if (tcp.window != previousWindow) windowSignal.trySend(Unit)
         } else if (tcp.window != previousWindow) {
             windowSignal.trySend(Unit)
         }
@@ -267,7 +287,12 @@ internal class TcpFlow(
     /** Caller holds [lock]. */
     private fun processData(tcp: TcpHeader, replies: MutableList<ByteArray>) {
         var length = tcp.payloadLength
-        if (length <= 0 && !tcp.fin) return
+        if (length <= 0 && !tcp.fin) {
+            // Keep-alive and zero-window probes (seq = rcvNxt - 1) must be answered with our
+            // current window, or a lost window update would stall the app forever.
+            if (tcp.seq != rcvNxt) replies += buildPacket(sndNxt, TCP_ACK)
+            return
+        }
         if (clientFinReceived) {
             replies += buildPacket(sndNxt, TCP_ACK)
             return
@@ -286,29 +311,72 @@ internal class TcpFlow(
             seq += trim
         }
         if (seq != rcvNxt) {
-            replies += buildPacket(sndNxt, TCP_ACK) // out of order: duplicate ACK, app retransmits
+            // A hole before this segment: keep it for reassembly so the app's kernel only has to
+            // resend the missing piece, then send a duplicate ACK to trigger its fast retransmit.
+            bufferOutOfOrder(seq, tcp.packet.data, offset, length, tcp.fin)
+            replies += buildPacket(sndNxt, TCP_ACK)
             return
         }
+        if (!deliver(tcp.packet.data, offset, length, tcp.fin)) {
+            replies += buildPacket(sndNxt, TCP_ACK) // window full: the rest is resent later
+            return
+        }
+        drainOutOfOrder()
+        replies += buildPacket(sndNxt, TCP_ACK)
+    }
+
+    /** Delivers in-order bytes (and FIN) to the upstream queue. False if the window cut it short. */
+    private fun deliver(data: ByteArray, offset: Int, length: Int, fin: Boolean): Boolean {
         if (length > 0) {
             val accept = minOf(length, receiveWindow())
             if (accept > 0) {
-                val chunk = tcp.packet.data.copyOfRange(offset, offset + accept)
+                val chunk = data.copyOfRange(offset, offset + accept)
                 queuedForUpstream.addAndGet(accept)
                 toUpstream.trySend(chunk)
                 rcvNxt += accept
                 onBytes(accept.toLong(), 0)
             }
-            if (accept < length) {
-                replies += buildPacket(sndNxt, TCP_ACK) // window full: the rest is dropped and resent later
-                return
-            }
+            if (accept < length) return false
         }
-        if (tcp.fin) {
+        if (fin) {
             rcvNxt += 1
             clientFinReceived = true
             toUpstream.trySend(FIN_MARKER)
+            outOfOrder.clear()
+            outOfOrderBytes = 0
         }
-        replies += buildPacket(sndNxt, TCP_ACK)
+        return true
+    }
+
+    private fun bufferOutOfOrder(seq: Int, data: ByteArray, offset: Int, length: Int, fin: Boolean) {
+        val distance = seq - rcvNxt
+        if (length <= 0 || distance <= 0 || distance >= RECEIVE_BUFFER) return
+        if (outOfOrderBytes + length > MAX_OUT_OF_ORDER_BYTES) return
+        if (outOfOrder.any { it.seq == seq && it.data.size >= length }) return
+        outOfOrder += Pending(seq, data.copyOfRange(offset, offset + length), fin)
+        outOfOrderBytes += length
+    }
+
+    /** Moves now-contiguous buffered segments into the in-order stream. */
+    private fun drainOutOfOrder() {
+        while (outOfOrder.isNotEmpty() && !clientFinReceived) {
+            val next = outOfOrder.filter { seqLe(it.seq, rcvNxt) }.minByOrNull { it.seq - rcvNxt } ?: break
+            outOfOrder.remove(next)
+            outOfOrderBytes -= next.data.size
+            val skip = rcvNxt - next.seq
+            if (skip >= next.data.size) {
+                if (next.fin && skip == next.data.size) deliver(next.data, 0, 0, fin = true)
+                continue
+            }
+            if (!deliver(next.data, skip, next.data.size - skip, next.fin)) {
+                // Window filled up while draining: keep the undelivered tail for later.
+                val consumed = rcvNxt - next.seq
+                val tail = next.data.copyOfRange(consumed, next.data.size)
+                outOfOrder += Pending(rcvNxt, tail, next.fin)
+                outOfOrderBytes += tail.size
+                break
+            }
+        }
     }
 
     private suspend fun upstreamWriter(up: FlowUpstream) {
@@ -322,7 +390,12 @@ internal class TcpFlow(
                 queuedForUpstream.addAndGet(-chunk.size)
                 var update: ByteArray? = null
                 synchronized(lock) {
-                    if (state != State.CLOSED && lastAdvertisedWindow < WINDOW_UPDATE_THRESHOLD &&
+                    if (state != State.CLOSED && outOfOrder.isNotEmpty()) {
+                        val before = rcvNxt
+                        drainOutOfOrder()
+                        if (rcvNxt != before) update = buildPacket(sndNxt, TCP_ACK)
+                    }
+                    if (update == null && state != State.CLOSED && lastAdvertisedWindow < WINDOW_UPDATE_THRESHOLD &&
                         receiveWindow() >= WINDOW_UPDATE_THRESHOLD
                     ) {
                         update = buildPacket(sndNxt, TCP_ACK)
@@ -409,6 +482,13 @@ internal class TcpFlow(
         if (close) finish()
     }
 
+    /** One-line snapshot of the sequence state, for diagnostics. */
+    fun debugState(): String = synchronized(lock) {
+        "state=$state una=${sndUna - iss} nxt=${sndNxt - iss} inflight=${sndNxt - sndUna} peerWin=$peerWindow " +
+            "unacked=${unacked.size} rto=$rto retries=$retries recovery=$inRecovery rcvNxt=$rcvNxt " +
+            "queued=${queuedForUpstream.get()} ooo=${outOfOrder.size} advWin=$lastAdvertisedWindow finSent=$finSent clientFin=$clientFinReceived"
+    }
+
     // ------------------------------------------------------------------ helpers (caller holds lock)
 
     private fun receiveWindow(): Int = (RECEIVE_BUFFER - queuedForUpstream.get()).coerceIn(0, 0xFFFF)
@@ -433,9 +513,10 @@ internal class TcpFlow(
         private val FIN_MARKER = ByteArray(0)
         const val RECEIVE_BUFFER = 0xFFFF
         private const val WINDOW_UPDATE_THRESHOLD = 16 * 1024
+        private const val MAX_OUT_OF_ORDER_BYTES = 256 * 1024
         private const val READ_CHUNK = 32 * 1024
         private const val MIN_MSS = 536
-        private const val INITIAL_RTO_MS = 300L
+        private const val INITIAL_RTO_MS = 250L
         private const val MAX_RTO_MS = 4_000L
         private const val MAX_RETRIES = 10
         private const val CONNECT_TIMEOUT_MS = 20_000L
