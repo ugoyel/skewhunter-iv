@@ -63,6 +63,12 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    lint {
+        lintConfig = file("lint.xml")
+        warningsAsErrors = false
+        abortOnError = true
+    }
+
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
@@ -80,6 +86,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.service)
     implementation(libs.androidx.datastore.preferences)
+    // ActivityResult APIs need fragment >= 1.3; the code scanner pulls in an older one transitively.
+    implementation(libs.androidx.fragment.ktx)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

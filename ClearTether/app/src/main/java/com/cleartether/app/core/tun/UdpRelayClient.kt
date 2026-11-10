@@ -53,7 +53,9 @@ internal class UdpRelayClient(
                     launch(blocking) { receiveLoop() }
                     // Association ends when the host closes the control connection.
                     val sink = ByteArray(64)
-                    while (ctl.read(sink) >= 0) Unit
+                    while (ctl.read(sink) >= 0) {
+                        // Nothing is expected on the control channel.
+                    }
                 } catch (e: Exception) {
                     if (!closed) markUnsupportedIfHandshakeFailed()
                 } finally {

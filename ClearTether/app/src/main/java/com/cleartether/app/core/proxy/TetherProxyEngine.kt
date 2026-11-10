@@ -438,7 +438,9 @@ class TetherProxyEngine(
                 // The association lives exactly as long as the TCP control connection.
                 val sink = ByteArray(256)
                 try {
-                    while (client.read(sink) >= 0) Unit
+                    while (client.read(sink) >= 0) {
+                        // Discard: the client only closes this connection to end the association.
+                    }
                 } finally {
                     relay.close()
                 }

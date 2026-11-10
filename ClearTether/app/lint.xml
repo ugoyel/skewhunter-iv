@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- targetSdk 36 is Google Play's current requirement. Moving to 37 needs a review of
+         Android 17's local-network-access rules first: ClearTether is entirely LAN traffic. -->
+    <issue id="OldTargetApi" severity="ignore" />
+</lint>
