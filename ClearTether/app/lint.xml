@@ -3,4 +3,11 @@
     <!-- targetSdk 36 is Google Play's current requirement. Moving to 37 needs a review of
          Android 17's local-network-access rules first: ClearTether is entirely LAN traffic. -->
     <issue id="OldTargetApi" severity="ignore" />
+    <!-- Pinned to the exact framework jar Robolectric expects (offline screenshot runs). -->
+    <issue id="NewerVersionAvailable">
+        <ignore regexp="android-all-instrumented" />
+    </issue>
+    <issue id="GradleDependency">
+        <ignore regexp="android-all-instrumented" />
+    </issue>
 </lint>

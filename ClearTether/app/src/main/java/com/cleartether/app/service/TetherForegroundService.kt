@@ -12,6 +12,8 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.cleartether.app.AppGraph
 import com.cleartether.app.R
+import com.cleartether.app.core.net.AddressPolicy
+import com.cleartether.app.core.net.Cidr
 import com.cleartether.app.core.net.DirectUpstreamConnector
 import com.cleartether.app.core.proxy.ClientRegistry
 import com.cleartether.app.core.proxy.CompositeTrafficMeter
@@ -188,9 +190,12 @@ class TetherForegroundService : Service() {
 
         runtime.host.value = HostStatus.Starting(HostStartStep.STARTING_PROXY)
         val endpoint = TetherEndpoint(group.networkName, group.passphrase, group.ownerAddress.hostAddress!!, settings.port)
+        // ACLs follow the real group subnet (192.168.49.0/24 on AOSP, but some OEM builds differ).
+        val groupSubnet = Cidr(group.ownerAddress, 24)
         val config = ProxyConfig(
             bindAddress = group.ownerAddress,
             port = settings.port,
+            policy = AddressPolicy(allowedClientNetworks = listOf(groupSubnet), blockedDestinationNetworks = listOf(groupSubnet)),
             captivePortalMitigation = settings.captivePortalAssist,
         )
         val proxy = TetherProxyEngine(
@@ -308,8 +313,11 @@ class TetherForegroundService : Service() {
 
     private suspend fun statsLoop() {
         var lastText = ""
+        var ticks = 0L
         while (scope.isActive) {
             delay(STATS_INTERVAL_MS)
+            // Re-arm the (timeout-bounded) wake lock so multi-hour sessions keep the CPU awake.
+            if (++ticks % WAKELOCK_REFRESH_TICKS == 0L) runCatching { wakeLock?.acquire(WAKELOCK_TIMEOUT_MS) }
             graph.runtime.devices.value = registry.snapshot()
             val text = notificationText()
             if (text != lastText) {
@@ -428,6 +436,7 @@ class TetherForegroundService : Service() {
         private const val STATS_INTERVAL_MS = 2_000L
         private const val LIMIT_GRACE_MS = 5 * 60_000L
         private const val WAKELOCK_TIMEOUT_MS = 12 * 60 * 60_000L
+        private const val WAKELOCK_REFRESH_TICKS = 30 * 60_000L / STATS_INTERVAL_MS
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(

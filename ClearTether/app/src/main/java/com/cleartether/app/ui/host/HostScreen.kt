@@ -333,7 +333,7 @@ private fun FreeTierCard(state: MainUiState, nowWallMs: Long, onUpgrade: () -> U
                 if (coolingDown) stringResource(R.string.free_card_cooldown, Format.duration(next - nowWallMs))
                 else stringResource(
                     R.string.free_card_body,
-                    Format.duration(state.session.remainingMs.coerceAtMost(state.freeTier.sessionTime.inWholeMilliseconds)),
+                    Format.allowance(state.session.remainingMs.coerceAtMost(state.freeTier.sessionTime.inWholeMilliseconds)),
                     Format.bytes(state.session.remainingBytes.coerceAtMost(state.freeTier.sessionBytes)),
                 ),
                 style = MaterialTheme.typography.bodyMedium,

@@ -12,6 +12,13 @@ val keystoreProps = Properties().apply {
 }
 fun secret(key: String): String? = keystoreProps.getProperty(key) ?: System.getenv(key)
 
+val robolectricSdk: Configuration = configurations.create("robolectricSdk") { isTransitive = false }
+val robolectricSdkDir = layout.buildDirectory.dir("robolectric-sdk")
+val syncRobolectricSdk = tasks.register<Sync>("syncRobolectricSdk") {
+    from(robolectricSdk)
+    into(robolectricSdkDir)
+}
+
 android {
     namespace = "com.cleartether.app"
     compileSdk = 37
@@ -71,6 +78,25 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all { test ->
+            // Screenshot tests (Robolectric + Roborazzi) only run when explicitly requested:
+            //   ./gradlew :app:testDebugUnitTest -Pscreenshots --tests '*ScreenshotTest*'
+            test.systemProperty("roborazzi.test.record", "true")
+            test.systemProperty("ct.screenshots", project.hasProperty("screenshots").toString())
+            test.systemProperty("ct.screenshot.dir", rootProject.file("docs/screenshots").absolutePath)
+            test.maxHeapSize = "2g"
+            // Robolectric's own downloader doesn't work behind every proxy, so Gradle resolves the
+            // Android framework jar and Robolectric runs offline against it.
+            if (project.hasProperty("screenshots")) test.dependsOn(syncRobolectricSdk) else test.exclude("**/ScreenshotTest*")
+            test.systemProperty("robolectric.offline", "true")
+            test.jvmArgs(
+                "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED",
+                "--add-opens=java.base/java.io=ALL-UNNAMED",
+                "--add-opens=java.base/jdk.internal.access=ALL-UNNAMED",
+            )
+            test.systemProperty("robolectric.dependency.dir", robolectricSdkDir.get().asFile.absolutePath)
+        }
     }
 
     packaging {
@@ -105,4 +131,12 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(libs.androidx.test.ext.junit)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
+    robolectricSdk(libs.robolectric.android.all)
 }
