@@ -24,11 +24,14 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.cleartether.app.billing.BillingRepository
+import com.cleartether.app.billing.PremiumPlan
 import com.cleartether.app.core.share.NdefCodec
 import com.cleartether.app.core.share.WifiCredentials
 import com.cleartether.app.core.share.WifiQr
@@ -249,27 +252,38 @@ class MainActivity : ComponentActivity(), PlatformActions {
     }
 
     override fun scanQr() {
-        val options = GmsBarcodeScannerOptions.Builder()
-            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-            .enableAutoZoom()
-            .build()
-        GmsBarcodeScanning.getClient(this, options).startScan()
-            .addOnSuccessListener { barcode ->
-                val credentials = barcode.rawValue?.let(WifiQr::decode)
-                    ?: barcode.wifi?.let { w -> w.ssid?.let { WifiCredentials(it, w.password.orEmpty()) } }
-                if (credentials != null) {
-                    viewModel.saveScannedHost(credentials)
-                } else {
-                    Toast.makeText(this, R.string.toast_not_wifi_qr, Toast.LENGTH_LONG).show()
+        // The scanner is a Google Play services module: on devices without it (or before its
+        // on-demand download finishes) it fails, so fail soft and offer the camera-app route.
+        val started = runCatching {
+            val options = GmsBarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                .enableAutoZoom()
+                .build()
+            GmsBarcodeScanning.getClient(this, options).startScan()
+                .addOnSuccessListener { barcode ->
+                    val credentials = barcode.rawValue?.let(WifiQr::decode)
+                        ?: barcode.wifi?.let { w -> w.ssid?.let { WifiCredentials(it, w.password.orEmpty()) } }
+                    if (credentials != null) {
+                        viewModel.saveScannedHost(credentials)
+                    } else {
+                        Toast.makeText(this, R.string.toast_not_wifi_qr, Toast.LENGTH_LONG).show()
+                    }
                 }
-            }
-            .addOnFailureListener {
-                Toast.makeText(this, R.string.toast_scanner_unavailable, Toast.LENGTH_LONG).show()
-            }
+                .addOnFailureListener { scannerUnavailable() }
+        }
+        if (started.isFailure) scannerUnavailable()
     }
 
-    override fun purchase() {
-        graph.billing.launchPurchase(this)
+    private fun scannerUnavailable() {
+        Toast.makeText(this, R.string.toast_scanner_unavailable, Toast.LENGTH_LONG).show()
+    }
+
+    override fun purchase(plan: PremiumPlan) {
+        graph.billing.launchPurchase(this, plan)
+    }
+
+    override fun openManageSubscription() {
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, BillingRepository.manageSubscriptionUrl(packageName).toUri())) }
     }
 
     override fun copy(label: String, value: String) {

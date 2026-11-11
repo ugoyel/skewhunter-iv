@@ -15,6 +15,8 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cleartether.app.billing.BillingState
+import com.cleartether.app.billing.PlanPeriod
+import com.cleartether.app.billing.PremiumPlan
 import com.cleartether.app.core.proxy.ClientStats
 import com.cleartether.app.core.proxy.TetherEndpoint
 import com.cleartether.app.core.session.FreeTierPolicy
@@ -55,6 +57,13 @@ class ScreenshotTest {
     private val endpoint = TetherEndpoint("DIRECT-CT-ClearTether-4F2A", "k7Qm-x9Tp-R2vw", "192.168.49.1", 8228)
     private val hostSettings = HostSettings("ClearTether-4F2A", "k7Qm-x9Tp-R2vw")
     private val noopHost = HostActions({}, {}, { _, _ -> }, {}, {}, {})
+    private val plans = BillingState(
+        loaded = true,
+        plans = listOf(
+            PremiumPlan(PlanPeriod.MONTH, "$2.99", 2_990_000, "USD"),
+            PremiumPlan(PlanPeriod.YEAR, "$14.99", 14_990_000, "USD", freeTrialDays = 3),
+        ),
+    )
 
     @Before
     fun gate() = assumeTrue("set -Pscreenshots to render", System.getProperty("ct.screenshots") == "true")
@@ -72,7 +81,7 @@ class ScreenshotTest {
 
     @Test
     fun hostIdle() = render("01-host-idle", dark = false) {
-        HostScreen(MainUiState(hostSettings = hostSettings, session = freeIdle(), billing = BillingState(formattedPrice = "$9.99")), 0, true, noopHost)
+        HostScreen(MainUiState(hostSettings = hostSettings, session = freeIdle(), billing = plans), 0, true, noopHost)
     }
 
     @Test
@@ -83,15 +92,15 @@ class ScreenshotTest {
                 hostSettings = hostSettings,
                 session = SessionState(
                     active = true, elapsedMs = 6 * 60_000, bytesUploaded = 9 * mb, bytesDownloaded = 47 * mb,
-                    remainingMs = 9 * 60_000 + 12_000, remainingBytes = 44 * mb,
-                    timeLimitMs = 15 * 60_000, dataLimitBytes = 100 * mb,
+                    remainingMs = 24 * 60_000 + 12_000, remainingBytes = Long.MAX_VALUE,
+                    timeLimitMs = 30 * 60_000, dataLimitBytes = 0,
                 ),
                 devices = listOf(
                     ClientStats("192.168.49.23", 6 * mb, 38 * mb, 14, 0, 0),
                     ClientStats("192.168.49.57", 2 * mb, 8 * mb, 4, 0, 0),
                     ClientStats("192.168.49.104", 1 * mb, 1 * mb, 0, 0, 0),
                 ),
-                billing = BillingState(formattedPrice = "$9.99"),
+                billing = plans,
             ),
             0, true, noopHost,
         )
@@ -128,11 +137,11 @@ class ScreenshotTest {
     fun paywall() {
         compose.setContent {
             ClearTetherTheme(darkTheme = false) {
-                PaywallDialog(PaywallReason.TIME_LIMIT, BillingState(formattedPrice = "$9.99"), FreeTierPolicy(), null, {}, {}, {})
+                PaywallDialog(PaywallReason.TIME_LIMIT, plans, FreeTierPolicy(), null, {}, {}, {})
             }
         }
         captureScreenRoboImage("$dir/05-paywall.png")
     }
 
-    private fun freeIdle() = SessionState(remainingMs = 15 * 60_000, remainingBytes = 100 * mb, timeLimitMs = 15 * 60_000, dataLimitBytes = 100 * mb)
+    private fun freeIdle() = SessionState(remainingMs = 30 * 60_000, remainingBytes = Long.MAX_VALUE, timeLimitMs = 30 * 60_000)
 }

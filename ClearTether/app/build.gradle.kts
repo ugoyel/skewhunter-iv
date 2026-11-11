@@ -27,12 +27,16 @@ android {
         applicationId = "com.cleartether.app"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        // CI passes -PversionCode=<n> so every Play upload gets a higher code.
+        versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 2
+        versionName = "1.1.0"
 
         val licenseKey = (project.findProperty("CLEARTETHER_PLAY_LICENSE_KEY") as String?).orEmpty()
         buildConfigField("String", "PLAY_LICENSE_KEY", "\"$licenseKey\"")
-        buildConfigField("String", "PREMIUM_PRODUCT_ID", "\"cleartether_premium_lifetime\"")
+        // Play Console catalogue: subscription with base plans "monthly" + "yearly", and an
+        // optional one-time "lifetime" product (shown only if it exists in Play Console).
+        buildConfigField("String", "SUBSCRIPTION_PRODUCT_ID", "\"cleartether_premium\"")
+        buildConfigField("String", "LIFETIME_PRODUCT_ID", "\"cleartether_premium_lifetime\"")
     }
 
     signingConfigs {
@@ -88,7 +92,7 @@ android {
             test.maxHeapSize = "2g"
             // Robolectric's own downloader doesn't work behind every proxy, so Gradle resolves the
             // Android framework jar and Robolectric runs offline against it.
-            if (project.hasProperty("screenshots")) test.dependsOn(syncRobolectricSdk) else test.exclude("**/ScreenshotTest*")
+            if (project.hasProperty("screenshots")) test.dependsOn(syncRobolectricSdk) else test.exclude("**/*ScreenshotTest*")
             test.systemProperty("robolectric.offline", "true")
             test.jvmArgs(
                 "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED",

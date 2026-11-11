@@ -51,6 +51,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cleartether.app.R
+import com.cleartether.app.billing.PremiumPlan
 import com.cleartether.app.data.AppMode
 import com.cleartether.app.data.ClientStatus
 import com.cleartether.app.data.HostStatus
@@ -71,7 +72,8 @@ interface PlatformActions {
     fun requestHostStart()
     fun requestClientStart()
     fun scanQr()
-    fun purchase()
+    fun purchase(plan: PremiumPlan)
+    fun openManageSubscription()
     fun copy(label: String, value: String)
     fun openWifiSettings()
     fun openAppSettings()
@@ -160,6 +162,7 @@ fun ClearTetherAppUi(viewModel: MainViewModel, platform: PlatformActions, debugP
                             onBatterySettings = platform::openBatterySettings,
                             onUpgrade = { viewModel.showPaywall() },
                             onRestore = { viewModel.restorePurchases() },
+                            onManageSubscription = platform::openManageSubscription,
                             onPrivacy = { showPrivacy = true },
                             onDebugPremium = viewModel::setDebugPremium,
                         ),

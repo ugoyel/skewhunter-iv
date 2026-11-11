@@ -26,8 +26,9 @@ devices over Wi-Fi Direct. No hotspot plan, no root.**
   and company security agents keep working.
 - **Captive-portal assist.** OS connectivity checks are answered instantly, so devices show
   "Connected".
-- **Freemium.** Free sessions get 15 minutes or 100 MB; a one-time **lifetime Premium**
-  purchase (Google Play Billing) unlocks unlimited tethering.
+- **Freemium.** Free plan: 30 minutes of sharing per day, then devices disconnect automatically.
+  **Premium** (monthly or yearly subscription via Google Play Billing, free trial on yearly)
+  unlocks unlimited sharing.
 
 > **How "transparent" works without root.** A non-rooted phone can't forward other devices'
 > packets, and a `VpnService` only sees the phone's *own* apps. So ClearTether relays traffic
@@ -77,8 +78,8 @@ Release signing reads `keystore.properties` (git-ignored) or environment variabl
 - Proxy engine: CONNECT tunnelling (2 MiB, SHA-256 verified), HTTP forwarding and header
   hygiene, captive-portal answers, PAC/profile/portal, DoH endpoint, SOCKS4a/SOCKS5 including UDP
   ASSOCIATE, ACLs, pause/resume, 64 concurrent tunnels.
-- Session manager (virtual time): data and time limits, carry-over, cooldown, mid-session
-  upgrade.
+- Session manager (virtual time): 30-minute daily allowance, optional data cap, carry-over,
+  midnight reset, mid-session upgrade. Billing plan maths (trial length, yearly savings).
 - Packet codecs, DNS cache/failover/truncation, NFC Type 4 APDU flow, Wi-Fi QR escaping.
 - **Kernel end-to-end** (`KernelTunE2ETest`, runs as root on Linux with `/dev/net/tun`,
   `ip` and `python3`; skipped otherwise): real kernel TCP → TUN → user-space stack → proxy →
@@ -89,21 +90,15 @@ Release signing reads `keystore.properties` (git-ignored) or environment variabl
 
 CI: `.github/workflows/cleartether-android.yml` builds, lints, tests and uploads the APK.
 
-## Publishing checklist (Google Play)
+## Publishing (Google Play)
 
-1. **In-app product:** create a one-time product with ID `cleartether_premium_lifetime`
-   (Monetize → Products → In-app products) and set the price.
-2. **License key:** copy *Monetize → Monetization setup → Licensing* into the Gradle property
-   `CLEARTETHER_PLAY_LICENSE_KEY` (e.g. in `~/.gradle/gradle.properties`) so purchases are
-   signature-verified on device.
-3. **Foreground service declaration:** declare `connectedDevice` ("share the phone's connection
-   with nearby devices over Wi-Fi") with a short demo video.
-4. **VpnService declaration:** Client mode uses `VpnService` for device-to-device connectivity;
-   no traffic goes to third-party servers.
-5. **Permissions:** `NEARBY_WIFI_DEVICES` (Android 13+, `neverForLocation`) and location for
-   Wi-Fi Direct on Android 10–12 only.
-6. **Privacy policy:** host [`docs/PRIVACY.md`](docs/PRIVACY.md) and link it in the listing.
-7. Mention in the listing that some mobile plans restrict tethering; users must follow their
-   carrier's terms.
+Everything for the store is in [`docs/play-store/`](docs/play-store):
+[step-by-step guide](docs/play-store/PUBLISHING.md), [listing text](docs/play-store/listing.md),
+[graphics](docs/play-store/graphics) and the [pricing recommendation](docs/play-store/PRICING.md)
+(monthly $2.99 / ₹99, yearly $14.99 / ₹499 with a 3-day trial). After the first manual upload,
+`.github/workflows/cleartether-release.yml` builds, signs and uploads releases in one click.
 
-Tune the free tier in `FreeTierPolicy` (`core/session/TetherSessionManager.kt`).
+Play Console catalogue: subscription `cleartether_premium` with base plans `monthly` and
+`yearly` (plus an optional one-time `cleartether_premium_lifetime`). Tune the free plan in
+`FreeTierPolicy` (`core/session/TetherSessionManager.kt`). Regenerate store graphics with
+`./gradlew :app:testDebugUnitTest -Pscreenshots --tests '*ScreenshotTest*' && python3 tools/play-store/make_graphics.py`.

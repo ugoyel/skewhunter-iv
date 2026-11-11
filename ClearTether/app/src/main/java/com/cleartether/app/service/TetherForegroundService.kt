@@ -76,7 +76,6 @@ class TetherForegroundService : Service() {
     private val registry = ClientRegistry()
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
-    private var limitGraceJob: Job? = null
     private var teardownJob: Job? = null
     @Volatile private var stopping = false
 
@@ -116,7 +115,7 @@ class TetherForegroundService : Service() {
         val settings = graph.settings.hostSettings()
 
         when (val eligibility = graph.session.eligibility(premium)) {
-            is SessionEligibility.CoolingDown -> return fail(HostErrorKind.FREE_LIMIT_COOLDOWN, retryAt = eligibility.availableAtWallMs)
+            is SessionEligibility.CoolingDown -> return fail(HostErrorKind.FREE_LIMIT_REACHED, retryAt = eligibility.availableAtWallMs)
             is SessionEligibility.Allowed -> Unit
         }
         val wd = WifiDirectManager(this).also { wifiDirect = it }
@@ -125,9 +124,9 @@ class TetherForegroundService : Service() {
         if (!wd.isWifiEnabled) return fail(HostErrorKind.WIFI_DISABLED)
 
         acquireLocks()
-        if (!graph.session.start(scope, premium)) return fail(HostErrorKind.FREE_LIMIT_COOLDOWN)
+        if (!graph.session.start(scope, premium)) return fail(HostErrorKind.FREE_LIMIT_REACHED)
         graph.session.onLimitReached = { reason ->
-            engine?.pause(limitMessage(reason))
+            engine?.pause(limitMessage(reason)) // drop traffic immediately, on the relay thread
             scope.launch { onLimitReached(reason) }
         }
         coroutineScope {
@@ -271,31 +270,24 @@ class TetherForegroundService : Service() {
         val status = when {
             session.premium -> getString(R.string.site_status_premium)
             session.limitReached != null -> getString(R.string.site_status_ended)
-            else -> getString(R.string.site_status_free, Format.duration(session.remainingMs), Format.bytes(session.remainingBytes))
+            else -> getString(R.string.site_status_free, Format.duration(session.remainingMs))
         }
         return HostSiteInfo(endpoint, paused = engine?.isPaused == true, statusLine = status)
     }
 
     // ------------------------------------------------------------------ monetisation hooks
 
-    private suspend fun onLimitReached(reason: LimitReason) {
-        updateRunning { it.copy(pausedFor = reason) }
+    /** Free allowance used up: disconnect every device now and point the user to Premium. */
+    private fun onLimitReached(reason: LimitReason) {
+        if (graph.billing.isPremium.value) return
         Notifications.limitReached(this, limitMessage(reason))
-        updateNotification()
-        // Keep the group up for a while so an in-app upgrade resumes instantly without clients
-        // having to rejoin; then stop to save battery.
-        limitGraceJob?.cancel()
-        limitGraceJob = scope.launch {
-            delay(LIMIT_GRACE_MS)
-            if (!graph.billing.isPremium.value) stopTethering()
-        }
+        fail(HostErrorKind.FREE_LIMIT_REACHED, retryAt = graph.session.nextResetWallMs())
     }
 
     private suspend fun observePremium() {
         graph.billing.isPremium.collect { premium ->
             graph.session.setPremium(premium)
             if (premium && engine?.isPaused == true) {
-                limitGraceJob?.cancel()
                 engine?.resume()
                 Notifications.cancelAlert(this)
                 updateRunning { it.copy(pausedFor = null) }
@@ -305,7 +297,7 @@ class TetherForegroundService : Service() {
     }
 
     private fun limitMessage(reason: LimitReason) = when (reason) {
-        LimitReason.TIME -> getString(R.string.limit_time_message)
+        LimitReason.TIME -> graph.freeTier.dailyTime.inWholeMinutes.toInt().let { resources.getQuantityString(R.plurals.limit_time_message, it, it) }
         LimitReason.DATA -> getString(R.string.limit_data_message)
     }
 
@@ -399,7 +391,6 @@ class TetherForegroundService : Service() {
 
     /** Synchronous part of teardown (also used from onDestroy). */
     private fun releaseNow() {
-        limitGraceJob?.cancel()
         engine?.stop()
         engine = null
         wifiDirect?.close()
@@ -434,7 +425,6 @@ class TetherForegroundService : Service() {
         private const val RECOVERY_BACKOFF_MS = 1_500L
         private const val GROUP_POLL_MS = 5_000L
         private const val STATS_INTERVAL_MS = 2_000L
-        private const val LIMIT_GRACE_MS = 5 * 60_000L
         private const val WAKELOCK_TIMEOUT_MS = 12 * 60 * 60_000L
         private const val WAKELOCK_REFRESH_TICKS = 30 * 60_000L / STATS_INTERVAL_MS
 

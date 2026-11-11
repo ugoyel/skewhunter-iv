@@ -13,27 +13,33 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.net.InetAddress
+import java.time.Instant
+import java.time.ZoneId
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 
 /**
- * Free-tier rules. A free session allows [sessionTime] **or** [sessionBytes], whichever comes
- * first. Usage carries over when the user stops and restarts, so toggling doesn't reset the
- * meter. The allowance refills once the tether has been idle for [cooldown].
+ * Free-tier rules: [dailyTime] of sharing per calendar day (device time zone), plus an optional
+ * [dailyBytes] cap (null = no data cap). When the allowance runs out, sharing disconnects.
+ * Usage carries over when the user stops and restarts, so toggling doesn't reset the meter.
+ * The allowance refills at local midnight.
  */
 data class FreeTierPolicy(
-    val sessionTime: Duration = 15.minutes,
-    val sessionBytes: Long = 100L * 1024 * 1024,
-    val cooldown: Duration = 10.minutes,
-)
+    val dailyTime: Duration = 30.minutes,
+    val dailyBytes: Long? = null,
+) {
+    val timeMs: Long get() = dailyTime.inWholeMilliseconds
+    val bytes: Long get() = dailyBytes ?: Long.MAX_VALUE
+    val hasDataCap: Boolean get() = dailyBytes != null
+}
 
 /** Persisted free-tier usage. */
 data class QuotaSnapshot(
     val usedMs: Long = 0,
     val usedBytes: Long = 0,
-    /** Wall-clock time the tether was last active (used to evaluate the cooldown). */
+    /** Wall-clock time the tether was last active (used to detect a new day). */
     val lastActiveWallMs: Long = 0,
 )
 
@@ -48,6 +54,7 @@ enum class LimitReason { TIME, DATA }
 /** Whether a new session may start right now. */
 sealed interface SessionEligibility {
     data class Allowed(val remainingMs: Long, val remainingBytes: Long, val unlimited: Boolean) : SessionEligibility
+    /** Today's allowance is used up; it refills at [availableAtWallMs] (next local midnight). */
     data class CoolingDown(val availableAtWallMs: Long) : SessionEligibility
 }
 
@@ -86,6 +93,7 @@ class TetherSessionManager(
     private val policy: FreeTierPolicy = FreeTierPolicy(),
     private val elapsedClock: () -> Long,
     private val wallClock: () -> Long = System::currentTimeMillis,
+    private val zone: () -> ZoneId = ZoneId::systemDefault,
 ) : TrafficMeter {
 
     private val _state = MutableStateFlow(SessionState())
@@ -113,12 +121,12 @@ class TetherSessionManager(
     suspend fun eligibility(isPremium: Boolean): SessionEligibility {
         if (isPremium) return SessionEligibility.Allowed(Long.MAX_VALUE, Long.MAX_VALUE, unlimited = true)
         val quota = effectiveQuota(store.load())
-        val remainingMs = policy.sessionTime.inWholeMilliseconds - quota.usedMs
-        val remainingBytes = policy.sessionBytes - quota.usedBytes
+        val remainingMs = policy.timeMs - quota.usedMs
+        val remainingBytes = policy.bytes - quota.usedBytes
         return if (remainingMs > 0 && remainingBytes > 0) {
             SessionEligibility.Allowed(remainingMs, remainingBytes, unlimited = false)
         } else {
-            SessionEligibility.CoolingDown(quota.lastActiveWallMs + policy.cooldown.inWholeMilliseconds)
+            SessionEligibility.CoolingDown(nextResetWallMs())
         }
     }
 
@@ -129,7 +137,7 @@ class TetherSessionManager(
     suspend fun start(scope: CoroutineScope, isPremium: Boolean): Boolean {
         if (active) return true
         val quota = effectiveQuota(store.load())
-        if (!isPremium && (quota.usedMs >= policy.sessionTime.inWholeMilliseconds || quota.usedBytes >= policy.sessionBytes)) {
+        if (!isPremium && (quota.usedMs >= policy.timeMs || quota.usedBytes >= policy.bytes)) {
             publish()
             return false
         }
@@ -179,7 +187,7 @@ class TetherSessionManager(
         publish()
     }
 
-    /** Refreshes [state] while idle so the UI can show allowance and cooldown. */
+    /** Refreshes [state] while idle so the UI can show today's allowance and reset time. */
     suspend fun refreshIdleState(isPremium: Boolean) {
         if (active) return
         premium = isPremium
@@ -188,27 +196,27 @@ class TetherSessionManager(
         carriedBytes = quota.usedBytes
         uploaded.set(0)
         downloaded.set(0)
-        val exhausted = quota.usedMs >= policy.sessionTime.inWholeMilliseconds || quota.usedBytes >= policy.sessionBytes
+        val exhausted = quota.usedMs >= policy.timeMs || quota.usedBytes >= policy.bytes
         limitReason = when {
             isPremium || !exhausted -> null
-            quota.usedBytes >= policy.sessionBytes -> LimitReason.DATA
+            quota.usedBytes >= policy.bytes -> LimitReason.DATA
             else -> LimitReason.TIME
         }
-        publish(lastActiveWallMs = quota.lastActiveWallMs)
+        publish()
     }
 
     override fun onTraffic(client: InetAddress, uploaded: Long, downloaded: Long) {
         if (!active) return
         if (uploaded > 0) this.uploaded.addAndGet(uploaded)
         if (downloaded > 0) this.downloaded.addAndGet(downloaded)
-        if (!premium && carriedBytes + this.uploaded.get() + this.downloaded.get() >= policy.sessionBytes) {
+        if (!premium && policy.hasDataCap && carriedBytes + this.uploaded.get() + this.downloaded.get() >= policy.bytes) {
             fireLimit(LimitReason.DATA)
         }
     }
 
     private fun checkTimeLimit() {
         if (!active || premium) return
-        if (carriedMs + (elapsedClock() - startedAt) >= policy.sessionTime.inWholeMilliseconds) fireLimit(LimitReason.TIME)
+        if (carriedMs + (elapsedClock() - startedAt) >= policy.timeMs) fireLimit(LimitReason.TIME)
     }
 
     private fun fireLimit(reason: LimitReason) {
@@ -226,35 +234,34 @@ class TetherSessionManager(
             QuotaSnapshot(carriedMs, carriedBytes, wallClock())
         } else {
             QuotaSnapshot(
-                usedMs = (carriedMs + sessionMs).coerceAtMost(policy.sessionTime.inWholeMilliseconds),
-                usedBytes = (carriedBytes + uploaded.get() + downloaded.get()).coerceAtMost(policy.sessionBytes),
+                usedMs = (carriedMs + sessionMs).coerceAtMost(policy.timeMs),
+                usedBytes = (carriedBytes + uploaded.get() + downloaded.get()).coerceAtMost(policy.bytes),
                 lastActiveWallMs = wallClock(),
             )
         }
         runCatching { store.save(snapshot) }
     }
 
-    /** Applies the cooldown: an allowance idle for long enough refills completely. */
+    /** The allowance is per calendar day: usage recorded on an earlier day doesn't count. */
     private fun effectiveQuota(saved: QuotaSnapshot): QuotaSnapshot {
-        val idleFor = wallClock() - saved.lastActiveWallMs
-        return if (saved.lastActiveWallMs == 0L || idleFor >= policy.cooldown.inWholeMilliseconds || idleFor < 0) {
-            QuotaSnapshot(0, 0, saved.lastActiveWallMs)
-        } else {
-            saved
-        }
+        val now = wallClock()
+        val sameDay = saved.lastActiveWallMs in 1..now && day(saved.lastActiveWallMs) == day(now)
+        return if (sameDay) saved else QuotaSnapshot(0, 0, saved.lastActiveWallMs)
     }
 
-    private fun publish(lastActiveWallMs: Long? = null) {
-        val limitMs = policy.sessionTime.inWholeMilliseconds
+    private fun day(wallMs: Long) = Instant.ofEpochMilli(wallMs).atZone(zone()).toLocalDate()
+
+    /** Next local midnight: when today's free allowance refills. */
+    fun nextResetWallMs(): Long =
+        day(wallClock()).plusDays(1).atStartOfDay(zone()).toInstant().toEpochMilli()
+
+    private fun publish() {
+        val limitMs = policy.timeMs
         val elapsed = if (active) elapsedClock() - startedAt else 0L
         val up = uploaded.get()
         val down = downloaded.get()
         val reason = limitReason
-        val nextFree = when {
-            premium || reason == null -> null
-            active -> wallClock() + policy.cooldown.inWholeMilliseconds
-            else -> (lastActiveWallMs ?: wallClock()) + policy.cooldown.inWholeMilliseconds
-        }
+        val nextFree = if (premium || reason == null) null else nextResetWallMs()
         _state.value = SessionState(
             active = active,
             premium = premium,
@@ -262,9 +269,9 @@ class TetherSessionManager(
             bytesUploaded = up,
             bytesDownloaded = down,
             remainingMs = if (premium) Long.MAX_VALUE else (limitMs - carriedMs - elapsed).coerceAtLeast(0),
-            remainingBytes = if (premium) Long.MAX_VALUE else (policy.sessionBytes - carriedBytes - up - down).coerceAtLeast(0),
+            remainingBytes = if (premium || !policy.hasDataCap) Long.MAX_VALUE else (policy.bytes - carriedBytes - up - down).coerceAtLeast(0),
             timeLimitMs = if (premium) 0 else limitMs,
-            dataLimitBytes = if (premium) 0 else policy.sessionBytes,
+            dataLimitBytes = if (premium || !policy.hasDataCap) 0 else policy.bytes,
             limitReached = if (premium) null else reason,
             nextFreeSessionAtWallMs = nextFree,
         )

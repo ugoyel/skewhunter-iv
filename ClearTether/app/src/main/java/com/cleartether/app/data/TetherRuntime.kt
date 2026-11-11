@@ -14,7 +14,7 @@ enum class HostErrorKind {
     GROUP_FAILED,
     GROUP_LOST,
     PORT_IN_USE,
-    FREE_LIMIT_COOLDOWN,
+    FREE_LIMIT_REACHED,
     UNKNOWN,
 }
 

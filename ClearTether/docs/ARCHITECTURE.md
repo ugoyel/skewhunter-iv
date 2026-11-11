@@ -127,21 +127,24 @@ full-duplex transfers finish byte-exact in about 4 s under loss and about 1 s wi
 
 `TetherSessionManager` meters every relayed byte through atomics on the hot path.
 
-- **Free tier:** each session gets **15 minutes or 100 MB**, whichever comes first. Usage
-  *carries over* when sharing is stopped and restarted, so toggling can't reset it. The allowance refills
-  after **10 minutes** idle (`FreeTierPolicy` sets all three numbers).
-- **Data limit:** fires synchronously on the relay thread that crosses it. `TetherProxyEngine.pause()`
-  closes every tunnel, and new requests get a friendly `503` page explaining how to upgrade.
-- **Time limit:** a 1 Hz ticker drives the countdown in the UI and the notification.
-- **Grace period:** the Wi-Fi group stays up for 5 minutes after the limit, so an in-app
-  purchase resumes all devices instantly without rejoining.
+- **Free plan:** **30 minutes of sharing per calendar day** (device time zone), with no data cap
+  by default (`FreeTierPolicy.dailyBytes` can add one). Usage *carries over* when sharing is
+  stopped and restarted, so toggling can't reset it. The allowance refills at local midnight.
+- **Auto-disconnect:** when the allowance runs out, `TetherProxyEngine.pause()` drops traffic on the
+  spot. The service then tears down the Wi-Fi Direct group, so every device disconnects, and
+  posts an "Upgrade" notification. A 1 Hz ticker drives the countdown in the UI and notification.
 - **Paywall triggers:** the limit event (in-app overlay), the notification action "Upgrade"
-  (`EXTRA_SHOW_PAYWALL`), the cooldown on start, and the toolbar/session-card buttons.
-- **Billing:** a one-time product `cleartether_premium_lifetime` (Play Billing 9,
-  `enableAutoServiceReconnection`, pending purchases). Purchases are signature-verified with
-  the Play license key (`CLEARTETHER_PLAY_LICENSE_KEY`) and acknowledged. Entitlement is cached
-  in DataStore for offline use, and re-checked against Play on every launch, so refunds and
-  revocations are honoured.
+  (`EXTRA_SHOW_PAYWALL`), tapping start with no minutes left, and the toolbar/free-plan buttons.
+- **Billing (Play Billing 9):** subscription `cleartether_premium` with base plans `monthly` and
+  `yearly`, plus a free-trial offer. Play returns only the offers a user is eligible for, so trials
+  show for new subscribers only. An optional one-time `cleartether_premium_lifetime` is shown if
+  it exists. The paywall lists the plans with Play's localized prices, the yearly saving, the trial
+  length and the auto-renewal terms; Settings links to Play's subscription center. Purchases are
+  signature-verified with the Play license key (`CLEARTETHER_PLAY_LICENSE_KEY`) and acknowledged.
+  Entitlement is cached in DataStore for offline use and re-checked against Play on every
+  launch, so expiry, cancellation, refunds and revocations are honoured.
+- **Release builds:** ML Kit's QR scanner instantiates its component registrars by reflection. R8
+  full mode dropped their constructors, which crashed the scanner, so `proguard-rules.pro` keeps them.
 
 ## 5. Foreground service and lifecycle
 

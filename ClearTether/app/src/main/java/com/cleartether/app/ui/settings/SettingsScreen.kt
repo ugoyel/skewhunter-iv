@@ -15,6 +15,7 @@ import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.ManageAccounts
 import androidx.compose.material.icons.rounded.Nfc
 import androidx.compose.material.icons.rounded.Policy
 import androidx.compose.material.icons.rounded.Refresh
@@ -63,6 +64,7 @@ data class SettingsActions(
     val onBatterySettings: () -> Unit,
     val onUpgrade: () -> Unit,
     val onRestore: () -> Unit,
+    val onManageSubscription: () -> Unit,
     val onPrivacy: () -> Unit,
     val onDebugPremium: (Boolean) -> Unit,
 )
@@ -100,8 +102,13 @@ fun SettingsScreen(state: MainUiState, hostRunning: Boolean, debugPremium: Boole
         if (state.premium) {
             Item(Icons.Rounded.WorkspacePremium, stringResource(R.string.settings_premium_active), stringResource(R.string.settings_premium_thanks)) {}
         } else {
-            Item(Icons.Rounded.WorkspacePremium, stringResource(R.string.settings_premium_upgrade), state.billing.formattedPrice ?: stringResource(R.string.settings_premium_lifetime)) {
+            Item(Icons.Rounded.WorkspacePremium, stringResource(R.string.settings_premium_upgrade), stringResource(R.string.settings_premium_plans)) {
                 actions.onUpgrade()
+            }
+        }
+        if (state.billing.subscribed) {
+            Item(Icons.Rounded.ManageAccounts, stringResource(R.string.settings_manage_sub), stringResource(R.string.settings_manage_sub_hint)) {
+                actions.onManageSubscription()
             }
         }
         Item(Icons.Rounded.Refresh, stringResource(R.string.action_restore), stringResource(R.string.settings_restore_hint)) { actions.onRestore() }

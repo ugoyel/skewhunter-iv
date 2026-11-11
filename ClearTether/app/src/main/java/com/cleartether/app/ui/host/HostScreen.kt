@@ -251,16 +251,18 @@ private fun SessionCard(state: MainUiState, onUpgrade: () -> Unit) {
             progress = 1f - s.timeProgress,
             warn = s.remainingMs < 120_000,
         )
-        MeterRow(
-            label = stringResource(R.string.meter_data_left),
-            value = Format.bytes(s.remainingBytes),
-            progress = 1f - s.dataProgress,
-            warn = s.remainingBytes < 10L * 1024 * 1024,
-        )
+        if (state.freeTier.hasDataCap) {
+            MeterRow(
+                label = stringResource(R.string.meter_data_left),
+                value = Format.bytes(s.remainingBytes),
+                progress = 1f - s.dataProgress,
+                warn = s.remainingBytes < 10L * 1024 * 1024,
+            )
+        }
         Text(
             pluralStringResource(
-                R.plurals.session_free_explainer, state.freeTier.sessionTime.inWholeMinutes.toInt(),
-                state.freeTier.sessionTime.inWholeMinutes, Format.bytes(state.freeTier.sessionBytes),
+                R.plurals.session_free_explainer, state.freeTier.dailyTime.inWholeMinutes.toInt(),
+                state.freeTier.dailyTime.inWholeMinutes,
             ),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -333,8 +335,8 @@ private fun FreeTierCard(state: MainUiState, nowWallMs: Long, onUpgrade: () -> U
                 if (coolingDown) stringResource(R.string.free_card_cooldown, Format.duration(next - nowWallMs))
                 else stringResource(
                     R.string.free_card_body,
-                    Format.allowance(state.session.remainingMs.coerceAtMost(state.freeTier.sessionTime.inWholeMilliseconds)),
-                    Format.bytes(state.session.remainingBytes.coerceAtMost(state.freeTier.sessionBytes)),
+                    Format.allowance(state.freeTier.timeMs),
+                    Format.allowance(state.session.remainingMs.coerceAtMost(state.freeTier.timeMs)),
                 ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -344,7 +346,7 @@ private fun FreeTierCard(state: MainUiState, nowWallMs: Long, onUpgrade: () -> U
                 onClick = onUpgrade,
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary, contentColor = MaterialTheme.colorScheme.onTertiary),
             ) {
-                Text(state.billing.formattedPrice?.let { stringResource(R.string.action_unlock_price, it) } ?: stringResource(R.string.action_unlock))
+                Text(stringResource(R.string.action_see_plans))
             }
         }
     }
@@ -381,7 +383,7 @@ private fun ErrorBanner(error: HostStatus.Error, nowWallMs: Long, actions: HostA
         HostErrorKind.GROUP_FAILED -> stringResource(R.string.err_group_failed)
         HostErrorKind.GROUP_LOST -> stringResource(R.string.err_group_lost)
         HostErrorKind.PORT_IN_USE -> stringResource(R.string.err_port)
-        HostErrorKind.FREE_LIMIT_COOLDOWN -> stringResource(
+        HostErrorKind.FREE_LIMIT_REACHED -> stringResource(
             R.string.err_cooldown, Format.duration(((error.retryAtWallMs ?: nowWallMs) - nowWallMs).coerceAtLeast(0)),
         )
         HostErrorKind.UNKNOWN -> stringResource(R.string.err_unknown, error.detail.orEmpty())
@@ -390,7 +392,7 @@ private fun ErrorBanner(error: HostStatus.Error, nowWallMs: Long, actions: HostA
         when (error.kind) {
             HostErrorKind.WIFI_DISABLED -> Button(onClick = actions.onOpenWifiSettings) { Text(stringResource(R.string.action_turn_on_wifi)) }
             HostErrorKind.PERMISSION_MISSING -> Button(onClick = actions.onOpenAppSettings) { Text(stringResource(R.string.action_settings)) }
-            HostErrorKind.FREE_LIMIT_COOLDOWN -> Button(onClick = actions.onUpgrade) { Text(stringResource(R.string.action_upgrade)) }
+            HostErrorKind.FREE_LIMIT_REACHED -> Button(onClick = actions.onUpgrade) { Text(stringResource(R.string.action_upgrade)) }
             else -> Unit
         }
     }

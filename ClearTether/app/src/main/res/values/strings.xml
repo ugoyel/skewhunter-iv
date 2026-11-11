@@ -18,10 +18,10 @@
     <string name="host_step_group">Creating Wi-Fi network…</string>
     <string name="host_step_proxy">Starting secure relay…</string>
     <string name="host_step_recovering">Restoring Wi-Fi network…</string>
-    <string name="host_sub_idle">Share your mobile data with laptops, Macs, iPhones and Android devices over Wi-Fi Direct. No hotspot plan needed.</string>
+    <string name="host_sub_idle">Share your phone\'s internet with laptops, Macs, iPhones and Android devices over a private Wi-Fi Direct network.</string>
     <string name="host_sub_running">Devices join \"%1$s\". Traffic is relayed by this phone with TLS left untouched.</string>
     <string name="pill_paused">Paused: upgrade to continue</string>
-    <string name="banner_paused">Your free session has ended. Connected devices stay joined for 5 minutes, so upgrading resumes instantly.</string>
+    <string name="banner_paused">Today\'s free time is used. Disconnecting devices…</string>
     <string name="card_join_title">Connect a device</string>
     <string name="tab_join_wifi">1. Join Wi-Fi</string>
     <string name="tab_setup_page">2. Setup page</string>
@@ -39,7 +39,7 @@
     <string name="label_connections">Open connections</string>
     <string name="label_command">Command</string>
     <string name="nfc_hint">Tap another Android phone to the back of this one to share the network over NFC.</string>
-    <string name="card_session_title">Free session</string>
+    <string name="card_session_title">Free plan</string>
     <string name="meter_time_left">Time left</string>
     <string name="meter_data_left">Data left</string>
     <string name="premium_unlimited">Premium: unlimited tethering</string>
@@ -51,14 +51,12 @@
     <string name="setup_card_body">Join the Wi-Fi network, then point the system proxy at %1$s. The setup guide has one-tap scripts for Windows, macOS and Linux.</string>
     <string name="action_setup_guide">Setup guide</string>
     <string name="action_copy_pac">Copy URL</string>
-    <string name="free_card_title">Free tier</string>
-    <string name="free_card_body">Your next session includes %1$s or %2$s. Go Premium for unlimited time and data.</string>
-    <string name="free_card_cooldown">Free allowance used. The next free session unlocks in %1$s, or go Premium to continue now.</string>
-    <string name="action_unlock">Unlock Premium</string>
-    <string name="action_unlock_price">Unlock forever: %1$s</string>
+    <string name="free_card_title">Free plan</string>
+    <string name="free_card_body">Includes %1$s of sharing every day. %2$s left today. Premium removes the limit.</string>
+    <string name="free_card_cooldown">Today\'s free minutes are used. They reset at midnight (in %1$s), or go Premium to share right now.</string>
     <string name="how_title">How ClearTether works</string>
     <string name="how_step1_title">Private Wi-Fi Direct network</string>
-    <string name="how_step1_body">Your phone creates its own WPA2 Wi-Fi network. Carrier hotspot provisioning isn\'t involved.</string>
+    <string name="how_step1_body">Your phone creates its own secure WPA2 network just for your devices.</string>
     <string name="how_step2_title">Scan, tap or install</string>
     <string name="how_step2_body">iPhones and Androids join with a QR code or NFC tap. Laptops get a one-time proxy script.</string>
     <string name="how_step3_title">Corporate-safe</string>
@@ -72,7 +70,7 @@
     <string name="err_group_failed">Android refused to create the Wi-Fi Direct network. Toggle Wi-Fi off and on, then try again.</string>
     <string name="err_group_lost">The Wi-Fi Direct network kept dropping. Check battery-saver settings and try again.</string>
     <string name="err_port">The relay port is in use. Pick another port in Settings.</string>
-    <string name="err_cooldown">Free allowance used. The next free session unlocks in %1$s.</string>
+    <string name="err_cooldown">Today\'s free minutes are used, so sharing stopped. Free sharing resumes in %1$s, or go Premium now.</string>
     <string name="err_unknown">Something went wrong. %1$s</string>
     <string name="action_turn_on_wifi">Turn on Wi-Fi</string>
     <string name="action_settings">Settings</string>
@@ -110,26 +108,20 @@
     <string name="msg_host_saved">Saved host %1$s</string>
     <string name="toast_scan_first">Scan the host\'s QR code first</string>
     <string name="toast_not_wifi_qr">That isn\'t a Wi-Fi QR code</string>
-    <string name="toast_scanner_unavailable">QR scanner unavailable. Enter the details manually.</string>
+    <string name="toast_scanner_unavailable">QR scanner isn\'t available yet (Google Play services is still downloading it). Try again in a minute, or tap Enter manually.</string>
     <string name="toast_turn_on_wifi">Turn on Wi-Fi. ClearTether needs the radio, not a connection.</string>
     <string name="toast_copied">%1$s copied</string>
     <string name="paywall_title">ClearTether Premium</string>
-    <string name="paywall_reason_time">Your %1$d-minute free session has ended.</string>
     <string name="paywall_reason_data">You\'ve used the %1$s free allowance.</string>
-    <string name="paywall_reason_cooldown">Your next free session unlocks in %1$s.</string>
-    <string name="paywall_reason_upgrade">Unlimited tethering for every device, forever.</string>
-    <string name="benefit_unlimited_title">Unlimited time and data</string>
-    <string name="benefit_unlimited_body">No session timer, no data cap.</string>
-    <string name="benefit_no_wait_title">No cooldowns</string>
-    <string name="benefit_no_wait_body">Share whenever you need to, all day.</string>
-    <string name="benefit_devices_title">Every device</string>
-    <string name="benefit_devices_body">Office laptop, MacBook, iPhone and Android at the same time.</string>
-    <string name="benefit_support_title">Support independent development</string>
-    <string name="benefit_support_body">One purchase, with updates included.</string>
-    <string name="paywall_cta">Unlock lifetime Premium</string>
-    <string name="paywall_cta_price">Unlock lifetime: %1$s</string>
+    <string name="paywall_reason_cooldown">Free minutes reset in %1$s. Premium lets you share now.</string>
+    <string name="paywall_reason_upgrade">Unlimited sharing for every device.</string>
+    <string name="benefit_unlimited_title">Unlimited sharing</string>
+    <string name="benefit_unlimited_body">No daily time limit and no data cap.</string>
+    <string name="benefit_no_wait_title">Never cut off</string>
+    <string name="benefit_no_wait_body">Devices stay connected for as long as you share: through meetings, downloads and calls.</string>
+    <string name="benefit_devices_title">All your devices</string>
+    <string name="benefit_devices_body">Office laptop, MacBook, iPhone and Android, at the same time.</string>
     <string name="paywall_pending">Waiting for payment…</string>
-    <string name="paywall_fine_print">One-time purchase through Google Play. No subscription. Restores on every device signed in to your Google account.</string>
     <string name="action_restore">Restore purchase</string>
     <string name="action_not_now">Not now</string>
     <string name="action_upgrade">Upgrade</string>
@@ -170,7 +162,6 @@
     <string name="settings_premium_active">Premium active</string>
     <string name="settings_premium_thanks">Thank you for supporting ClearTether!</string>
     <string name="settings_premium_upgrade">Upgrade to Premium</string>
-    <string name="settings_premium_lifetime">Lifetime license</string>
     <string name="settings_restore_hint">Bought on another device? Restore it here</string>
     <string name="settings_about">About</string>
     <string name="settings_privacy">Privacy</string>
@@ -188,18 +179,17 @@
     <string name="notif_running_title">Sharing on %1$s</string>
     <string name="notif_paused_title">Free session ended</string>
     <string name="notif_paused_text">Tap Upgrade to resume immediately</string>
-    <string name="notif_limit_title">Your free ClearTether session has ended</string>
+    <string name="notif_limit_title">Free sharing time is up</string>
     <string name="notif_client_connecting">Connecting to host…</string>
     <string name="notif_client_connecting_text">Joining the host\'s Wi-Fi network</string>
     <string name="notif_client_connected">Using host internet</string>
     <string name="notif_client_reconnecting">Host connection lost</string>
     <string name="notif_client_reconnecting_text">Waiting for the host Wi-Fi to return</string>
     <string name="notif_client_text">↓ %1$s  ↑ %2$s</string>
-    <string name="limit_time_message">The free session time limit was reached. Upgrade to Premium for unlimited tethering.</string>
-    <string name="limit_data_message">The free data allowance was used. Upgrade to Premium for unlimited tethering.</string>
+    <string name="limit_data_message">Today\'s free data is used, so connected devices were disconnected. Go Premium for unlimited sharing.</string>
     <string name="site_status_premium">Premium: unlimited session</string>
     <string name="site_status_ended">Free session ended</string>
-    <string name="site_status_free">Free session: %1$s or %2$s left</string>
+    <string name="site_status_free">Free plan: %1$s left today</string>
     <string name="cd_copy">Copy %1$s</string>
     <string name="cd_show">Show password</string>
     <string name="cd_hide">Hide password</string>
@@ -224,11 +214,51 @@
         <item quantity="other">%1$s • %2$d devices</item>
     </plurals>
     <plurals name="session_free_explainer">
-        <item quantity="one">Free sessions include %1$d minute or %2$s, whichever comes first.</item>
-        <item quantity="other">Free sessions include %1$d minutes or %2$s, whichever comes first.</item>
+        <item quantity="one">Free plan: %1$d minute of sharing per day. Devices disconnect automatically when it runs out.</item>
+        <item quantity="other">Free plan: %1$d minutes of sharing per day. Devices disconnect automatically when it runs out.</item>
     </plurals>
     <plurals name="settings_name_hint">
         <item quantity="one">Up to %1$d character. Clients that already joined will need to rejoin.</item>
         <item quantity="other">Up to %1$d characters. Clients that already joined will need to rejoin.</item>
+    </plurals>
+    <string name="action_see_plans">See Premium plans</string>
+    <string name="plan_yearly">Yearly</string>
+    <string name="plan_monthly">Monthly</string>
+    <string name="plan_lifetime">Lifetime</string>
+    <string name="plan_per_year">%1$s/year</string>
+    <string name="plan_per_month">%1$s/month</string>
+    <string name="plan_yearly_equiv">Only %1$s a month, billed yearly</string>
+    <string name="plan_monthly_hint">Flexible: cancel anytime</string>
+    <string name="plan_lifetime_hint">Pay once, keep Premium forever</string>
+    <string name="plan_badge_save">SAVE %1$d%%</string>
+    <string name="paywall_cta_generic">Go Premium</string>
+    <string name="paywall_cta_subscribe">Subscribe: %1$s</string>
+    <string name="paywall_cta_lifetime">Buy once: %1$s</string>
+    <string name="paywall_terms_sub">%1$s, renews automatically until you cancel. Cancel anytime in Google Play → Payments &amp; subscriptions.</string>
+    <string name="paywall_terms_lifetime">One-time purchase through Google Play. No subscription.</string>
+    <string name="paywall_loading">Loading prices from Google Play…</string>
+    <string name="paywall_unavailable">Premium plans aren\'t available on this install. Install ClearTether from Google Play to upgrade.</string>
+    <string name="settings_premium_plans">Monthly or yearly plans</string>
+    <string name="settings_manage_sub">Manage subscription</string>
+    <string name="settings_manage_sub_hint">Change plan or cancel in Google Play</string>
+    <plurals name="plan_trial">
+        <item quantity="one">%1$d-day free trial</item>
+        <item quantity="other">%1$d-day free trial</item>
+    </plurals>
+    <plurals name="paywall_cta_trial">
+        <item quantity="one">Start %1$d-day free trial</item>
+        <item quantity="other">Start %1$d-day free trial</item>
+    </plurals>
+    <plurals name="paywall_terms_trial">
+        <item quantity="one">Free for %1$d day, then %2$s. Renews automatically until you cancel. Cancel anytime before the trial ends to avoid being charged (Google Play → Payments &amp; subscriptions).</item>
+        <item quantity="other">Free for %1$d days, then %2$s. Renews automatically until you cancel. Cancel anytime before the trial ends to avoid being charged (Google Play → Payments &amp; subscriptions).</item>
+    </plurals>
+    <plurals name="paywall_reason_time">
+        <item quantity="one">Your %1$d free minute for today are used up.</item>
+        <item quantity="other">Your %1$d free minutes for today are used up.</item>
+    </plurals>
+    <plurals name="limit_time_message">
+        <item quantity="one">Today\'s %1$d free minute are used, so connected devices were disconnected. Go Premium for unlimited sharing.</item>
+        <item quantity="other">Today\'s %1$d free minutes are used, so connected devices were disconnected. Go Premium for unlimited sharing.</item>
     </plurals>
 </resources>
