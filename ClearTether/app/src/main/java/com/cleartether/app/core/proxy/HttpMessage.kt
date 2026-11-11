@@ -1,0 +1,157 @@
+package com.cleartether.app.core.proxy
+
+import com.cleartether.app.core.net.AsyncSocket
+import com.cleartether.app.core.net.BufferedAsyncReader
+import java.io.IOException
+import java.util.Locale
+
+/** A parsed HTTP/1.x request head (request line and headers). */
+class HttpRequestHead(
+    val method: String,
+    val target: String,
+    val version: String,
+    val headers: List<Pair<String, String>>,
+) {
+    fun header(name: String): String? = headers.firstOrNull { it.first.equals(name, ignoreCase = true) }?.second
+
+    val path: String get() = target.substringBefore('?')
+    val query: String? get() = target.substringAfter('?', "").ifEmpty { null }
+
+    companion object {
+        /** Parses the head bytes (including the terminating blank line). Returns null if malformed. */
+        fun parse(raw: ByteArray): HttpRequestHead? {
+            val text = String(raw, Charsets.ISO_8859_1)
+            val lines = text.split("\r\n", "\n").dropLastWhile { it.isEmpty() }
+            if (lines.isEmpty()) return null
+            val parts = lines[0].split(' ').filter { it.isNotEmpty() }
+            if (parts.size != 3 || !parts[2].startsWith("HTTP/1.")) return null
+            val method = parts[0].uppercase(Locale.ROOT)
+            if (method.any { !it.isLetter() }) return null
+            val headers = ArrayList<Pair<String, String>>(lines.size)
+            for (line in lines.drop(1)) {
+                val colon = line.indexOf(':')
+                if (colon <= 0) return null
+                headers += line.substring(0, colon).trim() to line.substring(colon + 1).trim()
+            }
+            return HttpRequestHead(method, parts[1], parts[2], headers)
+        }
+
+        /** Reads a request head from [reader]. Returns null on EOF before a complete head. */
+        suspend fun read(reader: BufferedAsyncReader, maxBytes: Int = MAX_HEAD_BYTES, timeoutMs: Long = 0): HttpRequestHead? {
+            while (true) {
+                val end = reader.indexOfHeaderEnd()
+                if (end >= 0) return parse(reader.take(end)) ?: throw HttpProtocolException("Malformed request")
+                if (reader.buffered > maxBytes) throw HttpProtocolException("Request head too large")
+                if (!reader.fillMore(timeoutMs)) return null
+            }
+        }
+
+        const val MAX_HEAD_BYTES = 64 * 1024
+    }
+}
+
+class HttpProtocolException(message: String) : IOException(message)
+
+/** host:port target parsed from a CONNECT authority or absolute URI. */
+data class HostPort(val host: String, val port: Int) {
+    /** Authority form; IPv6 literals are bracketed. */
+    override fun toString(): String = if (host.contains(':')) "[$host]:$port" else "$host:$port"
+
+    companion object {
+        fun parseAuthority(authority: String, defaultPort: Int): HostPort? {
+            if (authority.isEmpty()) return null
+            val host: String
+            val portText: String?
+            if (authority.startsWith('[')) {
+                val close = authority.indexOf(']')
+                if (close < 0) return null
+                host = authority.substring(1, close)
+                portText = authority.substring(close + 1).removePrefix(":").ifEmpty { null }
+            } else {
+                val colon = authority.lastIndexOf(':')
+                if (colon >= 0 && authority.indexOf(':') == colon) {
+                    host = authority.substring(0, colon)
+                    portText = authority.substring(colon + 1)
+                } else {
+                    host = authority
+                    portText = null
+                }
+            }
+            if (host.isEmpty() || host.any { it.isWhitespace() || it == '/' || it == '@' }) return null
+            val port = portText?.toIntOrNull() ?: if (portText == null) defaultPort else return null
+            if (port !in 1..65535) return null
+            return HostPort(host.lowercase(Locale.ROOT), port)
+        }
+    }
+}
+
+/** Absolute-form request target, e.g. `http://example.com:8080/a?b`. */
+data class AbsoluteUri(val scheme: String, val hostPort: HostPort, val pathAndQuery: String) {
+    companion object {
+        fun parse(target: String): AbsoluteUri? {
+            val schemeEnd = target.indexOf("://")
+            if (schemeEnd <= 0) return null
+            val scheme = target.substring(0, schemeEnd).lowercase(Locale.ROOT)
+            val rest = target.substring(schemeEnd + 3)
+            val pathStart = rest.indexOfAny(charArrayOf('/', '?')).let { if (it < 0) rest.length else it }
+            val authority = rest.substring(0, pathStart).substringAfterLast('@')
+            val defaultPort = when (scheme) { "http" -> 80; "https" -> 443; else -> return null }
+            val hostPort = HostPort.parseAuthority(authority, defaultPort) ?: return null
+            val path = rest.substring(pathStart).let { if (it.isEmpty()) "/" else if (it.startsWith('?')) "/$it" else it }
+            return AbsoluteUri(scheme, hostPort, path)
+        }
+    }
+}
+
+/** A fully buffered response generated by the proxy itself (local pages, errors, captive portal). */
+class HttpResponse(
+    val status: Int,
+    val reason: String,
+    val contentType: String? = null,
+    val body: ByteArray = ByteArray(0),
+    val extraHeaders: List<Pair<String, String>> = emptyList(),
+) {
+    fun encode(headOnly: Boolean = false): ByteArray {
+        val head = buildString {
+            append("HTTP/1.1 ").append(status).append(' ').append(reason).append("\r\n")
+            if (contentType != null) append("Content-Type: ").append(contentType).append("\r\n")
+            append("Content-Length: ").append(body.size).append("\r\n")
+            append("Cache-Control: no-store\r\n")
+            append("Connection: close\r\n")
+            for ((k, v) in extraHeaders) append(k).append(": ").append(v).append("\r\n")
+            append("\r\n")
+        }.toByteArray(Charsets.ISO_8859_1)
+        return if (headOnly || body.isEmpty()) head else head + body
+    }
+
+    suspend fun writeTo(socket: AsyncSocket, headOnly: Boolean = false) = socket.writeFully(encode(headOnly))
+
+    companion object {
+        fun text(status: Int, reason: String, text: String, contentType: String = "text/plain; charset=utf-8") =
+            HttpResponse(status, reason, contentType, text.toByteArray(Charsets.UTF_8))
+
+        fun html(status: Int, reason: String, html: String) = text(status, reason, html, "text/html; charset=utf-8")
+
+        fun errorPage(status: Int, reason: String, detail: String): HttpResponse = html(
+            status, reason,
+            """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ClearTether - $status</title><style>body{font-family:system-ui,sans-serif;background:#0b1416;color:#e6f4f1;display:flex;
+min-height:100vh;align-items:center;justify-content:center;margin:0}main{max-width:520px;padding:32px}h1{color:#2ee6c5;font-size:22px}
+p{line-height:1.5;color:#b5cdc8}</style></head><body><main><h1>${escapeHtml(reason)}</h1><p>${escapeHtml(detail)}</p>
+<p style="font-size:13px;opacity:.7">ClearTether proxy</p></main></body></html>""",
+        )
+    }
+}
+
+internal fun escapeHtml(s: String): String = buildString(s.length) {
+    for (c in s) when (c) {
+        '<' -> append("&lt;"); '>' -> append("&gt;"); '&' -> append("&amp;")
+        '"' -> append("&quot;"); '\'' -> append("&#39;"); else -> append(c)
+    }
+}
+
+/** Hop-by-hop headers that must not be forwarded by a proxy (RFC 9110 section 7.6.1). */
+internal val HOP_BY_HOP_HEADERS = setOf(
+    "connection", "proxy-connection", "keep-alive", "proxy-authorization", "proxy-authenticate",
+    "te", "trailer", "upgrade",
+)
