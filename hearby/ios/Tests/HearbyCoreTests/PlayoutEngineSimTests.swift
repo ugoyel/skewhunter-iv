@@ -30,7 +30,7 @@ final class PlayoutEngineSimTests: XCTestCase {
         static let hostEpochUs: Int64 = 7_000_000_000
         static let blockFrames: Int64 = 64 // position ramp repeats every 1.28 s
         static let sum: Float = 71_000
-        static let ring = 8192
+        static let ringFrames = 8192
         static let sinkBuffer = 3840 // 80 ms, like a typical AudioTrack
 
         let p: Params
@@ -155,7 +155,7 @@ final class PlayoutEngineSimTests: XCTestCase {
 
         // MARK: audio output: fixed latency, its own sample clock
 
-        private var ring = [Float](repeating: 0, count: Sim.ring * 2)
+        private var ring = [Float](repeating: 0, count: Sim.ringFrames * 2)
         private var consumed: Int64 = 0
         private var written: Int64 = 0
         private let periodNs: Double
@@ -173,7 +173,7 @@ final class PlayoutEngineSimTests: XCTestCase {
                 }
                 slots += 1
                 if consumed < written {
-                    let i = Int(consumed % Int64(Sim.ring)) * 2
+                    let i = Int(consumed % Int64(Sim.ringFrames)) * 2
                     observe(ring[i], ring[i + 1], heardNs: Int64(nextConsumeNs) + p.sinkLatencyUs * 1000)
                     consumed += 1
                 } else if written > 0 {
@@ -193,7 +193,7 @@ final class PlayoutEngineSimTests: XCTestCase {
                 }
                 let n = min(room, frames - done)
                 for k in 0..<n {
-                    let i = Int((written + Int64(k)) % Int64(Sim.ring)) * 2
+                    let i = Int((written + Int64(k)) % Int64(Sim.ringFrames)) * 2
                     ring[i] = interleaved[2 * (done + k)]
                     ring[i + 1] = interleaved[2 * (done + k) + 1]
                 }

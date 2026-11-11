@@ -104,11 +104,11 @@ final class PlayoutEngine {
 
     private var ts = SinkTimestamp()
     private let packet = JitterPacket()
-    private var pcm = [Float](repeating: 0, count: frame * ch)
-    private var resampled = [Float](repeating: 0, count: outCapacity * ch)
-    private let silence = [Float](repeating: 0, count: frame * ch)
-    private var tail = [Float](repeating: 0, count: fade * ch)
-    private let resampler = Resampler(channels: ch, maxInputFrames: frame)
+    private var pcm = [Float](repeating: 0, count: PlayoutEngine.frame * PlayoutEngine.ch)
+    private var resampled = [Float](repeating: 0, count: PlayoutEngine.outCapacity * PlayoutEngine.ch)
+    private let silence = [Float](repeating: 0, count: PlayoutEngine.frame * PlayoutEngine.ch)
+    private var tail = [Float](repeating: 0, count: PlayoutEngine.fade * PlayoutEngine.ch)
+    private let resampler = Resampler(channels: PlayoutEngine.ch, maxInputFrames: PlayoutEngine.frame)
 
     private var written: Int64 = 0
     private var nextSeq: Int64 = -1

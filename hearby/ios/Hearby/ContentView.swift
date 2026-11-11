@@ -156,7 +156,7 @@ private struct ListeningView: View {
             symbol: status.outputIsBluetooth ? "airpodspro" : "headphones",
             active: status.phase == .playing,
             title: title(for: status),
-            detail: "Listening to \(status.hostName)" + (status.outputName.isEmpty ? "" : " on \(status.outputName)")
+            detail: detail(for: status)
         ) {
             if status.phase == .playing {
                 HStack {
@@ -176,9 +176,7 @@ private struct ListeningView: View {
             Notice(text: message)
         }
         if status.lateBiasMs > 0 && status.phase == .playing {
-            Notice(text: "This device needs more time than the host's \(status.playoutDelayMs) ms sync buffer allows, so it plays "
-                + "\(status.lateBiasMs) ms behind the others. Ask the host to pick a larger sync buffer"
-                + (status.offsetMs < 0 ? ", or move the offset slider back toward 0." : "."))
+            Notice(text: lateNotice(for: status))
         }
 
         OffsetCard(receiver: receiver)
@@ -193,6 +191,17 @@ private struct ListeningView: View {
             Button("Leave", role: .destructive) { receiver.leave() }
                 .buttonStyle(SecondaryButtonStyle(tint: .red))
         }
+    }
+
+    private func detail(for status: ReceiverStatus) -> String {
+        status.outputName.isEmpty ? "Listening to \(status.hostName)" : "Listening to \(status.hostName) on \(status.outputName)"
+    }
+
+    private func lateNotice(for status: ReceiverStatus) -> String {
+        var text = "This device needs more time than the host's \(status.playoutDelayMs) ms sync buffer allows, "
+        text += "so it plays \(status.lateBiasMs) ms behind the others. Ask the host to pick a larger sync buffer"
+        text += status.offsetMs < 0 ? ", or move the offset slider back toward 0." : "."
+        return text
     }
 
     private func title(for status: ReceiverStatus) -> String {
@@ -265,12 +274,17 @@ private struct OffsetCard: View {
             .buttonStyle(.bordered)
             .frame(maxWidth: .infinity)
 
-            Text("If this device sounds late next to the others (typical for AirPods and Bluetooth speakers), move toward −. "
-                + "If it sounds early, move toward +. Remembered separately for each output"
-                + (receiver.status.outputName.isEmpty ? "." : " (now: \(receiver.status.outputName))."))
+            Text(verbatim: hint)
                 .font(.footnote)
                 .foregroundColor(.secondary)
         }
+    }
+
+    private var hint: String {
+        var text = "If this device sounds late next to the others (typical for AirPods and Bluetooth speakers), move toward −. "
+        text += "If it sounds early, move toward +. Remembered separately for each output"
+        text += receiver.status.outputName.isEmpty ? "." : " (now: \(receiver.status.outputName))."
+        return text
     }
 }
 
