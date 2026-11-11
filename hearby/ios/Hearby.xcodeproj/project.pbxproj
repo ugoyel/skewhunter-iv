@@ -1,0 +1,285 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		E07B2B02B2EFAE0CE034113F /* HearbyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAE7926B010F99D6FD223DCB /* HearbyApp.swift */; };
+		473C2DE2C28486AF08F94B36 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74F4418E6801F63A9A89E185 /* ContentView.swift */; };
+		BD521A1AAE85617147D234B4 /* IOSSyncReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E59EB3D66F21381D7642B16 /* IOSSyncReceiver.swift */; };
+		83678796AC5752E73DA1E5CA /* HostBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42AD76F9A2C52B02998135CB /* HostBrowser.swift */; };
+		DD7351EE789DA45FCEB6BB62 /* Protocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A085B19A965A6AFE54EBE32E /* Protocol.swift */; };
+		A7AD96689E936E850C16A490 /* ClockSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10EF6C81DD204FD641E9DF0 /* ClockSync.swift */; };
+		6583031BF121E5B97F4B22FD /* JitterBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78918C7219D3908A22A194D2 /* JitterBuffer.swift */; };
+		F5270BC2F2A8C5697ABFDCA9 /* Resampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E2062EE85740B9CE52C8732 /* Resampler.swift */; };
+		EED7E0BC06840A568D505BB4 /* PlayoutEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBDA240384BCE33120737161 /* PlayoutEngine.swift */; };
+		F3BA8E1741A5024111043325 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9D12909EC911253F87D4CDF5 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A9B32FE2EEF51FFA15EAA9A8 /* Hearby.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hearby.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		BAE7926B010F99D6FD223DCB /* HearbyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HearbyApp.swift; sourceTree = "<group>"; };
+		74F4418E6801F63A9A89E185 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		5E59EB3D66F21381D7642B16 /* IOSSyncReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSSyncReceiver.swift; sourceTree = "<group>"; };
+		42AD76F9A2C52B02998135CB /* HostBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostBrowser.swift; sourceTree = "<group>"; };
+		A085B19A965A6AFE54EBE32E /* Protocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Protocol.swift; sourceTree = "<group>"; };
+		D10EF6C81DD204FD641E9DF0 /* ClockSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClockSync.swift; sourceTree = "<group>"; };
+		78918C7219D3908A22A194D2 /* JitterBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JitterBuffer.swift; sourceTree = "<group>"; };
+		1E2062EE85740B9CE52C8732 /* Resampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Resampler.swift; sourceTree = "<group>"; };
+		FBDA240384BCE33120737161 /* PlayoutEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayoutEngine.swift; sourceTree = "<group>"; };
+		9D12909EC911253F87D4CDF5 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C8E224AB45141C06C0264D9D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		3052AA68E375866EC9C4ABDD /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		F9061E19966D46CECBB6EBB3 = {
+			isa = PBXGroup;
+			children = (
+				96A6A34B01DC454E90ED95D1 /* Hearby */,
+				DB6864FF6E54950AC09D75E9 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		DB6864FF6E54950AC09D75E9 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A9B32FE2EEF51FFA15EAA9A8 /* Hearby.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		96A6A34B01DC454E90ED95D1 /* Hearby */ = {
+			isa = PBXGroup;
+			children = (
+				BAE7926B010F99D6FD223DCB /* HearbyApp.swift */,
+				74F4418E6801F63A9A89E185 /* ContentView.swift */,
+				5E59EB3D66F21381D7642B16 /* IOSSyncReceiver.swift */,
+				42AD76F9A2C52B02998135CB /* HostBrowser.swift */,
+				27352A50C042D80BBB0D19B2 /* Core */,
+				9D12909EC911253F87D4CDF5 /* Assets.xcassets */,
+				C8E224AB45141C06C0264D9D /* Info.plist */,
+			);
+			path = Hearby;
+			sourceTree = "<group>";
+		};
+		27352A50C042D80BBB0D19B2 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				A085B19A965A6AFE54EBE32E /* Protocol.swift */,
+				D10EF6C81DD204FD641E9DF0 /* ClockSync.swift */,
+				78918C7219D3908A22A194D2 /* JitterBuffer.swift */,
+				1E2062EE85740B9CE52C8732 /* Resampler.swift */,
+				FBDA240384BCE33120737161 /* PlayoutEngine.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		B4B34DE3842D34F5F0D814E2 /* Hearby */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C40DED9897008B516A770B09 /* Build configuration list for PBXNativeTarget "Hearby" */;
+			buildPhases = (
+				7F7D47BC447C889336F93207 /* Sources */,
+				3052AA68E375866EC9C4ABDD /* Frameworks */,
+				98C32D66F573270736096556 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Hearby;
+			productName = Hearby;
+			productReference = A9B32FE2EEF51FFA15EAA9A8 /* Hearby.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		C11E1A6B8AFEA7D80A75783D /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					B4B34DE3842D34F5F0D814E2 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = 313368E2ECFDFD1685479843 /* Build configuration list for PBXProject "Hearby" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = F9061E19966D46CECBB6EBB3;
+			productRefGroup = DB6864FF6E54950AC09D75E9 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B4B34DE3842D34F5F0D814E2 /* Hearby */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		98C32D66F573270736096556 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F3BA8E1741A5024111043325 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		7F7D47BC447C889336F93207 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E07B2B02B2EFAE0CE034113F /* HearbyApp.swift in Sources */,
+				473C2DE2C28486AF08F94B36 /* ContentView.swift in Sources */,
+				BD521A1AAE85617147D234B4 /* IOSSyncReceiver.swift in Sources */,
+				83678796AC5752E73DA1E5CA /* HostBrowser.swift in Sources */,
+				DD7351EE789DA45FCEB6BB62 /* Protocol.swift in Sources */,
+				A7AD96689E936E850C16A490 /* ClockSync.swift in Sources */,
+				6583031BF121E5B97F4B22FD /* JitterBuffer.swift in Sources */,
+				F5270BC2F2A8C5697ABFDCA9 /* Resampler.swift in Sources */,
+				EED7E0BC06840A568D505BB4 /* PlayoutEngine.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		52778F722A815A979079E81E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		2B14AAA1525D78E0193F32E7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		E2088FA3EE0FEB37F6BF439A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Hearby/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.ugoyel.hearby;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F938316E64948989FF3A72EC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Hearby/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.ugoyel.hearby;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		313368E2ECFDFD1685479843 /* Build configuration list for PBXProject "Hearby" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				52778F722A815A979079E81E /* Debug */,
+				2B14AAA1525D78E0193F32E7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C40DED9897008B516A770B09 /* Build configuration list for PBXNativeTarget "Hearby" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E2088FA3EE0FEB37F6BF439A /* Debug */,
+				F938316E64948989FF3A72EC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = C11E1A6B8AFEA7D80A75783D /* Project object */;
+}

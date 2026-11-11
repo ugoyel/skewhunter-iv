@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hearby</string>
+    <string name="channel_host">Sharing audio</string>
+    <string name="channel_listen">Listening</string>
+    <string name="notif_host_title">Sharing this phone\'s audio</string>
+    <string name="notif_host_text_none">Waiting for listeners</string>
+    <plurals name="notif_host_text">
+        <item quantity="one">%d listener connected</item>
+        <item quantity="other">%d listeners connected</item>
+    </plurals>
+    <string name="notif_listen_title">Listening to %s</string>
+    <string name="notif_listen_text">Playing in sync</string>
+    <string name="action_stop">Stop</string>
+    <string name="action_leave">Leave</string>
+</resources>
