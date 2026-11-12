@@ -1,13 +1,17 @@
 # Hearby
 
-One Android phone shares whatever it is playing (YouTube, a movie, music) with nearby phones over
-the local Wi-Fi or its own hotspot. Every listener, Android or iPhone, plays it at the same instant,
-through its speaker or its own Bluetooth earbuds. No internet, no accounts, no paid SDKs.
+One phone is the DJ: it plays songs saved on it, and every phone nearby, Android or iPhone, plays
+the same music at the same moment, the DJ's own phone included. It works over the local Wi-Fi or
+the DJ's own hotspot, through each phone's speaker or its own Bluetooth earbuds or speaker. No
+internet, no accounts, no screen sharing, no paid SDKs.
 
-| | Host (shares audio) | Listener |
+A **sound check** then lines every phone up to within about a millisecond: each phone beeps in turn
+and the DJ phone's microphone times the beeps.
+
+| | DJ (plays the music) | Guest (plays along) |
 |---|---|---|
 | Android 10+ (Kotlin, Jetpack Compose) | yes | yes |
-| iOS 15+ (Swift, SwiftUI) | no (iOS cannot capture other apps' audio) | yes |
+| iOS 15+ (Swift, SwiftUI) | not yet | yes |
 
 ```
 hearby/
@@ -18,11 +22,8 @@ hearby/
   store/     Play Store icon and feature graphic
 ```
 
-In the apps, the phone sharing its audio is "the DJ", its session is "the party", and listeners are
-"the crowd". The code and the protocol keep the plainer words host and listener.
-
-```
-```
+In the apps, the phone playing the music is "the DJ", its session is "the party", and listeners
+are "the crowd". The code and the protocol keep the plainer words host and listener.
 
 ## Look and feel
 
@@ -32,7 +33,7 @@ the music actually being played (and settles into a row of dots when it is silen
 someone joins or when a phone locks into sync, and wording to match ("Be the DJ", "The crowd",
 "Finding the beat…").
 
-Android (DJ setup, a live party, finding a party, playing in sync):
+Android (the DJ playing a song, a sound check running, finding a party, a guest in sync):
 
 ![Android screens](docs/screens/android.png)
 
@@ -59,73 +60,87 @@ every run. The images above come from those renders.
 ## How it works
 
 ```
- HOST  (Android)                                                     AudioCaptureAndOpusService.kt
+ DJ PHONE (Android)                                                          PartyHostService.kt
  ┌──────────────────────────────────────────────────────────────────────────────────────────────┐
- │ YouTube / any app                                                                            │
- │      │ playback (usage MEDIA / GAME / UNKNOWN)                                               │
+ │ songs picked from the phone (system file picker: MP3, AAC/M4A, FLAC, Ogg, WAV ...)           │
  │      ▼                                                                                       │
- │ MediaProjection + AudioPlaybackCapture ──▶ AudioRecord   48 kHz · stereo · PCM16             │
- │                                               │ capture thread: read exactly 20 ms (960 fr.) │
- │                                               ▼                                              │
- │                            TimestampSmoother: host monotonic clock, jitter filtered          │
- │                                               ▼                                              │
- │                            MediaCodec "audio/opus" encoder: 1 packet per 20 ms               │
- │                                               ▼                                              │
- │                  ┌ 'H''B' ver type │ seq u32 │ timestamp u64 │ Opus payload ┐  16 B header   │
- │                  └──────────────────────────────────────────────────────────┘                │
- │                                               │ UDP unicast to each listener (DSCP EF)       │
- │ control thread, same socket:  JOIN · SYNC (NTP + keep-alive) · LEAVE · DISCOVER              │
- │ mDNS:  NsdManager registers  _hearby._udp                                                    │
+ │ MusicPlayer: MediaExtractor + MediaCodec decode ─▶ resample to 48 kHz stereo                 │
+ │      ▼                                                                                       │
+ │ sender thread: exactly one 20 ms frame every 20 ms, music or silence (pause never stops it)  │
+ │      ▼                                                                                       │
+ │ MediaCodec "audio/opus" encoder ─▶ ┌ 'H''B' ver type │ seq u32 │ timestamp u64 │ Opus ┐      │
+ │                                    └──────────────────────────────────────────────────┘      │
+ │      ├──────────────▶ this phone's own PlayoutRunner (plays in sync with everyone)           │
+ │      ▼ UDP unicast to each guest (DSCP EF)                                                   │
+ │ control thread: JOIN · SYNC (clock sync + keep-alive) · LEAVE · DISCOVER · NOW_PLAYING       │
+ │ sound check: CHIRP to each phone, microphone times them, OFFSET corrections back             │
+ │ mDNS: NsdManager registers _hearby._udp                                                      │
  └───────────────────────────────────────────────┼──────────────────────────────────────────────┘
-                                                 │  Wi-Fi LAN or the host's hotspot, port 47800
+                                                 │  Wi-Fi LAN or the DJ's hotspot, port 47800
                  ┌───────────────────────────────┴───────────────────────────────┐
                  ▼                                                               ▼
- LISTENER (Android)  AndroidSyncReceiver.kt            LISTENER (iOS)  IOSSyncReceiver.swift
+ GUEST (Android)  AndroidSyncReceiver.kt               GUEST (iOS)  IOSSyncReceiver.swift
  ┌──────────────────────────────────────────┐          ┌──────────────────────────────────────────┐
  │ DatagramSocket (bound to Wi-Fi)          │          │ NWConnection (UDP, no cellular)          │
  │   ├─ SYNC_RESP ─▶ ClockSync              │          │   ├─ SYNC_RESP ─▶ ClockSync              │
- │   └─ AUDIO ─────▶ JitterBuffer           │          │   └─ AUDIO ─────▶ JitterBuffer           │
- │ playout thread                           │          │ playout thread                           │
- │   PlayoutEngine: which frame is due now? │  shared  │   PlayoutEngine: which frame is due now? │
- │   ├─ MediaCodec Opus decode              │   core   │   ├─ AudioToolbox Opus decode            │
- │   ├─ Resampler (±0.5 % drift correction) │ ◀──────▶ │   ├─ Resampler (±0.5 % drift correction) │
- │   └─ AudioTrack.write (blocking)         │  logic   │   └─ ring buffer ─▶ AVAudioSourceNode    │
- │ AudioTrack.getTimestamp(): when do       │          │ render host time + outputLatency: when   │
- │ frames really reach the speaker / BT?    │          │ do frames really reach speaker / AirPods?│
+ │   ├─ AUDIO ─────▶ JitterBuffer           │          │   ├─ AUDIO ─────▶ JitterBuffer           │
+ │   └─ CHIRP / OFFSET ─▶ sound check       │          │   └─ CHIRP / OFFSET ─▶ sound check       │
+ │ PlayoutRunner                            │  shared  │ playout thread                           │
+ │   PlayoutEngine: which frame is due now? │   core   │   PlayoutEngine: which frame is due now? │
+ │   ├─ MediaCodec Opus decode              │ ◀──────▶ │   ├─ AudioToolbox Opus decode            │
+ │   ├─ Resampler (±0.5 % drift correction) │  logic   │   ├─ Resampler (±0.5 % drift correction) │
+ │   └─ AudioTrack.write (blocking)         │          │   └─ ring buffer ─▶ AVAudioSourceNode    │
  └──────────────────────────────────────────┘          └──────────────────────────────────────────┘
 
- Every listener plays the first sample of a packet at:
-     (packet timestamp − clock offset)  +  host playout delay  +  its own slider offset
+ Every phone, the DJ's included, plays the first sample of a packet at:
+     (packet timestamp − clock offset) + playout delay + sound-check correction + its own slider
 ```
 
 ### The pieces that make it stay in sync
 
-1. **One timeline.** The host stamps every 20 ms frame with the time it was captured on the host's
-   monotonic clock. Timestamps come from the real capture cadence, smoothed by a first-order loop,
-   not from counting samples, so they follow the capture clock's drift.
-2. **Clock offset per listener.** An NTP-style exchange (burst of 8 on join, then 1/s) estimates
-   `host clock − local clock`. Of the last 12 exchanges the one with the shortest round trip is
+1. **One timeline.** The DJ phone produces exactly one 20 ms frame every 20 ms on its monotonic
+   clock and stamps each with that time. The timeline never stops while the party is on: a pause
+   just sends silence, and a song change just changes what is in the next frame, so nobody ever
+   has to re-align.
+2. **Clock offset per phone.** An NTP-style exchange (burst of 8 on join, then 1/s) estimates
+   `DJ clock − local clock`. Of the last 12 exchanges the one with the shortest round trip is
    trusted, because its error bound (half the round trip) is the smallest.
-3. **A common playout delay.** The host picks how far behind live everyone plays (200 / 350 / 700 /
-   1200 ms) and tells listeners in JOIN_ACK and every SYNC_RESP. It has to cover capture + encode
-   (about 27 ms), the network, the listener's audio buffer and its output latency.
-4. **Closed-loop playout.** Before each frame the listener asks its audio output when the next
-   written sample will actually be *heard* (`AudioTrack.getTimestamp()` on Android; render-cycle
-   host time + `AVAudioSession.outputLatency` on iOS) and compares that with when the frame is
-   *due*. The error steers a 16-tap polyphase sinc resampler by at most ±0.5 %, which absorbs the
-   drift between the host's capture clock, the clock estimate and the listener's DAC. Errors over
-   30 ms, a host timeline jump, or a setting change trigger a sample-exact re-align instead.
-5. **Jitter and loss.** Packets wait, still encoded, in a sequence-indexed buffer until the last
+3. **A common playout delay.** Everyone plays one fixed delay (200 / 350 / 700 / 1200 ms) after the
+   timestamp, the DJ phone included. It has to cover the network, each phone's audio buffer and
+   its output latency. Pressing pause or skip is heard after that delay, on every phone at once.
+4. **Closed-loop playout.** Before each frame a phone asks its audio output when the next written
+   sample will actually be *heard* (`AudioTrack.getTimestamp()` on Android; render-cycle host time
+   + `AVAudioSession.outputLatency` on iOS) and compares that with when the frame is *due*. The
+   error steers a 16-tap polyphase sinc resampler by at most ±0.5 %, which absorbs the drift between
+   the clocks. Errors over 30 ms or a setting change trigger a sample-exact re-align instead.
+5. **The sound check: the last few milliseconds.** Step 4 is only as good as what the phone
+   *reports*, and phones misreport their speaker latency by a few milliseconds, Bluetooth by up to
+   hundreds. That residue is the audible "flam" between phones. So the DJ phone asks every phone
+   to play a 40 ms chirp (1.5 to 7 kHz sweep) at its own slot on the shared timeline and records
+   them all with its microphone. A matched filter (FFT cross-correlation, first strong peak, so
+   wall reflections are ignored) times each chirp to a fraction of a millisecond. The DJ phone
+   chirps too, first and last in every round: that cancels the microphone's own unknown latency,
+   and any clock drift during the round. Each phone gets back its correction, and a second round
+   mops up what is left.
+6. **Jitter and loss.** Packets wait, still encoded, in a sequence-indexed buffer until the last
    moment. A missing frame is concealed with a 5 ms reversed-tail fade-out and a fade-in on the next
-   good frame (the platform decoders expose no Opus PLC), so loss sounds like a tiny dip, not a click.
-6. **Honest fallback.** If a device cannot meet the delay (Bluetooth latency larger than the buffer,
-   or a big negative slider value), it plays later by exactly what is missing, shows that number,
-   and reclaims it automatically when headroom returns.
-7. **The manual slider.** Phones cannot measure what happens inside Bluetooth earbuds. The −500 …
-   +500 ms slider is added to that device's target time and remembered per output device.
+   good frame, so loss sounds like a tiny dip, not a click.
+7. **Honest fallback.** If a phone cannot meet the delay (for example a Bluetooth speaker with more
+   latency than the cushion allows), it plays later by exactly what is missing, shows that number,
+   and reclaims it automatically when headroom returns. The sound check says so too.
+8. **The manual slider.** Still there (−500 … +500 ms, remembered per output device) for anyone
+   who wants to fine-tune by ear or cannot run a sound check.
 
-`PlayoutEngine`, `ClockSync`, `JitterBuffer`, `Resampler` and the packet codec exist twice, in Kotlin
-and Swift, deliberately line for line the same and with no platform imports.
+`PlayoutEngine`, `ClockSync`, `JitterBuffer`, `Resampler`, the chirp and the packet codec exist
+twice, in Kotlin and Swift, deliberately line for line the same and with no platform imports.
+
+### How close is "in sync"?
+
+Sound itself travels about 34 cm per millisecond, so two phones 2 m apart already reach a listener
+up to 6 ms apart depending on where they stand. No system can make that 0. What Hearby can control
+is when each phone *emits* the sound, and that is what the sound check aligns: in the simulation
+below, a phone whose speaker is secretly 8 ms late and a Bluetooth speaker that is 148 ms late both
+end up within 0.3 ms of the DJ. For the check itself, hold the phones together, near the DJ phone.
 
 ## Building
 
@@ -179,43 +194,38 @@ are no package dependencies.
 
 ## Using it
 
-1. **Host:** open Hearby › *Share audio* › *Start sharing*. Allow the Microphone permission (Android
-   guards playback capture with it; the microphone itself is never opened) and accept Android's
-   capture dialog. Then start playback in any app.
-2. **Listeners:** join the same Wi-Fi as the host, or the host's hotspot. Open Hearby › *Listen* and
-   tap the host. If it does not appear, type the address shown on the host's screen.
-3. If one device sounds late next to the others, move its **Sync offset** slider toward −.
-   Bluetooth earbuds and speakers usually need somewhere between −50 and −250 ms.
+1. **DJ:** open Hearby › *Be the DJ* › *Start the party*, then *Add songs* and pick songs saved on
+   the phone. Play, pause and skip from the DJ screen.
+2. **Guests:** join the same Wi-Fi as the DJ, or the DJ's hotspot. Open Hearby › *Join a party* and
+   tap the DJ. If it does not appear, type the address shown on the DJ's screen.
+3. **Sound check** (DJ screen, once everyone shows *In sync*): gather the phones near the DJ phone,
+   turn their media volume up, and tap *Run sound check*. Allow the microphone when asked. Music
+   pauses for a few seconds while each phone beeps; then every phone shows how far off it was.
+   Run it again whenever someone switches to Bluetooth.
 
-The host itself keeps playing live while listeners are one playout delay behind. Turn the host's
-media volume down to avoid an echo in the same room; captured audio is taken before the volume
-control, so listeners are not affected.
+The DJ phone plays along in sync, so there is no echo between it and the others.
 
 ## Limitations and edge cases
 
-**Capture (Android host)**
+**Music**
 
-- Apps decide whether they may be captured. Android only captures playback with usage `MEDIA`,
-  `GAME` or `UNKNOWN` from apps that allow it (`allowAudioPlaybackCapture`, the default for apps
-  targeting Android 10+). YouTube, Chrome and most players allow it. **Netflix, Prime Video,
-  Disney+, Spotify and other DRM or opted-out apps deliver silence**, and phone/VoIP call audio is
-  never capturable. Hearby shows a hint when it has captured only silence for a few seconds.
-- MediaProjection consent is needed for every session; Android does not let an app remember it.
-- **Android 15 QPR1 and later stop MediaProjection when the device is locked.** Hosting therefore
-  needs the screen on and unlocked on those versions (playing a video keeps it on). Android 14 and
-  later also show a status-bar chip that ends the capture when tapped. Hearby reports both.
-- The host is not delay-compensated: it plays live, listeners play one playout delay later.
+- The DJ plays songs saved on the phone, picked with Android's file picker (no storage permission
+  needed). Anything the phone can decode works: MP3, AAC/M4A, FLAC, Ogg/Opus, WAV.
+- Streaming apps (Spotify, YouTube Music, Apple Music) are not sources: their songs are protected
+  and only their own apps can play them. That is also why Hearby does not need screen capture.
+- Picking songs is per party; the queue is not saved yet.
 
 **Sync accuracy**
 
-- Between wired or speaker listeners, the remaining error is the clock estimate (usually well under
-  a millisecond on a quiet LAN) plus each phone's own output-latency reporting.
-- Bluetooth adds 100 to 300 ms that the phone only partly knows. Use the slider; it is saved per
-  output device. AirPlay adds about two seconds and will not fit any playout delay.
-- A listener whose total latency exceeds the host's playout delay plays late by the shown amount.
-  Pick a larger sync buffer on the host. *Low delay* (200 ms) suits speaker or wired listeners only.
-- Video on the host's screen leads the listeners' audio by the playout delay. That is inherent to
-  the design: the host cannot delay another app's video.
+- Without a sound check, the remaining error is each phone's own output-latency reporting, typically
+  a few milliseconds and up to hundreds for Bluetooth. The sound check measures and removes it.
+- The sound check needs a quiet-ish moment (it pauses the music for a few seconds), phones near the
+  DJ phone, and audible volume. A phone it cannot hear is reported, and keeps its old setting.
+- The microphone is used only during the sound check, only on the DJ phone, and only while the app
+  is on screen. Nothing is recorded to storage or sent anywhere.
+- A phone whose total latency exceeds the playout delay plays late by the shown amount. Pick the
+  *Bluetooth* (700 ms) cushion when guests use Bluetooth speakers. AirPlay adds about two seconds
+  and will not fit any cushion.
 
 **Network**
 
@@ -229,7 +239,8 @@ control, so listeners are not affected.
 
 **iOS**
 
-- Listener only. Apple offers no API for capturing other apps' audio.
+- Guest only for now. An iPhone could be a DJ for its own song files in a future version; songs
+  bought through Apple Music are protected and cannot be shared by any app.
 - **Local Network permission.** iOS shows a one-time prompt the first time the app browses for hosts
   (text from `NSLocalNetworkUsageDescription`). If the user declines, nothing is found and the app
   says so; it is re-enabled under Settings › Privacy & Security › Local Network. The Bonjour type
@@ -247,11 +258,13 @@ Play accepts new apps as an **App Bundle** (`.aab`), not an APK. Besides uploadi
 - `applicationId` is `io.github.ugoyel.hearby`. It can never be changed after the first upload, so
   change it now in `android/app/build.gradle.kts` if you want a different one.
 - Enrol in Play App Signing and keep the upload keystore and its passwords somewhere safe.
-- Declare the two foreground service types in Play Console (App content › Foreground service
-  permissions): `mediaProjection` (capturing device audio to share it) and `mediaPlayback`
-  (playing the shared audio in the background). Play asks for a short video of each.
-- `RECORD_AUDIO` requires a privacy policy URL and a Data safety form. Hearby collects nothing and
-  sends audio only to devices on the local network, which is what the form should say.
+- Hearby uses no screen capture. Its only foreground service type is `mediaPlayback` (playing the
+  party's music in the background), which you declare in Play Console (App content › Foreground
+  service permissions).
+- `RECORD_AUDIO` (for the optional sound check) requires a privacy policy URL and a Data safety
+  form. Hearby collects nothing; the microphone is used on the DJ phone for a few seconds to time
+  beeps, in memory only.
+- Only share songs you have the rights to play to your guests.
 - Target API level is 36.
 
 ## Verification status
