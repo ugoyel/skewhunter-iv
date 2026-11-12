@@ -32,7 +32,13 @@ the music actually being played (and settles into a row of dots when it is silen
 someone joins or when a phone locks into sync, and wording to match ("Be the DJ", "The crowd",
 "Finding the beat…").
 
+Android (DJ setup, a live party, finding a party, playing in sync):
+
 ![Android screens](docs/screens/android.png)
+
+iPhone (finding a party, syncing, playing in sync, party over):
+
+![iOS screens](docs/screens/ios.png)
 
 The design system lives in one file per platform, `android/.../ui/PartyKit.kt` and
 `ios/Hearby/PartyKit.swift`: the palette, the animated backdrop, buttons, visualizer, confetti. The
@@ -46,6 +52,9 @@ Screens can be rendered without a phone:
   data, to `app/build/outputs/roborazzi/`.
 - iOS: launch a debug build with `-demo join`, `-demo playing`, `-demo syncing` or `-demo ended` to
   show a screen with sample data and no network. CI does this in the simulator.
+
+CI publishes both sets as downloadable artifacts (`hearby-android-screens`, `hearby-ios-screens`) on
+every run. The images above come from those renders.
 
 ## How it works
 
@@ -254,8 +263,9 @@ Play accepts new apps as an **App Bundle** (`.aab`), not an APK. Besides uploadi
 | Playout engine | Simulations with clock drift, DAC drift, jitter, 3 % loss, delay spikes, host pauses, slider changes and over-budget latency, in Kotlin and in Swift | Sync error stays under 1.5 ms |
 | Android build | Unit tests, lint, signed and 16 KB-aligned release build; also built on a clean GitHub runner | Pass |
 | iOS build | `swift test` and an `xcodebuild` simulator build on a macOS runner | Pass |
-| Android host, on an Android 14 emulator | Release APK: capture consent, `mediaProjection` foreground service, capture of a tone played by another process, Opus at the configured 96 kbit/s in 20 ms packets, received by the Python listener with no loss; mDNS registration accepted; clean stop | Pass |
-| Android listener, on an Android 14 emulator | Release APK: joined the Python host, clock sync, MediaCodec Opus decode, AudioTrack playout reaching "Playing in sync", offset controls and per-output memory, leave | Pass |
+| Screen design | Every Android screen rendered on the JVM with sample data; every iOS screen screenshotted in the iOS Simulator through the demo mode | Reviewed by eye |
+| Android host, on an Android 14 emulator | Release APK (1.1.0, party UI): capture consent, `mediaProjection` foreground service, capture of a tone played by another process, Opus at the configured 96 kbit/s in 20 ms packets, received by the Python listener with no loss; mDNS registration accepted; clean stop | Pass |
+| Android listener, on an Android 14 emulator | Release APK (1.1.0, party UI): joined the Python host, clock sync, MediaCodec Opus decode, AudioTrack playout reaching "Playing in sync", offset controls and per-output memory, leave | Pass |
 
 **Not verified yet, and needed before a store release:**
 

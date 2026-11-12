@@ -49,8 +49,6 @@ jobs:
   ios:
     name: iOS (core tests, simulator build, screenshots)
     runs-on: macos-15
-    permissions:
-      contents: write   # TEMPORARY: lets this one run commit its simulator screenshots back to the branch
     defaults:
       run:
         working-directory: hearby/ios
@@ -91,12 +89,3 @@ jobs:
           name: hearby-ios-screens
           path: hearby/ios/screens
           if-no-files-found: error
-      - name: Commit the screenshots to the branch (temporary step)
-        run: |
-          mkdir -p ../docs/screens
-          cp screens/*.png ../docs/screens/
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ../docs/screens
-          git commit -m "Hearby: iOS simulator screenshots [skip ci]"
-          git push
