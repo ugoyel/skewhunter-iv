@@ -1,9 +1,58 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Sound waves leaving a speaker, with a little confetti. Everything stays inside the adaptive-icon safe zone. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <group
+        android:pivotX="32.5"
+        android:pivotY="29.0"
+        android:rotation="25">
+        <path
+            android:fillColor="#C8FF3D"
+            android:pathData="M31.2,25h2.6a1.2,1.2 0 0 1 1.2,1.2v5.6a1.2,1.2 0 0 1 -1.2,1.2h-2.6a1.2,1.2 0 0 1 -1.2,-1.2v-5.6a1.2,1.2 0 0 1 1.2,-1.2z" />
+    </group>
+    <group
+        android:pivotX="76.5"
+        android:pivotY="28.0"
+        android:rotation="-30">
+        <path
+            android:fillColor="#FFC53D"
+            android:pathData="M75.2,24h2.6a1.2,1.2 0 0 1 1.2,1.2v5.6a1.2,1.2 0 0 1 -1.2,1.2h-2.6a1.2,1.2 0 0 1 -1.2,-1.2v-5.6a1.2,1.2 0 0 1 1.2,-1.2z" />
+    </group>
+    <group
+        android:pivotX="29.25"
+        android:pivotY="79.5"
+        android:rotation="-20">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M28.2,76h2.1a1.2,1.2 0 0 1 1.2,1.2v4.6a1.2,1.2 0 0 1 -1.2,1.2h-2.1a1.2,1.2 0 0 1 -1.2,-1.2v-4.6a1.2,1.2 0 0 1 1.2,-1.2z" />
+    </group>
+    <group
+        android:pivotX="79.5"
+        android:pivotY="82.0"
+        android:rotation="35">
+        <path
+            android:fillColor="#C8FF3D"
+            android:pathData="M78.2,78h2.6a1.2,1.2 0 0 1 1.2,1.2v5.6a1.2,1.2 0 0 1 -1.2,1.2h-2.6a1.2,1.2 0 0 1 -1.2,-1.2v-5.6a1.2,1.2 0 0 1 1.2,-1.2z" />
+    </group>
+    <group
+        android:pivotX="53.75"
+        android:pivotY="22.25"
+        android:rotation="10">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M52.7,19h2.1a1.2,1.2 0 0 1 1.2,1.2v4.1a1.2,1.2 0 0 1 -1.2,1.2h-2.1a1.2,1.2 0 0 1 -1.2,-1.2v-4.1a1.2,1.2 0 0 1 1.2,-1.2z" />
+    </group>
+    <group
+        android:pivotX="54.25"
+        android:pivotY="86.25"
+        android:rotation="-15">
+        <path
+            android:fillColor="#FFC53D"
+            android:pathData="M53.2,83h2.1a1.2,1.2 0 0 1 1.2,1.2v4.1a1.2,1.2 0 0 1 -1.2,1.2h-2.1a1.2,1.2 0 0 1 -1.2,-1.2v-4.1a1.2,1.2 0 0 1 1.2,-1.2z" />
+    </group>
     <path
         android:fillColor="#FFFFFF"
         android:pathData="M54,54m-7,0a7,7 0,1 1,14 0a7,7 0,1 1,-14 0" />

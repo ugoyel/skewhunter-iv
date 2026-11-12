@@ -57,6 +57,8 @@ data class ReceiverUiState(
     val outputIsBluetooth: Boolean = false,
     val lossPercent: Float = 0f,
     val muted: Boolean = false,
+    /** Peak level of what is playing right now, 0..1. Drives the visualizer. */
+    val level: Float = 0f,
 )
 
 /**
@@ -247,7 +249,7 @@ class AndroidSyncReceiver(
                     val m = Wire.decodeJoinAck(buf, len) ?: continue
                     lastPacketNs = rxNs
                     if (m.sampleRate != Proto.SAMPLE_RATE || m.channels != Proto.CHANNELS || m.frameMs != Proto.FRAME_MS) {
-                        message = "This host uses an audio format this version does not support."
+                        message = "This party uses an audio format this version of Hearby can't play. Try updating."
                         ended = true
                         continue
                     }
@@ -266,7 +268,7 @@ class AndroidSyncReceiver(
                     everJoined = true
                 }
                 Proto.TYPE_BYE -> if (Wire.decodeU32Body(buf, len) == streamId) {
-                    message = "The host stopped sharing."
+                    message = "The DJ ended the party."
                     ended = true
                 }
             }
@@ -295,7 +297,7 @@ class AndroidSyncReceiver(
                     send(sock, Wire.encodeJoin(clientId, Proto.PLATFORM_ANDROID, deviceName))
                 }
                 if (!everJoined && message == null && now - startNs > 5_000_000_000L) {
-                    message = "No answer from the host yet. Are both devices on the same Wi-Fi or hotspot?"
+                    message = "No answer from the DJ yet. Are you both on the same Wi-Fi, or on their hotspot?"
                 }
             } else {
                 // A quick burst to get a clock fix, then once a second to follow drift (and as keep-alive).
@@ -320,7 +322,7 @@ class AndroidSyncReceiver(
                 lastRouteCheckNs = now
                 checkRoute()
             }
-            if (now - lastPublishNs >= 200_000_000L) {
+            if (now - lastPublishNs >= 120_000_000L) {
                 lastPublishNs = now
                 publish()
             }
@@ -638,6 +640,7 @@ class AndroidSyncReceiver(
                 outputIsBluetooth = routeIsBluetooth,
                 lossPercent = lossPercent,
                 muted = muted,
+                level = if (muted) 0f else e?.outputLevel ?: 0f,
             ),
         )
     }

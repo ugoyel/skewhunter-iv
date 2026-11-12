@@ -130,7 +130,7 @@ class AudioCaptureAndOpusService : Service() {
             null
         }
         if (projection == null) {
-            finish("Screen/audio capture permission was not granted.")
+            finish("Android didn't give the go-ahead to share this phone's audio.")
             return
         }
         projection.registerCallback(projectionCallback, mainHandler)
@@ -158,7 +158,7 @@ class AudioCaptureAndOpusService : Service() {
             // by the device being locked. Ignore the echo of our own shutdown: by then the session
             // is already gone.
             if (session != null) {
-                finish("Android stopped the capture (screen locked, or sharing ended from the status bar).")
+                finish("Android stopped the party: the screen was locked, or sharing was ended from the status bar.")
             }
         }
     }
@@ -459,7 +459,7 @@ class AudioCaptureAndOpusService : Service() {
             val packet = DatagramPacket(buf, buf.size)
             var lastHousekeepingNs = 0L
             try {
-                sock.soTimeout = 200
+                sock.soTimeout = 100
             } catch (e: Exception) {
                 return
             }
@@ -475,7 +475,7 @@ class AudioCaptureAndOpusService : Service() {
                     if (!running) break
                 }
                 val now = System.nanoTime()
-                if (now - lastHousekeepingNs > 250_000_000L) {
+                if (now - lastHousekeepingNs > 120_000_000L) {
                     lastHousekeepingNs = now
                     housekeeping(now)
                 }

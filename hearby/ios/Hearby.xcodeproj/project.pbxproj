@@ -17,6 +17,7 @@
 		F5270BC2F2A8C5697ABFDCA9 /* Resampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E2062EE85740B9CE52C8732 /* Resampler.swift */; };
 		EED7E0BC06840A568D505BB4 /* PlayoutEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBDA240384BCE33120737161 /* PlayoutEngine.swift */; };
 		F3BA8E1741A5024111043325 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9D12909EC911253F87D4CDF5 /* Assets.xcassets */; };
+		528AD6FBC460625518CE0991 /* PartyKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52F6453CE27187EB28E93FE9 /* PartyKit.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +33,7 @@
 		FBDA240384BCE33120737161 /* PlayoutEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayoutEngine.swift; sourceTree = "<group>"; };
 		9D12909EC911253F87D4CDF5 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C8E224AB45141C06C0264D9D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		52F6453CE27187EB28E93FE9 /* PartyKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PartyKit.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -68,6 +70,7 @@
 				74F4418E6801F63A9A89E185 /* ContentView.swift */,
 				5E59EB3D66F21381D7642B16 /* IOSSyncReceiver.swift */,
 				42AD76F9A2C52B02998135CB /* HostBrowser.swift */,
+				52F6453CE27187EB28E93FE9 /* PartyKit.swift */,
 				27352A50C042D80BBB0D19B2 /* Core */,
 				9D12909EC911253F87D4CDF5 /* Assets.xcassets */,
 				C8E224AB45141C06C0264D9D /* Info.plist */,
@@ -160,6 +163,7 @@
 				473C2DE2C28486AF08F94B36 /* ContentView.swift in Sources */,
 				BD521A1AAE85617147D234B4 /* IOSSyncReceiver.swift in Sources */,
 				83678796AC5752E73DA1E5CA /* HostBrowser.swift in Sources */,
+				528AD6FBC460625518CE0991 /* PartyKit.swift in Sources */,
 				DD7351EE789DA45FCEB6BB62 /* Protocol.swift in Sources */,
 				A7AD96689E936E850C16A490 /* ClockSync.swift in Sources */,
 				6583031BF121E5B97F4B22FD /* JitterBuffer.swift in Sources */,

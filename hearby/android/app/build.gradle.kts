@@ -60,7 +60,16 @@ android {
     }
 
     testOptions {
-        unitTests.isReturnDefaultValues = true
+        unitTests {
+            isReturnDefaultValues = true
+            // Robolectric needs the merged resources to render real screens (see ScreenshotTest).
+            isIncludeAndroidResources = true
+            all {
+                // Write the rendered screens to app/build/outputs/roborazzi/ on every test run.
+                it.systemProperty("roborazzi.test.record", "true")
+                it.maxHeapSize = "2g"
+            }
+        }
     }
 }
 
@@ -82,4 +91,11 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     testImplementation("junit:junit:4.13.2")
+    // Screens are rendered on the JVM (no emulator) so the design can be reviewed as PNGs.
+    testImplementation("org.robolectric:robolectric:4.16.1")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.52.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.52.0")
+    testImplementation(platform("androidx.compose:compose-bom:2025.10.01"))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

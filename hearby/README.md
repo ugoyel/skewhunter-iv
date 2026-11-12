@@ -18,6 +18,35 @@ hearby/
   store/     Play Store icon and feature graphic
 ```
 
+In the apps, the phone sharing its audio is "the DJ", its session is "the party", and listeners are
+"the crowd". The code and the protocol keep the plainer words host and listener.
+
+```
+```
+
+## Look and feel
+
+Hearby is used at parties, so it looks like one: a dark stage with slow-moving pools of neon light,
+frosted glass panels, chunky gradient buttons that squish when pressed, a visualizer that moves with
+the music actually being played (and settles into a row of dots when it is silent), confetti when
+someone joins or when a phone locks into sync, and wording to match ("Be the DJ", "The crowd",
+"Finding the beat…").
+
+![Android screens](docs/screens/android.png)
+
+The design system lives in one file per platform, `android/.../ui/PartyKit.kt` and
+`ios/Hearby/PartyKit.swift`: the palette, the animated backdrop, buttons, visualizer, confetti. The
+type is Fredoka on Android (bundled, SIL Open Font License, see `android/licenses/FONTS.md`) and SF
+Rounded on iOS. The app is always dark, and looping animations stop when the system's reduce-motion
+or animation-off setting is on.
+
+Screens can be rendered without a phone:
+
+- Android: `./gradlew testDebugUnitTest --tests '*ScreenshotTest*'` writes every screen, with sample
+  data, to `app/build/outputs/roborazzi/`.
+- iOS: launch a debug build with `-demo join`, `-demo playing`, `-demo syncing` or `-demo ended` to
+  show a screen with sample data and no network. CI does this in the simulator.
+
 ## How it works
 
 ```

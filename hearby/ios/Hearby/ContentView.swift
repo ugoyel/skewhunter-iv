@@ -1,44 +1,46 @@
 import Network
 import SwiftUI
 
-/// The receiver screen: find a host, join with one tap, fine-tune sync with the offset slider.
-/// (iOS is listen-only: Apple gives third-party apps no way to capture other apps' audio.)
+/// The iPhone app: find a party, join with one tap, fine-tune the beat.
+/// (iPhones are guests only: Apple gives apps no way to capture what other apps are playing.)
 struct ContentView: View {
     @StateObject private var receiver = IOSSyncReceiver()
     @StateObject private var browser = HostBrowser()
     @Environment(\.scenePhase) private var scenePhase
+    @State private var confetti = 0
 
     var body: some View {
-        NavigationView {
-            ScrollView {
-                VStack(spacing: 16) {
-                    switch receiver.status.phase {
-                    case .idle:
-                        JoinView(browser: browser) { endpoint, name in
-                            receiver.join(endpoint: endpoint, name: name)
-                        }
-                    case .ended:
-                        StatusCard(
-                            symbol: "headphones", active: false, title: "Session ended",
-                            detail: receiver.status.message ?? "You left the session.")
-                        Button("Find another host") { receiver.dismiss() }
-                            .buttonStyle(PrimaryButtonStyle())
-                    default:
-                        ListeningView(receiver: receiver)
+        Group {
+            if let demo = Demo.requested {
+                PartyScreen(status: demo.status, confetti: 0) { DemoContent(demo: demo) }
+            } else {
+                PartyScreen(status: receiver.status, confetti: confetti) { live }
+                    .onAppear { updateBrowsing() }
+                    .onChange(of: scenePhase) { _ in updateBrowsing() }
+                    .onChange(of: receiver.status.phase) { phase in
+                        updateBrowsing()
+                        if phase == .playing { confetti += 1 } // locked in: celebrate
                     }
-                }
-                .padding(16)
-                .frame(maxWidth: 560)
-                .frame(maxWidth: .infinity)
             }
-            .background(Color(.systemGroupedBackground).ignoresSafeArea())
-            .navigationTitle("Hearby")
-            .navigationBarTitleDisplayMode(.inline)
         }
-        .navigationViewStyle(.stack)
-        .onAppear { updateBrowsing() }
-        .onChange(of: receiver.status.phase) { _ in updateBrowsing() }
-        .onChange(of: scenePhase) { _ in updateBrowsing() }
+        .preferredColorScheme(.dark)
+    }
+
+    @ViewBuilder private var live: some View {
+        switch receiver.status.phase {
+        case .idle:
+            JoinView(hosts: browser.hosts, permissionDenied: browser.permissionDenied) { endpoint, name in
+                receiver.join(endpoint: endpoint, name: name)
+            }
+        case .ended:
+            PartyOverView(message: receiver.status.message) { receiver.dismiss() }
+        default:
+            ListeningView(
+                status: receiver.status,
+                onOffset: { receiver.setOffsetMs($0) },
+                onResync: { receiver.resync() },
+                onLeave: { receiver.leave() })
+        }
     }
 
     /// Browse only while the join screen is actually on display.
@@ -51,67 +53,110 @@ struct ContentView: View {
     }
 }
 
+/// Stage, wordmark and a scrolling column for the current screen, with confetti on top.
+private struct PartyScreen<Content: View>: View {
+    let status: ReceiverStatus
+    let confetti: Int
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        ZStack {
+            PartyBackground(energy: status.phase == .playing ? 1 : 0)
+            ScrollView {
+                VStack(spacing: 16) {
+                    Wordmark()
+                    content
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .frame(maxWidth: 560)
+                .frame(maxWidth: .infinity)
+            }
+            ConfettiBurst(trigger: confetti)
+        }
+    }
+}
+
 // MARK: - Join
 
 private struct JoinView: View {
-    @ObservedObject var browser: HostBrowser
+    let hosts: [HostBrowser.Host]
+    let permissionDenied: Bool
     let onJoin: (NWEndpoint, String) -> Void
 
     @State private var manualAddress = ""
     @State private var manualError: String?
 
     var body: some View {
-        Card {
+        Hero(symbol: "headphones", active: false, title: "Join a party",
+             detail: "Hop on the same Wi-Fi as the DJ, or on their hotspot, and pick a party.")
+
+        GlassCard {
             HStack {
-                Text("Nearby hosts").font(.headline)
+                Text("Parties nearby").font(Party.font(22, .semibold)).foregroundColor(.white)
                 Spacer()
-                ProgressView()
+                Radar()
             }
-            if browser.permissionDenied {
-                Text("Hearby is not allowed to look for devices on your network. Turn it on under Settings › Privacy & Security › Local Network.")
-                    .font(.subheadline)
-                    .foregroundColor(.orange)
-            } else if browser.hosts.isEmpty {
-                Text("Looking on this Wi-Fi network… Connect to the same Wi-Fi as the host, or to the host's hotspot.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+            if permissionDenied {
+                Text("Hearby isn't allowed to look around your network. Switch it on in Settings › Privacy & Security › Local Network.")
+                    .font(Party.font(15))
+                    .foregroundColor(Party.sun)
+            } else if hosts.isEmpty {
+                Text("Looking for parties on this Wi-Fi…")
+                    .font(Party.font(15))
+                    .foregroundColor(Party.inkSoft)
             }
-            ForEach(browser.hosts) { host in
-                Divider()
+            ForEach(Array(hosts.enumerated()), id: \.element.id) { index, host in
+                if index > 0 { Divider().overlay(Party.glassStroke) }
                 HStack(spacing: 12) {
-                    Image(systemName: "dot.radiowaves.left.and.right")
-                        .foregroundColor(.accentColor)
-                    Text(host.name).lineLimit(1)
+                    Avatar(name: host.name)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(host.name).font(Party.font(17, .medium)).foregroundColor(.white).lineLimit(1)
+                        Text("Tap to tune in").font(Party.font(13)).foregroundColor(Party.inkSoft)
+                    }
                     Spacer()
                     Button("Join") { onJoin(host.endpoint, host.name) }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(PartyButtonStyle(height: 44, fullWidth: false))
                 }
             }
         }
 
-        Card {
-            Text("Join by address").font(.headline)
+        GlassCard {
+            Text("Know the address?").font(Party.font(22, .semibold)).foregroundColor(.white)
             HStack(spacing: 12) {
                 TextField("192.168.43.1", text: $manualAddress)
-                    .textFieldStyle(.roundedBorder)
+                    .font(Party.font(17))
+                    .foregroundColor(.white)
                     .keyboardType(.numbersAndPunctuation)
                     .disableAutocorrection(true)
                     .textInputAutocapitalization(.never)
                     .submitLabel(.go)
                     .onSubmit(joinManually)
+                    .padding(.horizontal, 16)
+                    .frame(height: 52)
+                    .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Party.glass))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(manualError == nil ? Party.glassStroke : Party.coral, lineWidth: 1))
                 Button("Join", action: joinManually)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(PartyButtonStyle(height: 52, fullWidth: false))
                     .disabled(manualAddress.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-            Text(manualError ?? "The host's address is shown on its screen while it is sharing.")
-                .font(.footnote)
-                .foregroundColor(manualError == nil ? .secondary : .red)
+            Text(manualError ?? "It's on the DJ's screen while the party is on.")
+                .font(Party.font(13))
+                .foregroundColor(manualError == nil ? Party.inkSoft : Party.coral)
         }
+
+        Text("iPhones join parties. To be the DJ you need an Android phone, because iOS doesn't let apps share what other apps are playing.")
+            .font(Party.font(13))
+            .foregroundColor(Party.inkFaint)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 6)
     }
 
     private func joinManually() {
         guard let parsed = AddressParser.parse(manualAddress) else {
-            manualError = "Enter the address shown on the host, for example 192.168.43.1"
+            manualError = "That doesn't look right. Use the address on the DJ's screen, like 192.168.43.1"
             return
         }
         manualError = nil
@@ -148,69 +193,65 @@ enum AddressParser {
 // MARK: - Listening
 
 private struct ListeningView: View {
-    @ObservedObject var receiver: IOSSyncReceiver
+    let status: ReceiverStatus
+    let onOffset: (Int) -> Void
+    let onResync: () -> Void
+    let onLeave: () -> Void
 
     var body: some View {
-        let status = receiver.status
-        StatusCard(
-            symbol: status.outputIsBluetooth ? "airpodspro" : "headphones",
-            active: status.phase == .playing,
-            title: title(for: status),
-            detail: detail(for: status)
-        ) {
-            if status.phase == .playing {
-                HStack {
-                    Metric(label: "Sync error", value: signed(status.syncErrorMs) + " ms")
-                    Spacer()
-                    Metric(label: "Network", value: String(format: "%.1f ms", status.rttMs))
-                    Spacer()
-                    Metric(label: "Buffer", value: "\(status.bufferMs) ms")
-                    Spacer()
-                    Metric(label: "Loss", value: String(format: "%.1f %%", status.lossPercent))
+        let playing = status.phase == .playing
+        GlassCard(lit: playing) {
+            HeroRow(symbol: status.outputIsBluetooth ? "airpodspro" : "headphones", active: playing, level: status.level,
+                    title: title, detail: detail)
+            if playing {
+                Equalizer(level: status.level)
+                HStack(spacing: 8) {
+                    let tight = abs(status.syncErrorMs) < 5 && status.lateBiasMs == 0
+                    Stat(value: signed(status.syncErrorMs) + " ms", label: "sync", accent: tight ? Party.lime : Party.sun)
+                    Stat(value: String(format: "%.1f ms", status.rttMs), label: "ping")
+                    Stat(value: "\(status.bufferMs) ms", label: "buffer")
+                    Stat(value: String(format: "%.1f%%", status.lossPercent), label: "drops", accent: status.lossPercent < 1 ? .white : Party.sun)
                 }
-                .padding(.top, 8)
             }
         }
 
         if let message = status.message {
             Notice(text: message)
         }
-        if status.lateBiasMs > 0 && status.phase == .playing {
-            Notice(text: lateNotice(for: status))
+        if status.lateBiasMs > 0 && playing {
+            Notice(text: lateNotice)
         }
 
-        OffsetCard(receiver: receiver)
+        OffsetCard(status: status, onOffset: onOffset)
 
         HStack(spacing: 12) {
-            Button {
-                receiver.resync()
-            } label: {
-                Label("Re-sync", systemImage: "arrow.triangle.2.circlepath")
-            }
-            .buttonStyle(SecondaryButtonStyle())
-            Button("Leave", role: .destructive) { receiver.leave() }
-                .buttonStyle(SecondaryButtonStyle(tint: .red))
+            Button(action: onResync) { Label("Re-sync", systemImage: "arrow.triangle.2.circlepath") }
+                .buttonStyle(GhostButtonStyle())
+            Button(action: onLeave) { Label("Leave", systemImage: "rectangle.portrait.and.arrow.right") }
+                .buttonStyle(PartyButtonStyle(fill: Party.stop, glow: Party.coral, height: 56))
         }
     }
 
-    private func detail(for status: ReceiverStatus) -> String {
-        status.outputName.isEmpty ? "Listening to \(status.hostName)" : "Listening to \(status.hostName) on \(status.outputName)"
-    }
-
-    private func lateNotice(for status: ReceiverStatus) -> String {
-        var text = "This device needs more time than the host's \(status.playoutDelayMs) ms sync buffer allows, "
-        text += "so it plays \(status.lateBiasMs) ms behind the others. Ask the host to pick a larger sync buffer"
-        text += status.offsetMs < 0 ? ", or move the offset slider back toward 0." : "."
-        return text
-    }
-
-    private func title(for status: ReceiverStatus) -> String {
+    private var title: String {
         switch status.phase {
-        case .connecting: return "Connecting…"
-        case .syncing: return "Syncing clocks…"
-        case .reconnecting: return "Reconnecting…"
-        default: return status.lateBiasMs > 0 ? "Playing, \(status.lateBiasMs) ms behind" : "Playing in sync"
+        case .connecting: return "Knocking on the door…"
+        case .syncing: return "Finding the beat…"
+        case .reconnecting: return "Lost the DJ, reconnecting…"
+        default: return status.lateBiasMs > 0 ? "Playing, \(status.lateBiasMs) ms behind" : "You're in sync!"
         }
+    }
+
+    private var detail: String {
+        // The icon already says Bluetooth.
+        let output = status.outputName.hasPrefix("Bluetooth: ") ? String(status.outputName.dropFirst(11)) : status.outputName
+        return output.isEmpty ? "DJ: \(status.hostName)" : "DJ: \(status.hostName) · \(output)"
+    }
+
+    private var lateNotice: String {
+        var text = "This phone needs more runway than the DJ's \(status.playoutDelayMs) ms sync cushion, "
+        text += "so it's \(status.lateBiasMs) ms behind the crowd. Ask the DJ for a bigger cushion"
+        text += status.offsetMs < 0 ? ", or slide the offset back toward 0." : "."
+        return text
     }
 
     private func signed(_ value: Float) -> String {
@@ -220,171 +261,163 @@ private struct ListeningView: View {
 
 /// The manual delay slider: -500...+500 ms, applied on release, plus fine nudges.
 private struct OffsetCard: View {
-    @ObservedObject var receiver: IOSSyncReceiver
+    let status: ReceiverStatus
+    let onOffset: (Int) -> Void
     @State private var dragging = false
     @State private var pending = 0.0
 
     var body: some View {
         // While the thumb is being dragged show the pending value; otherwise follow the receiver
         // (which also switches the value when the output device changes).
-        let applied = receiver.status.offsetMs
+        let applied = status.offsetMs
         let shown = dragging ? Int(pending.rounded()) : applied
         let slider = Binding<Double>(
             get: { dragging ? pending : Double(applied) },
             set: { pending = $0 })
 
-        Card {
+        GlassCard {
             HStack {
-                Image(systemName: receiver.status.outputIsBluetooth ? "airpodspro" : "speaker.wave.2")
-                    .foregroundColor(.secondary)
-                Text("Sync offset").font(.headline)
+                Image(systemName: "slider.horizontal.3").foregroundColor(Party.blue)
+                Text("Fine-tune the beat").font(Party.font(22, .semibold)).foregroundColor(.white).lineLimit(1).minimumScaleFactor(0.8)
                 Spacer()
-                Text("\(shown > 0 ? "+" : "")\(shown) ms")
-                    .font(.title3.weight(.semibold))
+                Text(verbatim: "\(shown > 0 ? "+" : "")\(shown) ms")
+                    .font(Party.font(24, .bold))
                     .monospacedDigit()
-                    .foregroundColor(.accentColor)
+                    .foregroundStyle(LinearGradient(colors: [Party.pink, Party.violet, Party.blue], startPoint: .leading, endPoint: .trailing))
             }
             Slider(value: slider, in: -500...500, step: 1) { editing in
                 if editing {
                     pending = Double(applied)
                     dragging = true
                 } else {
-                    receiver.setOffsetMs(Int(pending.rounded()))
+                    onOffset(Int(pending.rounded()))
                     dragging = false
                 }
             }
+            .tint(Party.pink)
             HStack {
                 Text("−500 earlier")
                 Spacer()
                 Text("later +500")
             }
-            .font(.caption2)
-            .foregroundColor(.secondary)
+            .font(Party.font(11))
+            .foregroundColor(Party.inkFaint)
 
             HStack(spacing: 8) {
                 ForEach([-10, -1], id: \.self) { step in
-                    Button("\(step)") { receiver.setOffsetMs(applied + step) }
+                    Button("\(step)") { onOffset(applied + step) }
                 }
-                Button("Reset") { receiver.setOffsetMs(0) }
+                Button("Reset") { onOffset(0) }
                     .disabled(applied == 0)
                 ForEach([1, 10], id: \.self) { step in
-                    Button("+\(step)") { receiver.setOffsetMs(applied + step) }
+                    Button("+\(step)") { onOffset(applied + step) }
                 }
             }
-            .buttonStyle(.bordered)
-            .frame(maxWidth: .infinity)
+            .buttonStyle(GhostButtonStyle(height: 46))
 
             Text(verbatim: hint)
-                .font(.footnote)
-                .foregroundColor(.secondary)
+                .font(Party.font(13))
+                .foregroundColor(Party.inkSoft)
         }
     }
 
     private var hint: String {
-        var text = "If this device sounds late next to the others (typical for AirPods and Bluetooth speakers), move toward −. "
-        text += "If it sounds early, move toward +. Remembered separately for each output"
-        text += receiver.status.outputName.isEmpty ? "." : " (now: \(receiver.status.outputName))."
+        var text = "Sounds late next to the others (hello, Bluetooth)? Slide toward −. Sounds early? Slide toward +. "
+        text += "Saved for each speaker or pair of earbuds"
+        text += status.outputName.isEmpty ? "." : " (now: \(status.outputName))."
         return text
+    }
+}
+
+private struct PartyOverView: View {
+    let message: String?
+    let onDismiss: () -> Void
+
+    var body: some View {
+        Hero(symbol: "sparkles", active: false, title: "Party's over", detail: message ?? "You left the party.")
+        Button(action: onDismiss) { Label("Find another party", systemImage: "headphones") }
+            .buttonStyle(PartyButtonStyle())
     }
 }
 
 // MARK: - Shared pieces
 
-private struct Card<Content: View>: View {
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) { content }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-}
-
-private struct StatusCard<Extra: View>: View {
+private struct Hero: View {
     let symbol: String
     let active: Bool
     let title: String
     let detail: String
-    @ViewBuilder var extra: Extra
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 16) {
-                Image(systemName: symbol)
-                    .font(.title2)
-                    .foregroundColor(active ? .white : .secondary)
-                    .frame(width: 48, height: 48)
-                    .background(active ? Color.accentColor : Color(.tertiarySystemFill))
-                    .clipShape(Circle())
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.title3.weight(.semibold))
-                    Text(detail).font(.subheadline).foregroundColor(.secondary)
-                }
+        GlassCard(lit: active) { HeroRow(symbol: symbol, active: active, level: 0, title: title, detail: detail) }
+    }
+}
+
+private struct HeroRow: View {
+    let symbol: String
+    let active: Bool
+    let level: Float
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            PulseOrb(symbol: symbol, active: active, level: level)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(Party.font(24, .bold)).foregroundColor(.white)
+                Text(detail).font(Party.font(15)).foregroundColor(Party.inkSoft)
             }
-            extra
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(active ? Color.accentColor.opacity(0.14) : Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
-extension StatusCard where Extra == EmptyView {
-    init(symbol: String, active: Bool, title: String, detail: String) {
-        self.init(symbol: symbol, active: active, title: title, detail: detail) { EmptyView() }
+// MARK: - Demo mode
+
+/// Launch with `-demo join|playing|syncing|ended` to show a screen with sample data and no network.
+/// Used to take screenshots in the simulator; compiled into debug builds only.
+enum Demo: String {
+    case join, playing, syncing, ended
+
+    static var requested: Demo? {
+        #if DEBUG
+        return UserDefaults.standard.string(forKey: "demo").flatMap(Demo.init(rawValue:))
+        #else
+        return nil
+        #endif
+    }
+
+    var status: ReceiverStatus {
+        switch self {
+        case .join: return ReceiverStatus()
+        case .playing:
+            return ReceiverStatus(
+                phase: .playing, hostName: "Mia's Pixel", syncErrorMs: 0.3, rttMs: 2.1, bufferMs: 184,
+                playoutDelayMs: 350, offsetMs: -120, outputName: "Bluetooth: AirPods Pro", outputIsBluetooth: true, level: 0.7)
+        case .syncing:
+            return ReceiverStatus(phase: .syncing, hostName: "Mia's Pixel", playoutDelayMs: 350, outputName: "iPhone speaker")
+        case .ended:
+            return ReceiverStatus(phase: .ended, message: "The DJ ended the party.")
+        }
     }
 }
 
-private struct Metric: View {
-    let label: String
-    let value: String
+private struct DemoContent: View {
+    let demo: Demo
 
     var body: some View {
-        VStack(spacing: 2) {
-            Text(value).font(.subheadline.weight(.semibold)).monospacedDigit()
-            Text(label).font(.caption2).foregroundColor(.secondary)
+        switch demo {
+        case .join:
+            let endpoint = NWEndpoint.hostPort(host: "192.168.43.1", port: NWEndpoint.Port(rawValue: Proto.port)!)
+            JoinView(
+                hosts: [
+                    HostBrowser.Host(id: "1", name: "Mia's Pixel", endpoint: endpoint),
+                    HostBrowser.Host(id: "2", name: "Kabir", endpoint: endpoint),
+                ],
+                permissionDenied: false) { _, _ in }
+        case .ended:
+            PartyOverView(message: demo.status.message) {}
+        default:
+            ListeningView(status: demo.status, onOffset: { _ in }, onResync: {}, onLeave: {})
         }
-    }
-}
-
-private struct Notice: View {
-    let text: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
-            Text(text).font(.subheadline)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.orange.opacity(0.14))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-}
-
-private struct PrimaryButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.headline)
-            .frame(maxWidth: .infinity, minHeight: 52)
-            .foregroundColor(.white)
-            .background(Color.accentColor.opacity(configuration.isPressed ? 0.7 : 1))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-}
-
-private struct SecondaryButtonStyle: ButtonStyle {
-    var tint: Color = .accentColor
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.headline)
-            .frame(maxWidth: .infinity, minHeight: 52)
-            .foregroundColor(tint)
-            .background(tint.opacity(configuration.isPressed ? 0.24 : 0.14))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }

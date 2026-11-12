@@ -253,6 +253,8 @@ struct ReceiverStatus: Equatable {
     var outputName = ""
     var outputIsBluetooth = false
     var lossPercent: Float = 0
+    /// Peak level of what is playing right now, 0...1. Drives the visualizer.
+    var level: Float = 0
 }
 
 // MARK: - Receiver
@@ -606,7 +608,7 @@ private final class ListenSession {
             guard let m = Wire.decodeJoinAck(b) else { return }
             lastPacketNs = rxNs
             guard Int(m.sampleRate) == Proto.sampleRate, Int(m.channels) == Proto.channels, Int(m.frameMs) == Proto.frameMs else {
-                message = "This host uses an audio format this version does not support."
+                message = "This party uses an audio format this version of Hearby can't play. Try updating."
                 ended = true
                 return
             }
@@ -627,7 +629,7 @@ private final class ListenSession {
 
         case Proto.typeBye:
             if let id = Wire.decodeU32Body(b), id == streamId {
-                message = "The host stopped sharing."
+                message = "The DJ ended the party."
                 ended = true
             }
 
@@ -656,7 +658,7 @@ private final class ListenSession {
                 send(Wire.encodeJoin(clientId: clientId, platform: Proto.platformIOS, name: deviceName))
             }
             if !everJoined, message == nil, now - startNs > 5_000_000_000 {
-                message = "No answer from the host yet. Check that both devices are on the same Wi-Fi or hotspot, "
+                message = "No answer from the DJ yet. Check you are both on the same Wi-Fi (or on their hotspot), "
                     + "and that Hearby is allowed under Settings › Privacy & Security › Local Network."
             }
         } else {
@@ -677,7 +679,7 @@ private final class ListenSession {
                 lastJoinNs = 0
             }
         }
-        if now - lastPublishNs >= 200_000_000 {
+        if now - lastPublishNs >= 120_000_000 {
             lastPublishNs = now
             publish(now: now)
         }
@@ -710,7 +712,7 @@ private final class ListenSession {
             phase: phase, hostName: hostName, message: message,
             syncErrorMs: snap.syncErrorMs, rttMs: Float(clock.rttUs) / 1000, bufferMs: snap.cushionMs,
             lateBiasMs: snap.lateBiasMs, playoutDelayMs: playoutDelayMs, offsetMs: offset,
-            outputName: output, outputIsBluetooth: bluetooth, lossPercent: lossPercent))
+            outputName: output, outputIsBluetooth: bluetooth, lossPercent: lossPercent, level: snap.level))
     }
 }
 

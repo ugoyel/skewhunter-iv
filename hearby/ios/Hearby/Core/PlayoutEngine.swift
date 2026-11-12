@@ -55,6 +55,8 @@ final class PlayoutEngine {
         var playedFrames: Int64 = 0
         var concealedFrames: Int64 = 0
         var realignCount: Int64 = 0
+        /** Peak level of the audio being played, 0...1, with a short decay. Drives the visualizer. */
+        var level: Float = 0
     }
 
     static let frame = Proto.frameSamples
@@ -75,6 +77,7 @@ final class PlayoutEngine {
     static let cushionWindowFrames = 250 // 5 s
     static let lateBiasHysteresisMs = 30
     static let lateBiasMinStepMs = 20
+    static let levelDecay: Float = 0.9 // per 20 ms frame
     static let resamplerDelayNs = Int64(Resampler.delayFrames) * 1_000_000_000 / Int64(Proto.sampleRate)
     private static let noTs = Int64.min
 
@@ -101,6 +104,7 @@ final class PlayoutEngine {
     private var playedFrames: Int64 = 0
     private var concealedFrames: Int64 = 0
     private var realignCount: Int64 = 0
+    private var outputLevel: Float = 0
 
     private var ts = SinkTimestamp()
     private let packet = JitterPacket()
@@ -188,7 +192,7 @@ final class PlayoutEngine {
         lock.lock()
         shared = Snapshot(
             state: state, syncErrorMs: syncErrorMs, speedPpm: speedPpm, lateBiasMs: lateBiasMs, cushionMs: cushionMs,
-            playedFrames: playedFrames, concealedFrames: concealedFrames, realignCount: realignCount)
+            playedFrames: playedFrames, concealedFrames: concealedFrames, realignCount: realignCount, level: outputLevel)
         lock.unlock()
     }
 
@@ -223,6 +227,7 @@ final class PlayoutEngine {
             speed = 1.0
             speedPpm = 0
             syncErrorMs = 0
+            outputLevel = 0
         }
         if next == .aligning && state == .playing { realignCount += 1 }
         state = next
@@ -334,6 +339,14 @@ final class PlayoutEngine {
             let tailStart = (PlayoutEngine.frame - PlayoutEngine.fade) * PlayoutEngine.ch
             for i in 0..<(PlayoutEngine.fade * PlayoutEngine.ch) { tail[i] = pcm[tailStart + i] }
             haveTail = true
+            var peak: Float = 0
+            var i = 0
+            while i < pcm.count { // every 8th frame is plenty for a meter
+                let v = abs(pcm[i])
+                if v > peak { peak = v }
+                i += 16
+            }
+            outputLevel = max(min(peak, 1), outputLevel * PlayoutEngine.levelDecay)
             lastTimestampUs = frameTs
             missRun = 0
             underflowRun = 0
@@ -341,6 +354,7 @@ final class PlayoutEngine {
             trackCushion(frameTs)
         } else {
             fillConcealment()
+            outputLevel *= PlayoutEngine.levelDecay
             if lastTimestampUs != PlayoutEngine.noTs { lastTimestampUs += Proto.frameUs }
             concealedFrames += 1
             missRun += 1

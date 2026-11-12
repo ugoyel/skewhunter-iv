@@ -97,6 +97,9 @@ class PlayoutEngine(
     /** How much received audio lies ahead of the play cursor, milliseconds. */
     @Volatile var cushionMs: Int = 0; private set
 
+    /** Peak level of the audio being played, 0..1, with a short decay. Drives the visualizer. */
+    @Volatile var outputLevel: Float = 0f; private set
+
     @Volatile var playedFrames: Long = 0; private set
     @Volatile var concealedFrames: Long = 0; private set
     @Volatile var realignCount: Long = 0; private set
@@ -169,6 +172,7 @@ class PlayoutEngine(
             speed = 1.0
             speedPpm = 0
             syncErrorMs = 0f
+            outputLevel = 0f
         }
         if (next == State.ALIGNING && state == State.PLAYING) realignCount++
         state = next
@@ -274,6 +278,14 @@ class PlayoutEngine(
             }
             System.arraycopy(pcm, (FRAME - FADE) * CH, tail, 0, FADE * CH)
             haveTail = true
+            var peak = 0f
+            var i = 0
+            while (i < pcm.size) { // every 8th frame is plenty for a meter
+                val v = abs(pcm[i])
+                if (v > peak) peak = v
+                i += 16
+            }
+            outputLevel = maxOf(minOf(peak, 1f), outputLevel * LEVEL_DECAY)
             lastTimestampUs = frameTs
             missRun = 0
             underflowRun = 0
@@ -281,6 +293,7 @@ class PlayoutEngine(
             trackCushion(frameTs)
         } else {
             fillConcealment(pcm)
+            outputLevel *= LEVEL_DECAY
             if (lastTimestampUs != NO_TS) lastTimestampUs += Proto.FRAME_US
             concealedFrames++
             missRun++
@@ -375,6 +388,7 @@ class PlayoutEngine(
         const val CUSHION_WINDOW_FRAMES = 250 // 5 s
         const val LATE_BIAS_HYSTERESIS_MS = 30
         const val LATE_BIAS_MIN_STEP_MS = 20
+        const val LEVEL_DECAY = 0.9f // per 20 ms frame
         const val RESAMPLER_DELAY_NS = Resampler.DELAY_FRAMES * 1_000_000_000L / Proto.SAMPLE_RATE
         private const val NO_TS = Long.MIN_VALUE
     }
