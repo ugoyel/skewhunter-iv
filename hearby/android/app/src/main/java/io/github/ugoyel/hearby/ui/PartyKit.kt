@@ -44,6 +44,7 @@ import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
@@ -166,7 +167,10 @@ fun HearbyTheme(content: @Composable () -> Unit) {
  */
 @Composable
 fun PartyBackground(energy: Float, modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
-    val drift by looping(28_000, to = 1f, still = 0.12f, label = "drift")
+    // The lights drift slowly, so ~20 redraws a second look identical to 60 and cost a third of
+    // the battery: the backdrop only redraws when the quantised value changes.
+    val rawDrift = looping(28_000, to = 1f, still = 0.12f, label = "drift")
+    val drift by remember { derivedStateOf { (rawDrift.value * DRIFT_STEPS).toInt() / DRIFT_STEPS } }
     val glow by animateFloatAsState(0.34f + 0.24f * energy.coerceIn(0f, 1f), tween(900), label = "glow")
     Box(
         modifier
@@ -186,6 +190,8 @@ fun PartyBackground(energy: Float, modifier: Modifier = Modifier, content: @Comp
         content = content,
     )
 }
+
+private const val DRIFT_STEPS = 560f // 28 s cycle: 20 steps per second
 
 /** A frosted panel floating over the stage. */
 @Composable

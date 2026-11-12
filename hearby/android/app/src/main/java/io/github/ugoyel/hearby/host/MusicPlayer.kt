@@ -49,6 +49,8 @@ class MusicPlayer(context: Context) {
     private var index = -1
     private var playing = false
     private var wanted = 0 // generation of the song the user asked for
+    private var opening = false // the loader is working on `wanted`
+    private var stale = false // the current song must be (re)opened before it can play
     private var error: String? = null
 
     private class Opened(val generation: Int, val decoder: TrackDecoder?, val error: String?)
@@ -93,6 +95,7 @@ class MusicPlayer(context: Context) {
             openLocked()
         }
         playing = !playing && index >= 0
+        if (playing && stale) openLocked() // e.g. after a song failed to open: try again on request
     }
 
     fun next() = synchronized(lock) { advanceLocked() }
@@ -125,27 +128,36 @@ class MusicPlayer(context: Context) {
     }
 
     fun snapshot(): Snapshot = synchronized(lock) {
-        Snapshot(
-            queue.toList(), index, playing, positionFrames * 1000 / Proto.SAMPLE_RATE,
-            loading = index >= 0 && decoderGeneration != wanted, error = error,
-        )
+        Snapshot(queue.toList(), index, playing, positionFrames * 1000 / Proto.SAMPLE_RATE, loading = opening, error = error)
     }
 
-    private fun advanceLocked() {
+    /**
+     * Next song, or stop at the end of the queue. After a song that could not be played, stopping
+     * must not reopen it, or a broken last song would be retried forever.
+     */
+    private fun advanceLocked(afterFailure: Boolean = false) {
         if (index + 1 < queue.size) {
             index++
+            openLocked()
         } else {
-            playing = false // end of the queue: stop, ready to replay the last song
+            playing = false
+            if (afterFailure) {
+                stale = true
+                ++wanted // drop the failed song's decoder (if any)
+            } else {
+                openLocked() // ready to replay the last song from the start
+            }
         }
-        openLocked()
     }
 
     /** Ask the loader for the current song; whatever it opens is adopted only if still wanted. */
     private fun openLocked() {
         val generation = ++wanted
-        error = null
         positionFrames = 0
-        val song = queue.getOrNull(index) ?: return
+        stale = false
+        val song = queue.getOrNull(index)
+        opening = song != null
+        if (song == null) return
         loader.execute {
             val opened = try {
                 Opened(generation, TrackDecoder(appContext, song.uri), null)
@@ -178,7 +190,7 @@ class MusicPlayer(context: Context) {
             // Song over (or broken): fill with silence and move on.
             synchronized(lock) {
                 if (n < 0) error = "Couldn't play \"${queue.getOrNull(index)?.title}\". Skipping it."
-                if (wanted == gen) advanceLocked()
+                if (wanted == gen) advanceLocked(afterFailure = n < 0)
             }
         }
         return n > 0
@@ -186,10 +198,13 @@ class MusicPlayer(context: Context) {
 
     private fun adoptPending() {
         val opened = pending.getAndSet(null) ?: return
-        val current = synchronized(lock) { wanted }
-        if (opened.generation != current) {
-            opened.decoder?.close()
-            return
+        synchronized(lock) {
+            if (opened.generation != wanted) {
+                opened.decoder?.close()
+                return
+            }
+            opening = false
+            if (opened.decoder != null) error = null
         }
         decoder?.close()
         decoder = opened.decoder
@@ -197,7 +212,7 @@ class MusicPlayer(context: Context) {
         if (opened.decoder == null) {
             synchronized(lock) {
                 error = opened.error
-                advanceLocked()
+                if (wanted == opened.generation) advanceLocked(afterFailure = true)
             }
         }
     }

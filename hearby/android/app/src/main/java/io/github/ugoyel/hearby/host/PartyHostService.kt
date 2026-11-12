@@ -147,6 +147,10 @@ class PartyHostService : Service() {
         _state.value = HostUiState(
             running = true, port = s.port, addresses = LocalNet.localIpv4Addresses(), bitrate = bitrate, playoutDelayMs = delayMs,
         )
+        // Songs shared to Hearby before the party started.
+        val waiting = synchronized(pending) { pending.toList().also { pending.clear() } }
+        _pendingSongs.value = 0
+        if (waiting.isNotEmpty()) s.player.addUris(waiting)
     }
 
     /** Tear everything down. Safe to call repeatedly. */
@@ -662,6 +666,25 @@ class PartyHostService : Service() {
         fun clearMessage() = _state.update { it.copy(message = null) }
 
         fun addSongs(uris: List<Uri>) = player?.addUris(uris)
+
+        private val pending = ArrayList<Uri>()
+        private val _pendingSongs = MutableStateFlow(0)
+
+        /** Songs shared to Hearby that will be queued as soon as the party starts. */
+        val pendingSongs: StateFlow<Int> = _pendingSongs.asStateFlow()
+
+        /** Queue songs now if the party is on, or as soon as it starts. */
+        fun queueSongs(uris: List<Uri>) {
+            val p = player
+            if (p != null) {
+                p.addUris(uris)
+            } else {
+                synchronized(pending) {
+                    pending.addAll(uris)
+                    _pendingSongs.value = pending.size
+                }
+            }
+        }
 
         fun playSong(index: Int) = player?.play(index)
 

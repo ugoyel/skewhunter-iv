@@ -274,18 +274,22 @@ Play accepts new apps as an **App Bundle** (`.aab`), not an APK. Besides uploadi
 | Wire format, Android ↔ iOS | The same hex vectors asserted by Kotlin and Swift unit tests; a third implementation in Python (`tools/hearby_probe.py`) interoperates with the Android app | Pass |
 | Clock sync, jitter buffer, resampler | Unit tests on both platforms | Pass |
 | Playout engine | Simulations with clock drift, DAC drift, jitter, 3 % loss, delay spikes, host pauses, slider changes and over-budget latency, in Kotlin and in Swift | Sync error stays under 1.5 ms |
+| Sound check: detector | Chirps placed at known fractional positions in a simulated room (reflections, reverb tail, crowd noise, a loud bass line, a clipped microphone) | Found within 0.1 ms |
+| Sound check: end to end | Three simulated phones running the real engines and clock sync: the DJ, a phone whose speaker is secretly 8 ms late, and a Bluetooth speaker 150 ms late, plus a microphone with its own 17 ms latency | Before: 6.4 ms and 148 ms off. After: within 0.3 ms, and stays there |
+| Same chirp on both platforms | Kotlin and Swift tests check the same reference samples | Pass |
 | Android build | Unit tests, lint, signed and 16 KB-aligned release build; also built on a clean GitHub runner | Pass |
 | iOS build | `swift test` and an `xcodebuild` simulator build on a macOS runner | Pass |
 | Screen design | Every Android screen rendered on the JVM with sample data; every iOS screen screenshotted in the iOS Simulator through the demo mode | Reviewed by eye |
-| Android host, on an Android 14 emulator | Release APK (1.1.0, party UI): capture consent, `mediaProjection` foreground service, capture of a tone played by another process, Opus at the configured 96 kbit/s in 20 ms packets, received by the Python listener with no loss; mDNS registration accepted; clean stop | Pass |
-| Android listener, on an Android 14 emulator | Release APK (1.1.0, party UI): joined the Python host, clock sync, MediaCodec Opus decode, AudioTrack playout reaching "Playing in sync", offset controls and per-output memory, leave | Pass |
+| DJ on an Android 14 emulator | Release APK 1.2.0: party starts as a plain `mediaPlayback` service (no screen-capture prompt); a 44.1 kHz MP3 opened with Hearby was decoded, resampled and played, with its title and artist; a Python guest received the Opus stream with no loss plus "now playing", pause and resume; the sound check sent the guest its chirp request and reported that it could not hear itself (the emulator has no speaker-to-microphone path) | Pass |
 
 **Not verified yet, and needed before a store release:**
 
-- Anything on physical phones. The emulator had no hardware acceleration and its audio device ran
-  slower than real time, so it shows that the pipelines work, not how tightly they sync.
+- Anything on physical phones. The emulator had no hardware acceleration and was badly overloaded
+  (the DJ's sending thread got a fraction of the CPU it needs), so it shows that the pipelines work,
+  not how they perform or how tightly phones sync.
+- **The sound check with real speakers and microphones.** The method is proven in simulation, but
+  real phone microphones, speakers, rooms and Bluetooth stacks have not been tried.
 - Real Wi-Fi and hotspot behaviour, including discovery across devices.
-- Bluetooth outputs and how well each phone reports its own output latency.
 - The iOS app at runtime. It compiles and its sync core passes the same tests as Android, but the
   AudioToolbox Opus decoder and AVAudioEngine timing have not been exercised on a device.
 

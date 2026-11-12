@@ -1,6 +1,7 @@
 package io.github.ugoyel.hearby.ui
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -129,6 +130,8 @@ fun MainScreen() {
     val host by PartyHostService.state.collectAsStateWithLifecycle()
     val listen by ReceiverService.state.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(if (listen.phase != Phase.IDLE && !host.running) 1 else 0) }
+    val sharedSongs by PartyHostService.pendingSongs.collectAsStateWithLifecycle()
+    LaunchedEffect(sharedSongs) { if (sharedSongs > 0) tab = 0 }
     val listening = listen.phase != Phase.IDLE && listen.phase != Phase.ENDED
 
     // Confetti for the two happy moments: someone joins your party, or you lock in to someone else's.
@@ -193,6 +196,8 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
     var bitrate by rememberSaveable { mutableIntStateOf(96_000) }
     var delayMs by rememberSaveable { mutableIntStateOf(350) }
     var micNotice by rememberSaveable { mutableStateOf<String?>(null) }
+    var pickerMissing by rememberSaveable { mutableStateOf(false) }
+    val waitingSongs by PartyHostService.pendingSongs.collectAsStateWithLifecycle()
 
     // Only for the "you're the DJ" notification; the party starts either way.
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -231,6 +236,14 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
         }
     }
 
+    fun pickSongs() {
+        try {
+            songPicker.launch(arrayOf("audio/*"))
+        } catch (e: ActivityNotFoundException) {
+            pickerMissing = true
+        }
+    }
+
     fun soundCheck() {
         if (context.hasPermission(Manifest.permission.RECORD_AUDIO)) PartyHostService.soundCheck()
         else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -240,7 +253,7 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
         HostLive(
             state,
             DjActions(
-                onAddSongs = { songPicker.launch(arrayOf("audio/*")) },
+                onAddSongs = ::pickSongs,
                 onToggle = { PartyHostService.togglePlay() },
                 onNext = { PartyHostService.next() },
                 onPrevious = { PartyHostService.previous() },
@@ -250,12 +263,21 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
                 onStop = { PartyHostService.stop(context) },
             ),
             micNotice = micNotice,
+            notice = if (pickerMissing) {
+                "This phone has no file picker. Open a song in your file manager and choose Share or Open with › Hearby."
+            } else {
+                null
+            },
         )
     } else {
         HostIdle(
             bitrate = bitrate, onBitrate = { bitrate = it },
             delayMs = delayMs, onDelay = { delayMs = it },
-            notice = state.message,
+            notice = state.message ?: when (waitingSongs) {
+                0 -> null
+                1 -> "1 song is ready. Start the party to play it."
+                else -> "$waitingSongs songs are ready. Start the party to play them."
+            },
             busyListening = listening,
             onStart = ::start,
         )
@@ -319,7 +341,7 @@ internal fun HostIdle(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String? = null) {
+internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String? = null, notice: String? = null) {
     val song = state.queue.getOrNull(state.current)
     GlassCard(lit = true) {
         HeroRow(
@@ -366,6 +388,7 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
     }
 
     state.songError?.let { Notice(it) }
+    notice?.let { Notice(it) }
 
     if (state.queue.isNotEmpty()) Queue(state, actions)
 

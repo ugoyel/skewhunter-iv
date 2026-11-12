@@ -145,10 +145,10 @@ def listen(args):
             playing = data[8] & 1
             title = read_name(data, 9)
             artist = read_name(data, 10 + data[9])
-            song = f"{title} - {artist}" if artist else title
-            if song != now_playing:
-                now_playing = song
-                print(f"now playing: {song or '(nothing)'}{'' if playing else ' (paused)'}")
+            song = (f"{title} - {artist}" if artist else title) or "(nothing)"
+            if (song, playing) != now_playing:
+                now_playing = (song, playing)
+                print(f"now playing: {song}{'' if playing else ' (paused)'}")
         elif kind == CHIRP:
             target, media_us = struct.unpack(">IQ", data[8:20])
             if target == client_id:
