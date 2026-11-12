@@ -78,6 +78,19 @@ class PlayoutEngine(
             }
         }
 
+    /** Correction measured by the DJ's sound check, microseconds. Positive plays later. */
+    @Volatile
+    var calibrationUs: Long = 0
+        set(value) {
+            if (field != value) {
+                field = value
+                requestRealign(resetLateBias = true)
+            }
+        }
+
+    /** Sound-check chirps waiting to be mixed into the output at their exact media time. */
+    val tones = ToneScheduler()
+
     // ---- observable state -----------------------------------------------------------------------
 
     @Volatile var state: State = State.WAITING; private set
@@ -143,6 +156,7 @@ class PlayoutEngine(
         nextSeq = -1
         lastTimestampUs = NO_TS
         lateBiasMs = 0
+        tones.clear()
         haveTail = false
         enter(State.WAITING)
     }
@@ -187,7 +201,10 @@ class PlayoutEngine(
     private fun presentationNs(): Long =
         ts.timeNs + (written - ts.framePosition) * 1_000_000_000L / Proto.SAMPLE_RATE
 
-    private fun totalDelayUs(): Long = (playoutDelayMs + userOffsetMs + lateBiasMs) * 1000L
+    private fun totalDelayUs(): Long = (playoutDelayMs + userOffsetMs + lateBiasMs) * 1000L + calibrationUs
+
+    /** Everything this device adds on top of the host's playout delay, µs (reported to the host). */
+    fun adjustUs(): Long = (userOffsetMs + lateBiasMs) * 1000L + calibrationUs
 
     private fun pumpAligning() {
         val newestTs = jitter.newestTimestampUs()
@@ -300,6 +317,9 @@ class PlayoutEngine(
             // Nothing at or beyond this frame has arrived: we are consuming faster than the network delivers.
             if (jitter.newestSeq < nextSeq) underflowRun++ else underflowRun = 0
         }
+
+        // Sound-check chirps go in after the fades, at their exact sample on the media timeline.
+        if (lastTimestampUs != NO_TS) tones.mixInto(pcm, lastTimestampUs, FRAME, CH)
 
         val n = resampler.process(pcm, FRAME, speed, resampled)
         sink.write(resampled, n)

@@ -24,7 +24,7 @@ import time
 MAGIC = b"HB"
 VERSION = 1
 PORT = 47800
-AUDIO, JOIN, JOIN_ACK, SYNC_REQ, SYNC_RESP, LEAVE, BYE, DISCOVER, DISCOVER_RESP = range(1, 10)
+AUDIO, JOIN, JOIN_ACK, SYNC_REQ, SYNC_RESP, LEAVE, BYE, DISCOVER, DISCOVER_RESP, NOW_PLAYING, CHIRP, OFFSET = range(1, 13)
 FRAME_US = 20_000
 # The canonical Opus "silence" packet: TOC 0xF8 = CELT fullband, 20 ms, mono, one frame.
 OPUS_SILENCE = bytes([0xF8, 0xFF, 0xFE])
@@ -92,6 +92,7 @@ def listen(args):
     last_seq = last_ts = None
     spacings, sizes, durations, arrivals = [], [], set(), []
     last_arrival = None
+    now_playing = None
     started = last_report = time.monotonic()
 
     while time.monotonic() - started < args.seconds:
@@ -103,7 +104,8 @@ def listen(args):
             last_sync = now
             syncs += 1
             rtt = best[0] if best else 0
-            sock.sendto(header(SYNC_REQ) + struct.pack(">IQIHBB", client_id, now_us(), rtt, 0, 2, 0), host)
+            # last field: our playout adjustment (slider + sound-check correction), none here
+            sock.sendto(header(SYNC_REQ) + struct.pack(">IQIHBBi", client_id, now_us(), rtt, 0, 2, 0, 0), host)
         try:
             data, _ = sock.recvfrom(2048)
         except socket.timeout:
@@ -139,6 +141,18 @@ def listen(args):
             if last_arrival is not None:
                 arrivals.append(rx - last_arrival)
             last_seq, last_ts, last_arrival = seq, ts, rx
+        elif kind == NOW_PLAYING:
+            playing = data[8] & 1
+            title = read_name(data, 9)
+            artist = read_name(data, 10 + data[9])
+            song = f"{title} - {artist}" if artist else title
+            if song != now_playing:
+                now_playing = song
+                print(f"now playing: {song or '(nothing)'}{'' if playing else ' (paused)'}")
+        elif kind == CHIRP:
+            target, media_us = struct.unpack(">IQ", data[8:20])
+            if target == client_id:
+                print(f"sound check: asked to chirp at media time {media_us} us (this probe has no speaker)")
         elif kind == BYE:
             print("host said BYE")
             break
@@ -192,7 +206,7 @@ def host(args):
             sock.sendto(header(JOIN_ACK) + struct.pack(">IIBBH", stream_id, 48_000, 2, 20, args.delay)
                         + name_field("hearby_probe"), addr)
         elif kind == SYNC_REQ and addr in clients:
-            _cid, t0, rtt, buffer_ms, status, _ = struct.unpack(">IQIHBB", data[4:24])
+            _cid, t0, rtt, buffer_ms, status, _ = struct.unpack(">IQIHBB", data[4:24])  # 24 or 28 bytes
             clients[addr].update(seen=time.monotonic(), status=status, rtt=rtt, buffer=buffer_ms)
             sock.sendto(header(SYNC_RESP) + struct.pack(">IQQQHH", stream_id, t0, rx, now_us(), args.delay, 0), addr)
         elif kind == LEAVE and addr in clients:

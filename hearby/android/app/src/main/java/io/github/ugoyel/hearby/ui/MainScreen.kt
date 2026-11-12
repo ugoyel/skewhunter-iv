@@ -1,19 +1,15 @@
 package io.github.ugoyel.hearby.ui
 
 import android.Manifest
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.projection.MediaProjectionConfig
-import android.media.projection.MediaProjectionManager
-import android.net.Uri
 import android.os.Build
-import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,19 +38,30 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.Android
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.Celebration
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Headphones
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Hearing
 import androidx.compose.material.icons.rounded.PhoneIphone
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Speaker
+import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
@@ -73,9 +80,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -89,7 +98,7 @@ import io.github.ugoyel.hearby.client.Phase
 import io.github.ugoyel.hearby.client.ReceiverService
 import io.github.ugoyel.hearby.client.ReceiverUiState
 import io.github.ugoyel.hearby.core.Proto
-import io.github.ugoyel.hearby.host.AudioCaptureAndOpusService
+import io.github.ugoyel.hearby.host.PartyHostService
 import io.github.ugoyel.hearby.host.HostUiState
 import io.github.ugoyel.hearby.host.ListenerInfo
 import java.util.Locale
@@ -117,7 +126,7 @@ private val MODES = listOf("Be the DJ" to Icons.Rounded.GraphicEq, "Join a party
 
 @Composable
 fun MainScreen() {
-    val host by AudioCaptureAndOpusService.state.collectAsStateWithLifecycle()
+    val host by PartyHostService.state.collectAsStateWithLifecycle()
     val listen by ReceiverService.state.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(if (listen.phase != Phase.IDLE && !host.running) 1 else 0) }
     val listening = listen.phase != Phase.IDLE && listen.phase != Phase.ENDED
@@ -183,56 +192,86 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
     val context = LocalContext.current
     var bitrate by rememberSaveable { mutableIntStateOf(96_000) }
     var delayMs by rememberSaveable { mutableIntStateOf(350) }
-    var notice by rememberSaveable { mutableStateOf<String?>(null) }
-    var micDenied by rememberSaveable { mutableStateOf(false) }
+    var micNotice by rememberSaveable { mutableStateOf<String?>(null) }
 
-    // Step 2: Android's own "start recording or casting?" prompt. Its result is the capture token.
-    val projectionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val data = result.data
-        if (result.resultCode == Activity.RESULT_OK && data != null) {
-            notice = null
-            AudioCaptureAndOpusService.start(context, result.resultCode, data, bitrate, delayMs)
-        } else {
-            notice = "To get the party going, tap Start on Android's sharing prompt."
+    // Only for the "you're the DJ" notification; the party starts either way.
+    val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        PartyHostService.start(context, bitrate, delayMs)
+    }
+    // Songs come from the system file picker, which grants access to exactly the files chosen:
+    // no storage permission needed.
+    val songPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) {
+            for (uri in uris) {
+                try {
+                    context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (e: Exception) {
+                    // the picker's own grant is enough while the party runs
+                }
+            }
+            PartyHostService.addSongs(uris)
         }
     }
-    // Step 1: runtime permissions. Android guards playback capture with RECORD_AUDIO.
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        if (context.hasPermission(Manifest.permission.RECORD_AUDIO)) {
-            micDenied = false
-            projectionLauncher.launch(captureIntent(context))
+    val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            micNotice = null
+            PartyHostService.soundCheck()
         } else {
-            micDenied = true
-            notice = "Android protects audio sharing with the Microphone permission. Hearby never listens to the mic; it only shares what this phone plays."
+            micNotice = "The sound check uses this phone's microphone for a few seconds to hear each phone's beep. " +
+                "Nothing is recorded or sent. You can still fine-tune each phone by hand."
         }
     }
 
     fun start() {
-        AudioCaptureAndOpusService.clearMessage()
-        val needed = buildList {
-            if (!context.hasPermission(Manifest.permission.RECORD_AUDIO)) add(Manifest.permission.RECORD_AUDIO)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                !context.hasPermission(Manifest.permission.POST_NOTIFICATIONS)
-            ) add(Manifest.permission.POST_NOTIFICATIONS)
+        PartyHostService.clearMessage()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !context.hasPermission(Manifest.permission.POST_NOTIFICATIONS)) {
+            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            PartyHostService.start(context, bitrate, delayMs)
         }
-        if (needed.isEmpty()) projectionLauncher.launch(captureIntent(context))
-        else permissionLauncher.launch(needed.toTypedArray())
+    }
+
+    fun soundCheck() {
+        if (context.hasPermission(Manifest.permission.RECORD_AUDIO)) PartyHostService.soundCheck()
+        else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 
     if (state.running) {
-        HostLive(state, onStop = { AudioCaptureAndOpusService.stop(context) })
+        HostLive(
+            state,
+            DjActions(
+                onAddSongs = { songPicker.launch(arrayOf("audio/*")) },
+                onToggle = { PartyHostService.togglePlay() },
+                onNext = { PartyHostService.next() },
+                onPrevious = { PartyHostService.previous() },
+                onPlay = { PartyHostService.playSong(it) },
+                onRemove = { PartyHostService.removeSong(it) },
+                onSoundCheck = ::soundCheck,
+                onStop = { PartyHostService.stop(context) },
+            ),
+            micNotice = micNotice,
+        )
     } else {
         HostIdle(
             bitrate = bitrate, onBitrate = { bitrate = it },
             delayMs = delayMs, onDelay = { delayMs = it },
-            notice = state.message ?: notice,
-            showSettingsLink = micDenied,
+            notice = state.message,
             busyListening = listening,
             onStart = ::start,
-            onOpenSettings = { context.openAppSettings() },
         )
     }
 }
+
+internal class DjActions(
+    val onAddSongs: () -> Unit = {},
+    val onToggle: () -> Unit = {},
+    val onNext: () -> Unit = {},
+    val onPrevious: () -> Unit = {},
+    val onPlay: (Int) -> Unit = {},
+    val onRemove: (Int) -> Unit = {},
+    val onSoundCheck: () -> Unit = {},
+    val onStop: () -> Unit = {},
+)
 
 @Composable
 internal fun HostIdle(
@@ -241,25 +280,16 @@ internal fun HostIdle(
     delayMs: Int,
     onDelay: (Int) -> Unit,
     notice: String?,
-    showSettingsLink: Boolean,
     busyListening: Boolean,
     onStart: () -> Unit,
-    onOpenSettings: () -> Unit,
 ) {
     Hero(
         icon = Icons.Rounded.Speaker, active = false,
         title = "Be the DJ",
-        body = "Play anything on this phone and everyone nearby hears it, perfectly in sync. No internet needed.",
+        body = "Play songs from this phone. Every phone at the party plays them at the same moment, this one included. No internet needed.",
     )
 
-    notice?.let { text ->
-        Notice(text) {
-            if (showSettingsLink) {
-                Spacer(Modifier.height(10.dp))
-                GhostButton("Open app settings", onOpenSettings, height = 44.dp)
-            }
-        }
-    }
+    notice?.let { Notice(it) }
 
     GlassCard {
         SectionTitle("Sound quality", "Lite goes easy on a busy hotspot. Studio sounds best.")
@@ -271,7 +301,7 @@ internal fun HostIdle(
     }
 
     GlassCard {
-        SectionTitle("Sync cushion", CUSHIONS.firstOrNull { it.delayMs == delayMs }?.blurb ?: "How far behind this phone the crowd plays.")
+        SectionTitle("Sync cushion", CUSHIONS.firstOrNull { it.delayMs == delayMs }?.blurb ?: "How far ahead Hearby plans the music.")
         for (row in CUSHIONS.chunked(2)) {
             Row(Modifier.padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 for (c in row) {
@@ -289,17 +319,40 @@ internal fun HostIdle(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun HostLive(state: HostUiState, onStop: () -> Unit) {
+internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String? = null) {
+    val song = state.queue.getOrNull(state.current)
     GlassCard(lit = true) {
-        HeroRow(Icons.Rounded.GraphicEq, active = true, level = state.level, title = "You're live!", body = "Hit play in any app. The crowd hears it in sync.")
-        Spacer(Modifier.height(14.dp))
-        Equalizer(state.level)
-        if (state.silentMs > 6_000) {
-            Spacer(Modifier.height(10.dp))
+        HeroRow(
+            Icons.Rounded.GraphicEq, active = true, level = state.level,
+            title = "You're live!",
+            body = if (state.queue.isEmpty()) "Add songs from this phone to get the party going." else "Every phone plays this in sync, this one too.",
+        )
+        if (song != null) {
+            Spacer(Modifier.height(16.dp))
+            Text(song.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                "Nothing coming through yet. Press play in your music or video app. A few apps (Netflix, Prime Video, Spotify) don't allow sharing.",
-                style = MaterialTheme.typography.bodySmall, color = Party.Sun,
+                when {
+                    state.loading -> "Loading…"
+                    song.artist.isNotBlank() -> song.artist
+                    else -> " "
+                },
+                style = MaterialTheme.typography.bodyMedium, color = Party.InkSoft, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
+            Spacer(Modifier.height(12.dp))
+            Equalizer(if (state.playing) state.level else 0f)
+            Spacer(Modifier.height(8.dp))
+            SongProgress(state.positionMs, song.durationMs)
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                RoundButton(Icons.Rounded.SkipPrevious, "Previous", actions.onPrevious)
+                Spacer(Modifier.width(22.dp))
+                PlayButton(state.playing, actions.onToggle)
+                Spacer(Modifier.width(22.dp))
+                RoundButton(Icons.Rounded.SkipNext, "Next", actions.onNext)
+            }
+        } else {
+            Spacer(Modifier.height(16.dp))
+            GradientButton("Add songs", actions.onAddSongs, Modifier.fillMaxWidth(), icon = Icons.Rounded.LibraryMusic)
         }
         Spacer(Modifier.height(14.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -308,17 +361,109 @@ internal fun HostLive(state: HostUiState, onStop: () -> Unit) {
             }
             InfoPill("${state.bitrate / 1000} kbps")
             InfoPill("${state.playoutDelayMs} ms cushion")
+            if (state.outputIsBluetooth) InfoPill(state.outputName.removePrefix("Bluetooth: "), Icons.Rounded.Bluetooth)
         }
     }
 
+    state.songError?.let { Notice(it) }
+
+    if (state.queue.isNotEmpty()) Queue(state, actions)
+
+    SoundCheckCard(state, actions.onSoundCheck, micNotice)
+
     Crowd(state.listeners)
 
-    Caption(
-        "Psst: this phone plays live while the crowd is ${state.playoutDelayMs} ms behind. " +
-            "Turn its own volume down to dodge the echo. Your crowd won't notice.",
-    )
+    GradientButton("End the party", actions.onStop, Modifier.fillMaxWidth(), icon = Icons.Rounded.Stop, brush = Party.Stop, glow = Party.Coral)
+}
 
-    GradientButton("End the party", onStop, Modifier.fillMaxWidth(), icon = Icons.Rounded.Stop, brush = Party.Stop, glow = Party.Coral)
+@Composable
+private fun Queue(state: HostUiState, actions: DjActions) {
+    GlassCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Up next", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = Color.White, modifier = Modifier.weight(1f))
+            GhostButton("Add songs", actions.onAddSongs, icon = Icons.Rounded.Add, height = 42.dp)
+        }
+        Spacer(Modifier.height(6.dp))
+        state.queue.forEachIndexed { index, song ->
+            if (index > 0) HorizontalDivider(color = Party.GlassStroke)
+            val current = index == state.current
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable { actions.onPlay(index) }
+                    .padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.width(30.dp), contentAlignment = Alignment.Center) {
+                    if (current) {
+                        Icon(Icons.Rounded.GraphicEq, "Playing", tint = Party.Pink, modifier = Modifier.size(20.dp))
+                    } else {
+                        Text("${index + 1}", style = MaterialTheme.typography.labelLarge, color = Party.InkFaint)
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleMedium, color = if (current) Party.Pink else Color.White,
+                    )
+                    val sub = listOf(song.artist, duration(song.durationMs)).filter { it.isNotBlank() }.joinToString(" · ")
+                    if (sub.isNotBlank()) Text(sub, style = MaterialTheme.typography.bodySmall, color = Party.InkSoft, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                IconButton(onClick = { actions.onRemove(index) }) {
+                    Icon(Icons.Rounded.Close, "Remove ${song.title}", tint = Party.InkFaint)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SoundCheckCard(state: HostUiState, onRun: () -> Unit, micNotice: String?) {
+    val check = state.soundCheck
+    GlassCard(lit = check.running) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Hearing, null, tint = Party.Lime)
+            Spacer(Modifier.width(10.dp))
+            Text("Sound check", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = Color.White, modifier = Modifier.weight(1f))
+            if (check.done && !check.running) Tag("Done", Party.Lime)
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Lines every phone up to the millisecond, Bluetooth speakers included. Gather the phones near this one, " +
+                "turn their volume up, and Hearby beeps each one in turn while this phone listens.",
+            style = MaterialTheme.typography.bodyMedium, color = Party.InkSoft,
+        )
+        Spacer(Modifier.height(12.dp))
+        if (check.running) {
+            LinearProgressIndicator(
+                progress = { check.progress.coerceIn(0.05f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape),
+                color = Party.Lime, trackColor = Party.GlassStroke,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(check.message ?: "Listening…", style = MaterialTheme.typography.bodyMedium, color = Color.White)
+        } else {
+            check.message?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = if (check.done) Party.Lime else Party.Sun)
+                Spacer(Modifier.height(12.dp))
+            }
+            micNotice?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = Party.Sun)
+                Spacer(Modifier.height(12.dp))
+            }
+            GradientButton(
+                if (check.done) "Run it again" else "Run sound check", onRun, Modifier.fillMaxWidth(),
+                icon = Icons.Rounded.Hearing, height = 52.dp,
+                enabled = state.listeners.any { it.status == Proto.STATUS_SYNCED || it.status == Proto.STATUS_LATE },
+            )
+            if (state.listeners.isEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text("Available once friends have joined.", style = MaterialTheme.typography.bodySmall, color = Party.InkFaint)
+            }
+        }
+    }
 }
 
 @Composable
@@ -350,21 +495,74 @@ private fun Crowd(listeners: List<ListenerInfo>) {
                             modifier = Modifier.size(14.dp), tint = Party.InkFaint,
                         )
                         Spacer(Modifier.width(4.dp))
-                        Text(
-                            "${fmt1(l.rttMs)} ms ping · ${l.bufferMs} ms buffered",
-                            style = MaterialTheme.typography.bodySmall, color = Party.InkSoft, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        )
+                        val detail = l.check?.takeIf { it.heard }?.let { "was ${signed1(it.beforeMs)} ms off, fixed" }
+                            ?: "${fmt1(l.rttMs)} ms ping · ${l.bufferMs} ms buffered"
+                        Text(detail, style = MaterialTheme.typography.bodySmall, color = Party.InkSoft, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 Spacer(Modifier.width(8.dp))
-                when (l.status) {
-                    Proto.STATUS_SYNCED -> Tag("In sync", Party.Lime)
-                    Proto.STATUS_LATE -> Tag("Behind", Party.Coral)
+                val check = l.check
+                when {
+                    check != null && check.heard && l.status != Proto.STATUS_LATE -> Tag("${signed1(check.afterMs)} ms", Party.Lime)
+                    check != null && !check.heard -> Tag("Not heard", Party.Coral)
+                    l.status == Proto.STATUS_SYNCED -> Tag("In sync", Party.Lime)
+                    l.status == Proto.STATUS_LATE -> Tag("Behind", Party.Coral)
                     else -> Tag("Tuning in", Party.Sun)
                 }
             }
         }
     }
+}
+
+@Composable
+private fun SongProgress(positionMs: Long, durationMs: Long) {
+    val fraction = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+    LinearProgressIndicator(
+        progress = { fraction },
+        modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape),
+        color = Party.Pink, trackColor = Party.GlassStroke,
+    )
+    Spacer(Modifier.height(4.dp))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(duration(positionMs), style = MaterialTheme.typography.labelSmall, color = Party.InkFaint)
+        Text(if (durationMs > 0) duration(durationMs) else "", style = MaterialTheme.typography.labelSmall, color = Party.InkFaint)
+    }
+}
+
+@Composable
+private fun PlayButton(playing: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(72.dp)
+            .shadow(18.dp, CircleShape, ambientColor = Party.Pink, spotColor = Party.Violet)
+            .clip(CircleShape)
+            .background(Party.Brand)
+            .clickable(role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Pause" else "Play", tint = Color.White, modifier = Modifier.size(40.dp))
+    }
+}
+
+@Composable
+private fun RoundButton(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(52.dp)
+            .clip(CircleShape)
+            .background(Party.Glass)
+            .border(1.dp, Party.GlassStroke, CircleShape)
+            .clickable(role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, label, tint = Color.White, modifier = Modifier.size(28.dp))
+    }
+}
+
+private fun duration(ms: Long): String {
+    if (ms <= 0) return ""
+    val s = ms / 1000
+    return "%d:%02d".format(Locale.US, s / 60, s % 60)
 }
 
 // ---- guest (listener) -----------------------------------------------------------------------------------
@@ -514,8 +712,24 @@ internal fun Listening(
             body = "DJ: $dj" + if (output.isNotBlank()) " · $output" else "",
         )
         if (playing) {
+            if (state.songTitle.isNotBlank()) {
+                Spacer(Modifier.height(14.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.MusicNote, null, tint = Party.Pink, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(state.songTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        val sub = if (state.songPlaying) state.songArtist else "Paused by the DJ"
+                        if (sub.isNotBlank()) Text(sub, style = MaterialTheme.typography.bodySmall, color = Party.InkSoft, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
             Spacer(Modifier.height(14.dp))
             Equalizer(state.level)
+            if (state.soundChecked) {
+                Spacer(Modifier.height(12.dp))
+                Tag("Sound-checked by the DJ", Party.Lime)
+            }
             Spacer(Modifier.height(14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val tight = abs(state.syncErrorMs) < 5f && state.lateBiasMs == 0
@@ -675,27 +889,6 @@ private fun Nudge(label: String, modifier: Modifier = Modifier, enabled: Boolean
 
 private fun Context.hasPermission(permission: String) =
     ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
-
-private fun Context.openAppSettings() {
-    startActivity(
-        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-    )
-}
-
-/**
- * The system capture-consent intent. On Android 14+ we ask for the whole display rather than
- * offering "a single app": audio capture is what we are after, and it should cover whichever app
- * the user switches to.
- */
-private fun captureIntent(context: Context): Intent {
-    val manager = context.getSystemService(MediaProjectionManager::class.java)
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-        manager.createScreenCaptureIntent(MediaProjectionConfig.createConfigForDefaultDisplay())
-    } else {
-        manager.createScreenCaptureIntent()
-    }
-}
 
 private val IPV4 = Regex("""^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?::(\d{1,5}))?$""")
 

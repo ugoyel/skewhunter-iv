@@ -48,11 +48,36 @@ final class ProtocolTests: XCTestCase {
     }
 
     func testSyncRequest() {
-        let b = Wire.encodeSyncReq(clientId: 0xDEAD_BEEF, t0Us: 0x0000_0001_0203_0405, rttUs: 2500, bufferMs: 180, status: Proto.statusSynced)
-        XCTAssertEqual(hex(b), "48420104" + "deadbeef" + "0000000102030405" + "000009c4" + "00b4" + "02" + "00")
+        let b = Wire.encodeSyncReq(
+            clientId: 0xDEAD_BEEF, t0Us: 0x0000_0001_0203_0405, rttUs: 2500, bufferMs: 180, status: Proto.statusSynced, adjustUs: -120_000)
+        XCTAssertEqual(hex(b), "48420104" + "deadbeef" + "0000000102030405" + "000009c4" + "00b4" + "02" + "00" + "fffe2b40")
         XCTAssertEqual(
             Wire.decodeSyncReq(b),
-            SyncReqMsg(clientId: 0xDEAD_BEEF, t0Us: 0x0000_0001_0203_0405, rttUs: 2500, bufferMs: 180, status: Proto.statusSynced))
+            SyncReqMsg(
+                clientId: 0xDEAD_BEEF, t0Us: 0x0000_0001_0203_0405, rttUs: 2500, bufferMs: 180, status: Proto.statusSynced,
+                adjustUs: -120_000))
+        // The original 24-byte form (no adjust field) is still understood.
+        XCTAssertEqual(Wire.decodeSyncReq(Array(b.prefix(24)))?.adjustUs, 0)
+    }
+
+    func testNowPlaying() {
+        let b = Wire.encodeNowPlaying(streamId: 0x0A0B_0C0D, playing: true, title: "Song", artist: "Band")
+        XCTAssertEqual(hex(b), "4842010a" + "0a0b0c0d" + "01" + "04" + "536f6e67" + "04" + "42616e64")
+        XCTAssertEqual(Wire.decodeNowPlaying(b), NowPlayingMsg(streamId: 0x0A0B_0C0D, playing: true, title: "Song", artist: "Band"))
+        XCTAssertNil(Wire.decodeNowPlaying(Array(b.dropLast())))
+        XCTAssertEqual(hex(Wire.encodeNowPlaying(streamId: 1, playing: false, title: "", artist: "")), "4842010a" + "00000001" + "00" + "00" + "00")
+    }
+
+    func testChirp() {
+        let b = Wire.encodeChirp(streamId: 0x0A0B_0C0D, clientId: 0xDEAD_BEEF, mediaTimeUs: 0x0000_0001_0203_0405, checkId: 7)
+        XCTAssertEqual(hex(b), "4842010b" + "0a0b0c0d" + "deadbeef" + "0000000102030405" + "0007" + "0000")
+        XCTAssertEqual(Wire.decodeChirp(b), ChirpMsg(streamId: 0x0A0B_0C0D, clientId: 0xDEAD_BEEF, mediaTimeUs: 0x0000_0001_0203_0405, checkId: 7))
+    }
+
+    func testOffset() {
+        let b = Wire.encodeOffset(streamId: 0x0A0B_0C0D, clientId: 0xDEAD_BEEF, adjustUs: -6_500, checkId: 7, errorUs: 6_500)
+        XCTAssertEqual(hex(b), "4842010c" + "0a0b0c0d" + "deadbeef" + "ffffe69c" + "0007" + "1964")
+        XCTAssertEqual(Wire.decodeOffset(b), OffsetMsg(streamId: 0x0A0B_0C0D, clientId: 0xDEAD_BEEF, adjustUs: -6_500, checkId: 7, errorUs: 6_500))
     }
 
     func testSyncResponse() {

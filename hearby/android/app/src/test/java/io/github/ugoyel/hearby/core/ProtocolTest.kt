@@ -61,14 +61,53 @@ class ProtocolTest {
 
     @Test
     fun syncRequest() {
-        val b = Wire.encodeSyncReq(0xDEADBEEFL, 0x0000000102030405L, 2500, 180, Proto.STATUS_SYNCED)
-        assertEquals("48420104" + "deadbeef" + "0000000102030405" + "000009c4" + "00b4" + "02" + "00", hex(b))
+        val b = Wire.encodeSyncReq(0xDEADBEEFL, 0x0000000102030405L, 2500, 180, Proto.STATUS_SYNCED, adjustUs = -120_000)
+        assertEquals("48420104" + "deadbeef" + "0000000102030405" + "000009c4" + "00b4" + "02" + "00" + "fffe2b40", hex(b))
         val m = Wire.decodeSyncReq(b, b.size)!!
         assertEquals(0xDEADBEEFL, m.clientId)
         assertEquals(0x0000000102030405L, m.t0Us)
         assertEquals(2500L, m.rttUs)
         assertEquals(180, m.bufferMs)
         assertEquals(Proto.STATUS_SYNCED, m.status)
+        assertEquals(-120_000L, m.adjustUs)
+        // The original 24-byte form (no adjust field) is still understood.
+        val legacy = Wire.decodeSyncReq(b, 24)!!
+        assertEquals(0L, legacy.adjustUs)
+        assertEquals(180, legacy.bufferMs)
+    }
+
+    @Test
+    fun nowPlaying() {
+        val b = WireParty.encodeNowPlaying(0x0A0B0C0DL, true, "Song", "Band")
+        assertEquals("4842010a" + "0a0b0c0d" + "01" + "04" + "536f6e67" + "04" + "42616e64", hex(b))
+        val m = WireParty.decodeNowPlaying(b, b.size)!!
+        assertEquals(0x0A0B0C0DL, m.streamId)
+        assertEquals(true, m.playing)
+        assertEquals("Song", m.title)
+        assertEquals("Band", m.artist)
+        assertNull(WireParty.decodeNowPlaying(b, b.size - 1))
+        val paused = WireParty.encodeNowPlaying(1, false, "", "")
+        assertEquals("4842010a" + "00000001" + "00" + "00" + "00", hex(paused))
+    }
+
+    @Test
+    fun chirp() {
+        val b = WireParty.encodeChirp(0x0A0B0C0DL, 0xDEADBEEFL, 0x0000000102030405L, 7)
+        assertEquals("4842010b" + "0a0b0c0d" + "deadbeef" + "0000000102030405" + "0007" + "0000", hex(b))
+        val m = WireParty.decodeChirp(b, b.size)!!
+        assertEquals(0xDEADBEEFL, m.clientId)
+        assertEquals(0x0000000102030405L, m.mediaTimeUs)
+        assertEquals(7, m.checkId)
+    }
+
+    @Test
+    fun offset() {
+        val b = WireParty.encodeOffset(0x0A0B0C0DL, 0xDEADBEEFL, -6_500, 7, 6_500)
+        assertEquals("4842010c" + "0a0b0c0d" + "deadbeef" + "ffffe69c" + "0007" + "1964", hex(b))
+        val m = WireParty.decodeOffset(b, b.size)!!
+        assertEquals(-6_500L, m.adjustUs)
+        assertEquals(7, m.checkId)
+        assertEquals(6_500, m.errorUs)
     }
 
     @Test

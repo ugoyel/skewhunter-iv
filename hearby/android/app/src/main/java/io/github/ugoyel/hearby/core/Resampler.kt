@@ -17,7 +17,17 @@ import kotlin.math.sqrt
  *
  * Mirrored by ios/Hearby/Core/Resampler.swift.
  */
-class Resampler(private val channels: Int = 2, maxInputFrames: Int = Proto.FRAME_SAMPLES) {
+class Resampler(
+    private val channels: Int = 2,
+    maxInputFrames: Int = Proto.FRAME_SAMPLES,
+    /**
+     * Low-pass corner as a fraction of the input Nyquist frequency. 1.0 for drift correction and
+     * for upsampling (e.g. 44.1 to 48 kHz music); output/input rate when downsampling, so content
+     * above the new Nyquist frequency is removed instead of aliasing.
+     */
+    cutoff: Double = 1.0,
+) {
+    private val table: FloatArray = if (cutoff >= 1.0) TABLE else buildTable(cutoff.coerceIn(0.05, 1.0))
 
     private val work = FloatArray((HISTORY + maxInputFrames) * channels)
     private var phase = 0.0 // read position carried into the next block, in input frames, [0, 1)
@@ -45,8 +55,8 @@ class Resampler(private val channels: Int = 2, maxInputFrames: Int = Proto.FRAME
                 var acc = 0f
                 var w = base + c
                 for (t in 0 until TAPS) {
-                    val h0 = TABLE[row0 + t]
-                    acc += (h0 + (TABLE[row1 + t] - h0) * mu) * work[w]
+                    val h0 = table[row0 + t]
+                    acc += (h0 + (table[row1 + t] - h0) * mu) * work[w]
                     w += ch
                 }
                 out[produced * ch + c] = acc
@@ -74,9 +84,9 @@ class Resampler(private val channels: Int = 2, maxInputFrames: Int = Proto.FRAME
         private const val KAISER_BETA = 6.0
 
         /** (PHASES + 1) rows of TAPS coefficients; row k is the filter for a fractional delay k / PHASES. */
-        internal val TABLE: FloatArray = buildTable()
+        internal val TABLE: FloatArray = buildTable(1.0)
 
-        private fun buildTable(): FloatArray {
+        private fun buildTable(cutoff: Double): FloatArray {
             val table = FloatArray((PHASES + 1) * TAPS)
             val half = TAPS / 2.0
             val i0Beta = besselI0(KAISER_BETA)
@@ -87,7 +97,8 @@ class Resampler(private val channels: Int = 2, maxInputFrames: Int = Proto.FRAME
                 for (t in 0 until TAPS) {
                     // Distance from the interpolation point to tap t, in input frames.
                     val x = (TAPS / 2 - 1) + frac - t
-                    val sinc = if (abs(x) < 1e-9) 1.0 else sin(PI * x) / (PI * x)
+                    val y = x * cutoff
+                    val sinc = if (abs(y) < 1e-9) 1.0 else sin(PI * y) / (PI * y)
                     val r = x / half
                     val window = if (abs(r) >= 1.0) 0.0 else besselI0(KAISER_BETA * sqrt(1.0 - r * r)) / i0Beta
                     row[t] = sinc * window

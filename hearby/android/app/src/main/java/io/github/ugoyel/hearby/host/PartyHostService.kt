@@ -1,6 +1,5 @@
 package io.github.ugoyel.hearby.host
 
-import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -9,12 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.media.AudioAttributes
-import android.media.AudioFormat
-import android.media.AudioPlaybackCaptureConfiguration
-import android.media.AudioRecord
-import android.media.projection.MediaProjection
-import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
@@ -28,14 +22,16 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
-import androidx.core.content.IntentCompat
 import io.github.ugoyel.hearby.LocalNet
 import io.github.ugoyel.hearby.MainActivity
 import io.github.ugoyel.hearby.R
+import io.github.ugoyel.hearby.client.PlayoutRunner
 import io.github.ugoyel.hearby.codec.MediaCodecOpusEncoder
+import io.github.ugoyel.hearby.core.ClockSync
+import io.github.ugoyel.hearby.core.JitterBuffer
 import io.github.ugoyel.hearby.core.Proto
-import io.github.ugoyel.hearby.core.TimestampSmoother
 import io.github.ugoyel.hearby.core.Wire
+import io.github.ugoyel.hearby.core.WireParty
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -47,6 +43,7 @@ import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import java.security.SecureRandom
+import java.util.concurrent.locks.LockSupport
 import kotlin.math.abs
 
 data class ListenerInfo(
@@ -57,6 +54,18 @@ data class ListenerInfo(
     val rttMs: Float,
     val bufferMs: Int,
     val status: Int,
+    /** Sound-check result for this phone, if one ran. */
+    val check: CheckResult? = null,
+)
+
+data class SongInfo(val title: String, val artist: String, val durationMs: Long)
+
+data class SoundCheckUi(
+    val running: Boolean = false,
+    val progress: Float = 0f,
+    val message: String? = null,
+    /** True once a sound check finished successfully in this party. */
+    val done: Boolean = false,
 )
 
 data class HostUiState(
@@ -66,104 +75,81 @@ data class HostUiState(
     val port: Int = Proto.PORT,
     val addresses: List<String> = emptyList(),
     val listeners: List<ListenerInfo> = emptyList(),
-    /** Peak level of the captured audio, 0..1. */
+    /** Level of what this phone is playing right now, 0..1. */
     val level: Float = 0f,
-    /** How long the capture has been digital silence; long silences usually mean the app blocks capture. */
-    val silentMs: Long = 0,
     val bitrate: Int = 96_000,
     val playoutDelayMs: Int = 350,
+    val queue: List<SongInfo> = emptyList(),
+    val current: Int = -1,
+    val playing: Boolean = false,
+    val positionMs: Long = 0,
+    val loading: Boolean = false,
+    val songError: String? = null,
+    /** Where this phone's own sound goes (it plays in sync with everyone else). */
+    val outputName: String = "",
+    val outputIsBluetooth: Boolean = false,
+    val soundCheck: SoundCheckUi = SoundCheckUi(),
 )
 
 /**
- * HOST: captures whatever the phone is playing, encodes it to Opus and fans it out over UDP.
+ * HOST (the DJ): plays songs saved on this phone to every phone at the party, this one included.
  *
- *   other apps' audio ──AudioPlaybackCapture──▶ AudioRecord (48 kHz stereo PCM16)
- *        └─ capture thread: read 20 ms ─▶ timestamp ─▶ MediaCodec Opus ─▶ [16-byte header + packet]
- *                                                                              └─▶ UDP unicast to every listener
- *   control thread: JOIN / SYNC_REQ (NTP + keep-alive) / LEAVE / DISCOVER on the same socket
+ *   MusicPlayer (decode, 48 kHz) ─▶ sender thread: one 20 ms frame per 20 ms, music or silence
+ *        ─▶ MediaCodec Opus ─▶ [16-byte header + packet] ─┬─▶ UDP to every guest
+ *                                                         └─▶ this phone's own PlayoutRunner
+ *   control thread: JOIN / SYNC (clock sync + keep-alive) / LEAVE / DISCOVER on one socket
+ *   sound check: chirps on every phone, timed by this phone's microphone, corrections sent back
  *
- * Runs as a foreground service of type mediaProjection, which Android requires for playback capture.
- * The MediaProjection consent result is passed in by the activity; consent has to be given again
- * for every session.
+ * The timeline never stops while the party is on (pausing just sends silence), so phones stay
+ * locked to it through pauses and song changes. Nothing captures the screen or other apps: this
+ * is a plain mediaPlayback foreground service.
  */
-class AudioCaptureAndOpusService : Service() {
+class PartyHostService : Service() {
 
     private var session: Session? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START -> startSession(intent)
+            ACTION_START -> startSession(intent.getIntExtra(EXTRA_BITRATE, 96_000), intent.getIntExtra(EXTRA_DELAY_MS, 350))
             ACTION_STOP -> finish(null)
-            else -> if (session == null) stopSelf() // restarted without a projection token: nothing to do
+            else -> if (session == null) stopSelf()
         }
         return START_NOT_STICKY
     }
 
-    private fun startSession(intent: Intent) {
+    private fun startSession(bitrate: Int, delayMs: Int) {
         if (session != null) return
-        val bitrate = intent.getIntExtra(EXTRA_BITRATE, 96_000)
-        val delayMs = intent.getIntExtra(EXTRA_DELAY_MS, 350)
-
-        // 1. Become a mediaProjection foreground service. On Android 14+ this is only allowed once
-        //    the user has accepted the capture dialog, which the activity did just before.
         try {
-            ServiceCompat.startForeground(
-                this, NOTIFICATION_ID, buildNotification(0), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION,
-            )
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(0, null), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         } catch (e: Exception) {
             Log.e(TAG, "startForeground failed", e)
-            finish("Android did not allow audio sharing to start (${e.javaClass.simpleName}).")
+            finish("Android did not allow the party to start (${e.javaClass.simpleName}).")
             return
         }
-
-        // 2. Redeem the consent token.
-        val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
-        val resultData = IntentCompat.getParcelableExtra(intent, EXTRA_RESULT_DATA, Intent::class.java)
-        val projection = try {
-            if (resultData == null) null
-            else getSystemService(MediaProjectionManager::class.java).getMediaProjection(resultCode, resultData)
-        } catch (e: Exception) {
-            Log.e(TAG, "getMediaProjection failed", e)
-            null
-        }
-        if (projection == null) {
-            finish("Android didn't give the go-ahead to share this phone's audio.")
-            return
-        }
-        projection.registerCallback(projectionCallback, mainHandler)
-
-        // 3. Capture, encode, serve.
-        val s = Session(projection, bitrate, delayMs)
+        val s = Session(bitrate, delayMs)
         try {
             s.start()
         } catch (e: Exception) {
             Log.e(TAG, "could not start session", e)
             s.stop()
-            finish(e.message ?: "Could not start audio capture.")
+            finish(e.message ?: "Could not start the party.")
             return
         }
         session = s
         _state.value = HostUiState(
-            running = true, port = s.port, addresses = LocalNet.localIpv4Addresses(),
-            bitrate = bitrate, playoutDelayMs = delayMs,
+            running = true, port = s.port, addresses = LocalNet.localIpv4Addresses(), bitrate = bitrate, playoutDelayMs = delayMs,
         )
     }
 
-    private val projectionCallback = object : MediaProjection.Callback() {
-        override fun onStop() {
-            // Revoked from the status bar chip, by another capture starting, or (Android 15 QPR1+)
-            // by the device being locked. Ignore the echo of our own shutdown: by then the session
-            // is already gone.
-            if (session != null) {
-                finish("Android stopped the party: the screen was locked, or sharing was ended from the status bar.")
-            }
-        }
-    }
-
-    /** Tear everything down. Safe to call repeatedly and from any thread's posted callback. */
+    /** Tear everything down. Safe to call repeatedly. */
     private fun finish(message: String?) {
         val s = session
         session = null
@@ -177,84 +163,89 @@ class AudioCaptureAndOpusService : Service() {
         val s = session
         session = null
         s?.stop()
+        if (instance === this) instance = null
         if (_state.value.running) _state.update { HostUiState(bitrate = it.bitrate, playoutDelayMs = it.playoutDelayMs) }
         super.onDestroy()
     }
 
     // ---- notification ---------------------------------------------------------------------------
 
-    private fun buildNotification(listeners: Int): Notification {
+    private fun buildNotification(listeners: Int, song: String?): Notification {
         val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, getString(R.string.channel_host), NotificationManager.IMPORTANCE_LOW),
-        )
+        nm.createNotificationChannel(NotificationChannel(CHANNEL_ID, getString(R.string.channel_host), NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val stop = PendingIntent.getService(
-            this, 1, Intent(this, AudioCaptureAndOpusService::class.java).setAction(ACTION_STOP),
+            this, 1, Intent(this, PartyHostService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val text = if (listeners == 0) getString(R.string.notif_host_text_none)
+        val crowd = if (listeners == 0) getString(R.string.notif_host_text_none)
         else resources.getQuantityString(R.plurals.notif_host_text, listeners, listeners)
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_hearby)
-            .setContentTitle(getString(R.string.notif_host_title))
-            .setContentText(text)
+            .setContentTitle(song ?: getString(R.string.notif_host_title))
+            .setContentText(crowd)
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .addAction(0, getString(R.string.action_stop), stop)
             .build()
     }
 
-    // ---- one hosting session --------------------------------------------------------------------
+    // ---- one party ------------------------------------------------------------------------------
 
     private class Client(val address: InetSocketAddress, val id: Long, val name: String, val platform: Int) {
         @Volatile var lastSeenNs = System.nanoTime()
         @Volatile var rttUs = 0L
         @Volatile var bufferMs = 0
         @Volatile var status = Proto.STATUS_CONNECTING
-        /** Reused for every audio datagram to this listener (capture thread only). */
+        @Volatile var adjustUs = 0L
+        @Volatile var check: CheckResult? = null
+        /** Reused for every audio datagram to this listener (sender thread only). */
         val audioPacket = DatagramPacket(ByteArray(0), 0, address)
     }
 
-    private inner class Session(
-        private val projection: MediaProjection,
-        private val bitrate: Int,
-        private val playoutDelayMs: Int,
-    ) {
+    private inner class Session(private val bitrate: Int, private val playoutDelayMs: Int) {
         private val streamId = SecureRandom().nextInt().toLong() and 0xFFFFFFFFL
-        private val hostName = LocalNet.deviceName(this@AudioCaptureAndOpusService)
+        private val hostName = LocalNet.deviceName(this@PartyHostService)
+        val player = MusicPlayer(this@PartyHostService)
 
         @Volatile private var running = false
         @Volatile private var clients: Array<Client> = emptyArray()
         private val clientsLock = Any()
 
         private var socket: DatagramSocket? = null
-        private var record: AudioRecord? = null
         private var encoder: MediaCodecOpusEncoder? = null
-        private var captureThread: Thread? = null
+        private var senderThread: Thread? = null
         private var controlThread: Thread? = null
+
+        // This phone as a speaker: fed directly, clock offset zero by definition.
+        private val localJitter = JitterBuffer()
+        private val localClock = ClockSync()
+        private val local = PlayoutRunner(this@PartyHostService, localJitter, localClock)
+        val localId = SecureRandom().nextInt().toLong() and 0xFFFFFFFFL
+
+        @Volatile private var lastSentTimestampUs = 0L
+        @Volatile private var checkRunner: SoundCheckRunner? = null
+        @Volatile private var checkIds = 0
+        @Volatile private var soundCheck = SoundCheckUi()
 
         private var wakeLock: PowerManager.WakeLock? = null
         private var wifiLock: WifiManager.WifiLock? = null
         private var multicastLock: WifiManager.MulticastLock? = null
         private var nsdListener: NsdManager.RegistrationListener? = null
-
-        @Volatile private var peakLevel = 0f
-        @Volatile private var lastSoundNs = System.nanoTime()
-        private var notifiedListeners = -1
+        private var notified = -1 to ""
+        private var lastNowPlaying = ""
+        private var lastNowPlayingNs = 0L
 
         var port = Proto.PORT
             private set
 
-        @SuppressLint("MissingPermission") // RECORD_AUDIO is requested by the UI before the service starts
         fun start() {
-            // -- network --
             val s = DatagramSocket(null)
             s.reuseAddress = true
             try {
@@ -267,31 +258,9 @@ class AudioCaptureAndOpusService : Service() {
             } catch (e: Exception) {
                 // not fatal
             }
-            LocalNet.bindHostSocketIfNeeded(this@AudioCaptureAndOpusService, s)
+            LocalNet.bindHostSocketIfNeeded(this@PartyHostService, s)
             socket = s
             port = s.localPort
-
-            // -- capture: everything other apps play as media / game / unknown usage --
-            val captureConfig = AudioPlaybackCaptureConfiguration.Builder(projection)
-                .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-                .addMatchingUsage(AudioAttributes.USAGE_GAME)
-                .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
-                .build()
-            val format = AudioFormat.Builder()
-                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                .setSampleRate(Proto.SAMPLE_RATE)
-                .setChannelMask(AudioFormat.CHANNEL_IN_STEREO)
-                .build()
-            val minBytes = AudioRecord.getMinBufferSize(
-                Proto.SAMPLE_RATE, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT,
-            )
-            val r = AudioRecord.Builder()
-                .setAudioFormat(format)
-                .setBufferSizeInBytes(maxOf(minBytes, FRAME_BYTES * 4))
-                .setAudioPlaybackCaptureConfig(captureConfig)
-                .build()
-            record = r
-            check(r.state == AudioRecord.STATE_INITIALIZED) { "Playback capture is not available on this device." }
 
             encoder = try {
                 MediaCodecOpusEncoder(bitrate)
@@ -299,7 +268,6 @@ class AudioCaptureAndOpusService : Service() {
                 throw IllegalStateException("This device has no Opus encoder.", e)
             }
 
-            // -- stay awake, keep Wi-Fi out of power save --
             val pm = getSystemService(PowerManager::class.java)
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "hearby:host").apply {
                 setReferenceCounted(false)
@@ -321,8 +289,13 @@ class AudioCaptureAndOpusService : Service() {
                 acquire()
             }
 
+            // Same clock on both sides: three zero-offset, zero-delay "exchanges" make it synced.
+            repeat(3) { val t = System.nanoTime() / 1000; localClock.addSample(t, t, t, t) }
+            local.playoutDelayMs = playoutDelayMs
+            local.start()
+
             running = true
-            captureThread = Thread(::captureLoop, "hearby-capture").also { it.start() }
+            senderThread = Thread(::sendLoop, "hearby-sender").also { it.start() }
             controlThread = Thread(::controlLoop, "hearby-control").also { it.start() }
             registerService()
         }
@@ -330,9 +303,8 @@ class AudioCaptureAndOpusService : Service() {
         fun stop() {
             val wasRunning = running
             running = false
+            checkRunner?.cancel()
             unregisterService()
-
-            // Tell listeners we are done (three times; it is UDP).
             val s = socket
             if (wasRunning && s != null) {
                 val bye = Wire.encodeBye(streamId)
@@ -348,44 +320,29 @@ class AudioCaptureAndOpusService : Service() {
                     }
                 }.apply { start(); join(500) }
             }
-
-            try {
-                record?.stop() // unblocks the capture thread
-            } catch (e: Exception) {
-                // not recording
-            }
-            s?.close() // unblocks the control thread
-            captureThread?.join(1500)
+            s?.close()
+            senderThread?.join(1500)
             controlThread?.join(1500)
-            record?.release()
+            local.stop()
             encoder?.release()
-            record = null
             encoder = null
             socket = null
-
-            try {
-                projection.unregisterCallback(projectionCallback)
-                projection.stop()
-            } catch (e: Exception) {
-                // already stopped
-            }
+            player.release()
             wakeLock?.let { if (it.isHeld) it.release() }
             wifiLock?.let { if (it.isHeld) it.release() }
             multicastLock?.let { if (it.isHeld) it.release() }
         }
 
-        // ---- capture thread: PCM -> Opus -> UDP ---------------------------------------------------
+        // ---- sender: one frame every 20 ms, music or silence ------------------------------------
 
-        private fun captureLoop() {
+        private fun sendLoop() {
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
-            val rec = record ?: return
             val enc = encoder ?: return
             val sock = socket ?: return
-            val pcm = ByteArray(FRAME_BYTES)
+            val frame = FloatArray(Proto.FRAME_SAMPLES * Proto.CHANNELS)
+            val pcm = ByteArray(MediaCodecOpusEncoder.PCM_BLOCK_BYTES)
             val datagram = ByteArray(Proto.AUDIO_HEADER_SIZE + Proto.MAX_PAYLOAD)
-            val smoother = TimestampSmoother()
             var seq = 0L
-
             val send = MediaCodecOpusEncoder.PacketSink { data: ByteBuffer, size: Int, timestampUs: Long ->
                 if (size <= Proto.MAX_PAYLOAD) {
                     Wire.writeAudioHeader(datagram, seq, timestampUs)
@@ -400,58 +357,49 @@ class AudioCaptureAndOpusService : Service() {
                             // unreachable right now; the control thread drops it if it stays silent
                         }
                     }
+                    // ... and this phone plays exactly the same packet.
+                    localJitter.put(Wire.audioSeq(datagram), timestampUs, datagram, Proto.AUDIO_HEADER_SIZE, size)
+                    lastSentTimestampUs = timestampUs
                 }
             }
 
+            var nextNs = System.nanoTime()
             try {
-                rec.startRecording()
-                if (rec.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
-                    fail("Could not start capturing audio. Is another app already recording?")
-                    return
-                }
                 while (running) {
-                    var filled = 0
-                    while (filled < FRAME_BYTES) {
-                        val n = rec.read(pcm, filled, FRAME_BYTES - filled)
-                        if (n <= 0) {
-                            if (running) fail("Audio capture stopped unexpectedly (error $n).")
-                            return
-                        }
-                        filled += n
+                    val now = System.nanoTime()
+                    if (now < nextNs) {
+                        LockSupport.parkNanos(nextNs - now)
+                        continue
                     }
-                    // The block ended "now", so its first sample was captured one frame ago.
-                    val timestampUs = smoother.next(System.nanoTime() / 1000 - Proto.FRAME_US)
-                    meter(pcm)
-                    enc.encode(pcm, timestampUs, send)
+                    if (now - nextNs > MAX_LAG_NS) nextNs = now // starved for a while: jump (phones re-align once)
+                    player.pull(frame)
+                    toPcm16(frame, pcm)
+                    enc.encode(pcm, nextNs / 1000, send)
                     if (enc.unsupportedFraming) {
                         fail("This device's Opus encoder uses an unsupported frame size.")
                         return
                     }
+                    nextNs += Proto.FRAME_US * 1000
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "capture loop died", e)
-                if (running) fail("Audio capture failed: ${e.javaClass.simpleName}")
+                Log.e(TAG, "send loop died", e)
+                if (running) fail("The party stopped unexpectedly: ${e.javaClass.simpleName}")
             }
         }
 
-        private fun meter(pcm: ByteArray) {
-            var peak = 0
-            var i = 0
-            while (i < FRAME_BYTES) { // every 8th sample is plenty for a level meter
-                val v = abs((pcm[i + 1].toInt() shl 8) or (pcm[i].toInt() and 0xFF))
-                if (v > peak) peak = v
-                i += 16
+        private fun toPcm16(src: FloatArray, dst: ByteArray) {
+            for (i in src.indices) {
+                val v = (src[i].coerceIn(-1f, 1f) * 32767f).toInt()
+                dst[2 * i] = v.toByte()
+                dst[2 * i + 1] = (v shr 8).toByte()
             }
-            val level = peak / 32768f
-            if (level > peakLevel) peakLevel = level
-            if (peak > 8) lastSoundNs = System.nanoTime()
         }
 
         private fun fail(message: String) {
             mainHandler.post { if (session === this) finish(message) }
         }
 
-        // ---- control thread: join / clock sync / discovery ---------------------------------------
+        // ---- control: join / clock sync / discovery ----------------------------------------------
 
         private fun controlLoop() {
             val sock = socket ?: return
@@ -477,7 +425,7 @@ class AudioCaptureAndOpusService : Service() {
                 val now = System.nanoTime()
                 if (now - lastHousekeepingNs > 120_000_000L) {
                     lastHousekeepingNs = now
-                    housekeeping(now)
+                    housekeeping(sock, now)
                 }
             }
         }
@@ -492,6 +440,7 @@ class AudioCaptureAndOpusService : Service() {
                         clients = (kept + Client(from, m.clientId, m.name, m.platform)).toTypedArray()
                     }
                     reply(sock, Wire.encodeJoinAck(streamId, playoutDelayMs, hostName), from)
+                    lastNowPlaying = "" // make sure the newcomer hears what is playing
                 }
                 Proto.TYPE_SYNC_REQ -> {
                     val m = Wire.decodeSyncReq(b, len) ?: return
@@ -500,6 +449,7 @@ class AudioCaptureAndOpusService : Service() {
                     c.rttUs = m.rttUs
                     c.bufferMs = m.bufferMs
                     c.status = m.status
+                    c.adjustUs = m.adjustUs
                     val resp = Wire.encodeSyncResp(streamId, m.t0Us, rxUs, 0, playoutDelayMs)
                     Wire.patchSyncRespT2(resp, System.nanoTime() / 1000) // t2: immediately before sending
                     reply(sock, resp, from)
@@ -522,40 +472,117 @@ class AudioCaptureAndOpusService : Service() {
             }
         }
 
-        private fun housekeeping(nowNs: Long) {
+        private fun sendToClient(id: Long, data: ByteArray) {
+            val c = clients.firstOrNull { it.id == id } ?: return
+            socket?.let { reply(it, data, c.address) }
+        }
+
+        private fun housekeeping(sock: DatagramSocket, nowNs: Long) {
             synchronized(clientsLock) {
                 if (clients.any { nowNs - it.lastSeenNs > CLIENT_TIMEOUT_NS }) {
                     clients = clients.filter { nowNs - it.lastSeenNs <= CLIENT_TIMEOUT_NS }.toTypedArray()
                 }
             }
             val snapshot = clients
-            val listeners = snapshot.map {
-                ListenerInfo(
-                    it.id, it.name, it.platform, it.address.address?.hostAddress ?: "?",
-                    it.rttUs / 1000f, it.bufferMs, it.status,
-                )
+            val music = player.snapshot()
+            val song = music.queue.getOrNull(music.index)
+
+            // Tell everyone what is playing: on every change, and once a second for anyone who missed it.
+            val nowPlaying = "${song?.title}|${song?.artist}|${music.playing && !player.hold}"
+            if (nowPlaying != lastNowPlaying || nowNs - lastNowPlayingNs > 1_000_000_000L) {
+                lastNowPlaying = nowPlaying
+                lastNowPlayingNs = nowNs
+                val msg = WireParty.encodeNowPlaying(streamId, music.playing && !player.hold, song?.title.orEmpty(), song?.artist.orEmpty())
+                for (c in snapshot) reply(sock, msg, c.address)
             }
-            val level = peakLevel
-            peakLevel = 0f
-            val silentMs = (nowNs - lastSoundNs) / 1_000_000
+
             _state.update {
                 if (!it.running) it
                 else it.copy(
-                    listeners = listeners, level = level, silentMs = silentMs,
+                    listeners = snapshot.map { c ->
+                        ListenerInfo(c.id, c.name, c.platform, c.address.address?.hostAddress ?: "?", c.rttUs / 1000f, c.bufferMs, c.status, c.check)
+                    },
+                    level = if (local.muted) 0f else local.engine?.outputLevel ?: 0f,
                     addresses = if (it.addresses.isEmpty()) LocalNet.localIpv4Addresses() else it.addresses,
+                    queue = music.queue.map { s -> SongInfo(s.title, s.artist, s.durationMs) },
+                    current = music.index,
+                    playing = music.playing,
+                    positionMs = music.positionMs,
+                    loading = music.loading,
+                    songError = music.error,
+                    outputName = local.routeName,
+                    outputIsBluetooth = local.routeIsBluetooth,
+                    soundCheck = soundCheck,
                 )
             }
-            if (snapshot.size != notifiedListeners) {
-                notifiedListeners = snapshot.size
+            val note = snapshot.size to (if (music.playing) song?.title.orEmpty() else "")
+            if (note != notified) {
+                notified = note
                 try {
-                    getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(snapshot.size))
+                    getSystemService(NotificationManager::class.java)
+                        .notify(NOTIFICATION_ID, buildNotification(snapshot.size, note.second.ifBlank { null }))
                 } catch (e: Exception) {
                     // notifications disabled
                 }
             }
         }
 
-        // ---- mDNS / DNS-SD advertisement ------------------------------------------------------------
+        // ---- sound check -------------------------------------------------------------------------
+
+        fun startSoundCheck() {
+            if (checkRunner != null) return
+            val guests = clients.filter { it.status == Proto.STATUS_SYNCED || it.status == Proto.STATUS_LATE }
+            if (guests.isEmpty()) {
+                soundCheck = SoundCheckUi(message = "Wait until your friends show \"In sync\", then run the sound check.")
+                return
+            }
+            val base = checkIds
+            checkIds += 10
+            val runner = SoundCheckRunner(
+                this@PartyHostService, localId, playoutDelayMs,
+                mediaNowUs = { lastSentTimestampUs },
+                requestChirp = { id, mediaUs, checkId ->
+                    if (id == localId) local.scheduleTone(mediaUs) else sendToClient(id, WireParty.encodeChirp(streamId, id, mediaUs, checkId))
+                },
+                applyCorrection = { id, adjustUs, checkId, errorUs ->
+                    repeat(3) { sendToClient(id, WireParty.encodeOffset(streamId, id, adjustUs, checkId, errorUs)) }
+                },
+                onProgress = { text, progress -> soundCheck = SoundCheckUi(running = true, progress = progress, message = text) },
+            )
+            checkRunner = runner
+            soundCheck = SoundCheckUi(running = true, message = "Getting ready…")
+            Thread({
+                player.hold = true // the beeps need a quiet moment
+                val outcome = try {
+                    runner.run(
+                        guests.map { c -> CheckParticipant(c.id, c.name) { c.adjustUs } },
+                        CheckParticipant(localId, "DJ") { local.adjustUs() },
+                        base,
+                    )
+                } finally {
+                    player.hold = false
+                    checkRunner = null
+                }
+                for (c in guests) outcome.results[c.id]?.let { c.check = it }
+                soundCheck = summarize(outcome)
+            }, "hearby-soundcheck").start()
+        }
+
+        private fun summarize(outcome: SoundCheckRunner.Outcome): SoundCheckUi {
+            outcome.failure?.let { return SoundCheckUi(message = it) }
+            val results = outcome.results.values
+            val missed = results.count { !it.heard }
+            val worst = results.filter { it.heard }.maxOfOrNull { abs(it.afterMs) } ?: 0f
+            val text = when {
+                missed == results.size -> "Couldn't hear any of the other phones. Hold them close to this one, turn their volume up, and try again."
+                missed > 0 -> "Lined up ${results.size - missed} of ${results.size} phones. Move the others closer and run it again."
+                worst > 3f -> "Lined up, but a phone was still ${"%.1f".format(worst)} ms off. Pick a bigger sync cushion if it keeps happening."
+                else -> "Every phone lined up to within ${"%.1f".format(maxOf(worst, 0.1f))} ms."
+            }
+            return SoundCheckUi(message = text, done = missed < results.size)
+        }
+
+        // ---- mDNS / DNS-SD advertisement -----------------------------------------------------------
 
         private fun registerService() {
             val nsd = getSystemService(NsdManager::class.java) ?: return
@@ -593,54 +620,59 @@ class AudioCaptureAndOpusService : Service() {
                 // never registered
             }
         }
+
+        fun setOffsetMs(ms: Int) = local.setUserOffsetMs(ms)
     }
 
     companion object {
         private const val TAG = "HearbyHost"
         private const val ACTION_START = "io.github.ugoyel.hearby.host.START"
         private const val ACTION_STOP = "io.github.ugoyel.hearby.host.STOP"
-        private const val EXTRA_RESULT_CODE = "resultCode"
-        private const val EXTRA_RESULT_DATA = "resultData"
         private const val EXTRA_BITRATE = "bitrate"
         private const val EXTRA_DELAY_MS = "delayMs"
         private const val CHANNEL_ID = "host"
         private const val NOTIFICATION_ID = 41
 
-        private const val FRAME_BYTES = MediaCodecOpusEncoder.PCM_BLOCK_BYTES
         private const val MAX_LISTENERS = 32
         private const val CLIENT_TIMEOUT_NS = 6_000_000_000L
         private const val MAX_SESSION_MS = 12 * 60 * 60 * 1000L
+        private const val MAX_LAG_NS = 200_000_000L
 
         private val _state = MutableStateFlow(HostUiState())
         val state: StateFlow<HostUiState> = _state.asStateFlow()
 
-        /**
-         * Start hosting. [resultCode] / [resultData] are what the MediaProjection consent activity
-         * returned (see MainScreen).
-         */
-        fun start(context: Context, resultCode: Int, resultData: Intent, bitrate: Int, playoutDelayMs: Int) {
+        @Volatile
+        private var instance: PartyHostService? = null
+
+        private val player get() = instance?.session?.player
+
+        fun start(context: Context, bitrate: Int, playoutDelayMs: Int) {
             _state.update { it.copy(message = null) }
-            val intent = Intent(context, AudioCaptureAndOpusService::class.java)
+            val intent = Intent(context, PartyHostService::class.java)
                 .setAction(ACTION_START)
-                .putExtra(EXTRA_RESULT_CODE, resultCode)
-                .putExtra(EXTRA_RESULT_DATA, resultData)
                 .putExtra(EXTRA_BITRATE, bitrate)
                 .putExtra(EXTRA_DELAY_MS, playoutDelayMs)
             ContextCompat.startForegroundService(context, intent)
         }
 
         fun stop(context: Context) {
-            // Go through the service so it can release the projection itself, in order. Simply
-            // calling stopService() makes Android revoke the projection first (the foreground
-            // service is gone), which would look like the system ended the capture.
-            val intent = Intent(context, AudioCaptureAndOpusService::class.java).setAction(ACTION_STOP)
-            try {
-                context.startService(intent)
-            } catch (e: Exception) {
-                context.stopService(intent)
-            }
+            context.startService(Intent(context, PartyHostService::class.java).setAction(ACTION_STOP))
         }
 
         fun clearMessage() = _state.update { it.copy(message = null) }
+
+        fun addSongs(uris: List<Uri>) = player?.addUris(uris)
+
+        fun playSong(index: Int) = player?.play(index)
+
+        fun togglePlay() = player?.toggle()
+
+        fun next() = player?.next()
+
+        fun previous() = player?.previous()
+
+        fun removeSong(index: Int) = player?.remove(index)
+
+        fun soundCheck() = instance?.session?.startSoundCheck()
     }
 }

@@ -57,6 +57,8 @@ final class PlayoutEngine {
         var realignCount: Int64 = 0
         /** Peak level of the audio being played, 0...1, with a short decay. Drives the visualizer. */
         var level: Float = 0
+        /** Everything this device adds on top of the host's playout delay, µs (reported to the host). */
+        var adjustUs: Int64 = 0
     }
 
     static let frame = Proto.frameSamples
@@ -90,13 +92,18 @@ final class PlayoutEngine {
     private let lock = NSLock()
     private var sharedPlayoutDelayMs = 350
     private var sharedUserOffsetMs = 0
+    private var sharedCalibrationUs: Int64 = 0
     private var realignRequest = 0 // 0 none, 1 realign, 2 realign + drop late bias, 3 new stream
     private var shared = Snapshot()
 
     // Playout-thread state.
     private var playoutDelayMs = 350
     private var userOffsetMs = 0
+    private var calibrationUs: Int64 = 0
     private var state = State.waiting
+
+    /// Sound-check chirps waiting to be mixed into the output at their exact media time.
+    let tones = ToneScheduler()
     private var syncErrorMs: Float = 0
     private var speedPpm = 0
     private var lateBiasMs = 0
@@ -156,6 +163,16 @@ final class PlayoutEngine {
         lock.unlock()
     }
 
+    /// Correction measured by the DJ's sound check, µs. Positive plays later.
+    func setCalibrationUs(_ value: Int64) {
+        lock.lock()
+        if sharedCalibrationUs != value {
+            sharedCalibrationUs = value
+            realignRequest = max(realignRequest, 2)
+        }
+        lock.unlock()
+    }
+
     /// Re-run alignment at the next frame (settings changed, or the user asked to re-sync).
     func requestRealign(resetLateBias: Bool) {
         lock.lock()
@@ -185,6 +202,7 @@ final class PlayoutEngine {
         realignRequest = 0
         playoutDelayMs = sharedPlayoutDelayMs
         userOffsetMs = sharedUserOffsetMs
+        calibrationUs = sharedCalibrationUs
         lock.unlock()
 
         step(request)
@@ -192,7 +210,8 @@ final class PlayoutEngine {
         lock.lock()
         shared = Snapshot(
             state: state, syncErrorMs: syncErrorMs, speedPpm: speedPpm, lateBiasMs: lateBiasMs, cushionMs: cushionMs,
-            playedFrames: playedFrames, concealedFrames: concealedFrames, realignCount: realignCount, level: outputLevel)
+            playedFrames: playedFrames, concealedFrames: concealedFrames, realignCount: realignCount, level: outputLevel,
+            adjustUs: Int64(userOffsetMs + lateBiasMs) * 1000 + calibrationUs)
         lock.unlock()
     }
 
@@ -218,6 +237,7 @@ final class PlayoutEngine {
         nextSeq = -1
         lastTimestampUs = PlayoutEngine.noTs
         lateBiasMs = 0
+        tones.clear()
         haveTail = false
         enter(.waiting)
     }
@@ -243,7 +263,7 @@ final class PlayoutEngine {
         ts.timeNs + (written - ts.framePosition) * 1_000_000_000 / Int64(Proto.sampleRate)
     }
 
-    private func totalDelayUs() -> Int64 { Int64(playoutDelayMs + userOffsetMs + lateBiasMs) * 1000 }
+    private func totalDelayUs() -> Int64 { Int64(playoutDelayMs + userOffsetMs + lateBiasMs) * 1000 + calibrationUs }
 
     private func pumpAligning() {
         let newestTs = jitter.newestTimestampUs()
@@ -360,6 +380,11 @@ final class PlayoutEngine {
             missRun += 1
             // Nothing at or beyond this frame has arrived: we are consuming faster than the network delivers.
             if jitter.newestSeq < nextSeq { underflowRun += 1 } else { underflowRun = 0 }
+        }
+
+        // Sound-check chirps go in after the fades, at their exact sample on the media timeline.
+        if lastTimestampUs != PlayoutEngine.noTs {
+            tones.mix(into: &pcm, frameTimeUs: lastTimestampUs, frames: PlayoutEngine.frame, channels: PlayoutEngine.ch)
         }
 
         let n = resampler.process(pcm, inFrames: PlayoutEngine.frame, speed: speed, out: &resampled)

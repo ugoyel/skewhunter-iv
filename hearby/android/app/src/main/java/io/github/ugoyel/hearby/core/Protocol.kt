@@ -42,6 +42,9 @@ object Proto {
     const val TYPE_BYE = 0x07
     const val TYPE_DISCOVER = 0x08
     const val TYPE_DISCOVER_RESP = 0x09
+    const val TYPE_NOW_PLAYING = 0x0A
+    const val TYPE_CHIRP = 0x0B
+    const val TYPE_OFFSET = 0x0C
 
     const val PLATFORM_ANDROID = 1
     const val PLATFORM_IOS = 2
@@ -63,15 +66,33 @@ class JoinAckMsg(
     val hostName: String,
 )
 
-class SyncReqMsg(val clientId: Long, val t0Us: Long, val rttUs: Long, val bufferMs: Int, val status: Int)
+class SyncReqMsg(
+    val clientId: Long,
+    val t0Us: Long,
+    val rttUs: Long,
+    val bufferMs: Int,
+    val status: Int,
+    /** Everything the listener adds to the playout delay (slider + calibration + fallback), µs. */
+    val adjustUs: Long = 0,
+)
 
 class SyncRespMsg(val streamId: Long, val t0Us: Long, val t1Us: Long, val t2Us: Long, val playoutDelayMs: Int)
 
 class DiscoverRespMsg(val nonce: Long, val streamId: Long, val listeners: Int, val hostName: String)
 
+class NowPlayingMsg(val streamId: Long, val playing: Boolean, val title: String, val artist: String)
+
+class ChirpMsg(val streamId: Long, val clientId: Long, val mediaTimeUs: Long, val checkId: Int)
+
+class OffsetMsg(val streamId: Long, val clientId: Long, val adjustUs: Long, val checkId: Int, val errorUs: Int)
+
 /** Stateless encode/decode helpers. Decoders return null on anything malformed. */
 object Wire {
-    const val SYNC_REQ_SIZE = 24
+    const val SYNC_REQ_SIZE = 28
+    /** SYNC_REQ before the adjust field was added; still accepted. */
+    const val SYNC_REQ_MIN_SIZE = 24
+    const val CHIRP_SIZE = 24
+    const val OFFSET_SIZE = 20
     const val SYNC_RESP_SIZE = 36
     private const val SYNC_RESP_T2_OFFSET = 24
 
@@ -127,6 +148,14 @@ object Wire {
         if (getU8(b, 2) != Proto.VERSION) return -1
         return getU8(b, 3)
     }
+
+    /** A length-prefixed UTF-8 string field. */
+    fun nameField(name: String): ByteArray {
+        val nb = nameBytes(name)
+        return byteArrayOf(nb.size.toByte()) + nb
+    }
+
+    fun readNameField(b: ByteArray, off: Int, len: Int): String? = readName(b, off, len)
 
     private fun nameBytes(name: String): ByteArray {
         val raw = name.toByteArray(Charsets.UTF_8)
@@ -205,21 +234,24 @@ object Wire {
 
     // ---- SYNC_REQ (0x04)  client -> host   (also the keep-alive) --------------------------------
     //  4  u32 clientId   8  u64 t0 (client clock, us)   16  u32 rttUs
-    // 20  u16 bufferMs   22  u8 status   23  u8 reserved
+    // 20  u16 bufferMs   22  u8 status   23  u8 reserved   24  i32 adjustUs
+    // (the 24-byte form without adjustUs is still accepted)
 
-    fun encodeSyncReq(clientId: Long, t0Us: Long, rttUs: Long, bufferMs: Int, status: Int): ByteArray {
+    fun encodeSyncReq(clientId: Long, t0Us: Long, rttUs: Long, bufferMs: Int, status: Int, adjustUs: Long = 0): ByteArray {
         val b = header(SYNC_REQ_SIZE, Proto.TYPE_SYNC_REQ)
         putU32(b, 4, clientId)
         putU64(b, 8, t0Us)
         putU32(b, 16, rttUs.coerceIn(0, 0xFFFFFFFFL))
         putU16(b, 20, bufferMs.coerceIn(0, 0xFFFF))
         b[22] = status.toByte()
+        putU32(b, 24, adjustUs.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()) and 0xFFFFFFFFL)
         return b
     }
 
     fun decodeSyncReq(b: ByteArray, len: Int): SyncReqMsg? {
-        if (len < SYNC_REQ_SIZE) return null
-        return SyncReqMsg(getU32(b, 4), getU64(b, 8), getU32(b, 16), getU16(b, 20), getU8(b, 22))
+        if (len < SYNC_REQ_MIN_SIZE) return null
+        val adjust = if (len >= SYNC_REQ_SIZE) getU32(b, 24).toInt().toLong() else 0L
+        return SyncReqMsg(getU32(b, 4), getU64(b, 8), getU32(b, 16), getU16(b, 20), getU8(b, 22), adjust)
     }
 
     // ---- SYNC_RESP (0x05)  host -> client ---------------------------------------------------------
@@ -275,6 +307,71 @@ object Wire {
         if (len < 14) return null
         val name = readName(b, 13, len) ?: return null
         return DiscoverRespMsg(getU32(b, 4), getU32(b, 8), getU8(b, 12), name)
+    }
+}
+
+/** Messages added for the DJ's own music and the sound check. */
+object WireParty {
+    // ---- NOW_PLAYING (0x0A)  host -> client ---------------------------------------------------------
+    //  4  u32 streamId   8  u8 flags (bit 0: playing)   9  u8 titleLen   10  title   then u8 artistLen, artist
+
+    fun encodeNowPlaying(streamId: Long, playing: Boolean, title: String, artist: String): ByteArray {
+        val t = Wire.nameField(title)
+        val a = Wire.nameField(artist)
+        val b = ByteArray(9 + t.size + a.size)
+        Wire.writeHeader(b, Proto.TYPE_NOW_PLAYING)
+        Wire.putU32(b, 4, streamId)
+        b[8] = if (playing) 1 else 0
+        t.copyInto(b, 9)
+        a.copyInto(b, 9 + t.size)
+        return b
+    }
+
+    fun decodeNowPlaying(b: ByteArray, len: Int): NowPlayingMsg? {
+        if (len < 11) return null
+        val title = Wire.readNameField(b, 9, len) ?: return null
+        val artistAt = 10 + Wire.getU8(b, 9)
+        val artist = Wire.readNameField(b, artistAt, len) ?: return null
+        return NowPlayingMsg(Wire.getU32(b, 4), Wire.getU8(b, 8) and 1 != 0, title, artist)
+    }
+
+    // ---- CHIRP (0x0B)  host -> client ---------------------------------------------------------------
+    //  4  u32 streamId   8  u32 clientId (who should chirp)   12  u64 mediaTimeUs
+    // 20  u16 checkId   22  u16 reserved
+
+    fun encodeChirp(streamId: Long, clientId: Long, mediaTimeUs: Long, checkId: Int): ByteArray {
+        val b = ByteArray(Wire.CHIRP_SIZE)
+        Wire.writeHeader(b, Proto.TYPE_CHIRP)
+        Wire.putU32(b, 4, streamId)
+        Wire.putU32(b, 8, clientId)
+        Wire.putU64(b, 12, mediaTimeUs)
+        Wire.putU16(b, 20, checkId)
+        return b
+    }
+
+    fun decodeChirp(b: ByteArray, len: Int): ChirpMsg? {
+        if (len < Wire.CHIRP_SIZE) return null
+        return ChirpMsg(Wire.getU32(b, 4), Wire.getU32(b, 8), Wire.getU64(b, 12), Wire.getU16(b, 20))
+    }
+
+    // ---- OFFSET (0x0C)  host -> client --------------------------------------------------------------
+    //  4  u32 streamId   8  u32 clientId   12  i32 adjustUs (add to the current correction)
+    // 16  u16 checkId (apply each id once)   18  u16 errorUs (|error| measured, capped at 65535)
+
+    fun encodeOffset(streamId: Long, clientId: Long, adjustUs: Long, checkId: Int, errorUs: Int): ByteArray {
+        val b = ByteArray(Wire.OFFSET_SIZE)
+        Wire.writeHeader(b, Proto.TYPE_OFFSET)
+        Wire.putU32(b, 4, streamId)
+        Wire.putU32(b, 8, clientId)
+        Wire.putU32(b, 12, adjustUs.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()) and 0xFFFFFFFFL)
+        Wire.putU16(b, 16, checkId)
+        Wire.putU16(b, 18, errorUs.coerceIn(0, 0xFFFF))
+        return b
+    }
+
+    fun decodeOffset(b: ByteArray, len: Int): OffsetMsg? {
+        if (len < Wire.OFFSET_SIZE) return null
+        return OffsetMsg(Wire.getU32(b, 4), Wire.getU32(b, 8), Wire.getU32(b, 12).toInt().toLong(), Wire.getU16(b, 16), Wire.getU16(b, 18))
     }
 }
 

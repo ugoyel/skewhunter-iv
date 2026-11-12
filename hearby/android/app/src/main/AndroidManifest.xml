@@ -9,19 +9,18 @@
     <!-- Lets a host hear broadcast discovery probes while its screen is off. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
-    <!-- AudioPlaybackCapture is gated behind RECORD_AUDIO even though the microphone is never opened. -->
+    <!-- Only for the optional sound check: the DJ phone listens for a few seconds, on screen, to time
+         every phone's beep. Nothing is recorded to storage or sent anywhere. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- Host: capturing playback through MediaProjection. -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
-    <!-- Listener: keeps playing with the screen off. -->
+    <!-- DJ and guests: keep playing music with the screen off. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Keeps the CPU and Wi-Fi radio out of power save while streaming. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <!-- RECORD_AUDIO would otherwise make Play hide the app from devices without a microphone. -->
+    <!-- The sound check is optional, so phones without a microphone can still install Hearby. -->
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-feature android:name="android.hardware.wifi" android:required="false" />
 
@@ -48,9 +47,9 @@
         </activity>
 
         <service
-            android:name=".host.AudioCaptureAndOpusService"
+            android:name=".host.PartyHostService"
             android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
+            android:foregroundServiceType="mediaPlayback" />
 
         <service
             android:name=".client.ReceiverService"

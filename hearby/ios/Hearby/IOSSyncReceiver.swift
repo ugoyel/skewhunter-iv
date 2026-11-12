@@ -255,6 +255,12 @@ struct ReceiverStatus: Equatable {
     var lossPercent: Float = 0
     /// Peak level of what is playing right now, 0...1. Drives the visualizer.
     var level: Float = 0
+    /// What the DJ is playing.
+    var songTitle = ""
+    var songArtist = ""
+    var songPlaying = false
+    /// True once the DJ's sound check has lined this phone up.
+    var soundChecked = false
 }
 
 // MARK: - Receiver
@@ -369,6 +375,12 @@ private final class ListenSession {
     private var hostName: String
     private var playoutDelayMs = 350
     private var message: String?
+    private var songTitle = ""
+    private var songArtist = ""
+    private var songPlaying = false
+    private var calibrationUs: Int64 = 0
+    private var lastCheckId: Int = -1
+    private var soundChecked = false
     private var syncsSent = 0
     private var startNs: Int64 = 0
     private var lastPacketNs: Int64 = 0
@@ -613,11 +625,15 @@ private final class ListenSession {
                 return
             }
             if m.streamId != streamId {
-                // New session on the host: old audio and old sequence numbers are meaningless.
+                // New session on the host: old audio, sequence numbers and corrections are meaningless.
                 streamId = m.streamId
                 jitter.clear()
                 clock.reset()
                 syncsSent = 0
+                calibrationUs = 0
+                lastCheckId = -1
+                soundChecked = false
+                engine.setCalibrationUs(0)
                 engine.requestStreamReset()
             }
             if !m.hostName.isEmpty { hostName = m.hostName }
@@ -626,6 +642,26 @@ private final class ListenSession {
             message = nil
             joined = true
             everJoined = true
+
+        case Proto.typeNowPlaying:
+            guard let m = Wire.decodeNowPlaying(b), m.streamId == streamId else { return }
+            songTitle = m.title
+            songArtist = m.artist
+            songPlaying = m.playing
+
+        case Proto.typeChirp:
+            // The DJ's sound check: play the chirp at exactly this point of the shared timeline.
+            guard let m = Wire.decodeChirp(b), m.streamId == streamId, m.clientId == clientId else { return }
+            engine.tones.schedule(Int64(bitPattern: m.mediaTimeUs))
+
+        case Proto.typeOffset:
+            // The DJ sends each correction a few times (it is UDP); apply each one exactly once.
+            guard let m = Wire.decodeOffset(b), m.streamId == streamId, m.clientId == clientId,
+                  Int(m.checkId) != lastCheckId else { return }
+            lastCheckId = Int(m.checkId)
+            calibrationUs = min(max(calibrationUs + Int64(m.adjustUs), -1_000_000), 1_000_000)
+            soundChecked = true
+            engine.setCalibrationUs(calibrationUs)
 
         case Proto.typeBye:
             if let id = Wire.decodeU32Body(b), id == streamId {
@@ -672,7 +708,8 @@ private final class ListenSession {
                     : (snap.lateBiasMs > 0 ? Proto.statusLate : Proto.statusSynced)
                 send(Wire.encodeSyncReq(
                     clientId: clientId, t0Us: UInt64(HostClock.nowNs() / 1000),
-                    rttUs: UInt32(clamping: clock.rttUs), bufferMs: UInt16(clamping: snap.cushionMs), status: state))
+                    rttUs: UInt32(clamping: clock.rttUs), bufferMs: UInt16(clamping: snap.cushionMs), status: state,
+                    adjustUs: Int32(clamping: snap.adjustUs)))
             }
             if now - lastPacketNs > ListenSession.hostTimeoutNs {
                 joined = false // host went quiet: fall back to knocking until it answers again
@@ -712,7 +749,8 @@ private final class ListenSession {
             phase: phase, hostName: hostName, message: message,
             syncErrorMs: snap.syncErrorMs, rttMs: Float(clock.rttUs) / 1000, bufferMs: snap.cushionMs,
             lateBiasMs: snap.lateBiasMs, playoutDelayMs: playoutDelayMs, offsetMs: offset,
-            outputName: output, outputIsBluetooth: bluetooth, lossPercent: lossPercent, level: snap.level))
+            outputName: output, outputIsBluetooth: bluetooth, lossPercent: lossPercent, level: snap.level,
+            songTitle: songTitle, songArtist: songArtist, songPlaying: songPlaying, soundChecked: soundChecked))
     }
 }
 

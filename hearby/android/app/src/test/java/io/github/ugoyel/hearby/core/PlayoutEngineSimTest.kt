@@ -18,7 +18,7 @@ import kotlin.math.roundToLong
  */
 class PlayoutEngineSimTest {
 
-    private class Params(
+    internal class Params(
         val seed: Long,
         val playoutDelayMs: Int = 350,
         val clientClockOffsetUs: Long = -3_200_000_000L,
@@ -33,9 +33,13 @@ class PlayoutEngineSimTest {
         val spikeUs: Int = 0,
         val pauseAtSeq: Long = Long.MAX_VALUE,
         val pauseNs: Long = 0,
+        /** Output latency the phone does NOT report (speaker DSP, an unreported Bluetooth link). */
+        val hiddenLatencyUs: Long = 0,
+        /** Decode every packet to silence (sound-check tests mix chirps on top). */
+        val silent: Boolean = false,
     )
 
-    private class Sim(val p: Params) : AudioSink, OpusFrameDecoder {
+    internal class Sim(val p: Params) : AudioSink, OpusFrameDecoder {
         val rng = Random(p.seed)
         val jitter = JitterBuffer()
         val clock = ClockSync()
@@ -121,6 +125,10 @@ class PlayoutEngineSimTest {
 
         // ---- decoder: encodes "where in the stream am I" into the samples -----------------------
         override fun decode(packet: ByteArray, length: Int, out: FloatArray): Boolean {
+            if (p.silent) {
+                java.util.Arrays.fill(out, 0f)
+                return true
+            }
             val seq = Wire.getU64(packet, 0)
             val base = (seq % BLOCK_FRAMES) * 960
             for (i in 0 until 960) {
@@ -142,6 +150,9 @@ class PlayoutEngineSimTest {
         private var tsTimeNs = 0L
         var underruns = 0L
 
+        /** When set, every sample this phone plays is added here at its true time (48 kHz). */
+        var heard: FloatArray? = null
+
         private fun advanceSink(toNs: Long) {
             while (nextConsumeNs <= toNs) {
                 if (slots++ % 480 == 0L) { // the "mixer" publishes a timestamp every 10 ms, with noise
@@ -150,7 +161,12 @@ class PlayoutEngineSimTest {
                 }
                 if (consumed < written) {
                     val i = (consumed % RING).toInt() * 2
-                    observe(ring[i], ring[i + 1], nextConsumeNs.toLong() + p.sinkLatencyUs * 1000)
+                    val heardNs = nextConsumeNs.toLong() + (p.sinkLatencyUs + p.hiddenLatencyUs) * 1000
+                    observe(ring[i], ring[i + 1], heardNs)
+                    heard?.let { track -> // what a microphone in the room picks up from this phone
+                        val idx = (heardNs * Proto.SAMPLE_RATE / 1_000_000_000L).toInt()
+                        if (idx in track.indices) track[idx] += ring[i]
+                    }
                     consumed++
                 } else if (written > 0) {
                     underruns++

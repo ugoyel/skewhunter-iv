@@ -37,6 +37,9 @@ enum Proto {
     static let typeBye: UInt8 = 0x07
     static let typeDiscover: UInt8 = 0x08
     static let typeDiscoverResp: UInt8 = 0x09
+    static let typeNowPlaying: UInt8 = 0x0A
+    static let typeChirp: UInt8 = 0x0B
+    static let typeOffset: UInt8 = 0x0C
 
     static let platformAndroid: UInt8 = 1
     static let platformIOS: UInt8 = 2
@@ -68,6 +71,8 @@ struct SyncReqMsg: Equatable {
     var rttUs: UInt32
     var bufferMs: UInt16
     var status: UInt8
+    /// Everything the listener adds to the playout delay (slider + sound-check correction + fallback), µs.
+    var adjustUs: Int32 = 0
 }
 
 struct SyncRespMsg: Equatable {
@@ -76,6 +81,28 @@ struct SyncRespMsg: Equatable {
     var t1Us: UInt64
     var t2Us: UInt64
     var playoutDelayMs: UInt16
+}
+
+struct NowPlayingMsg: Equatable {
+    var streamId: UInt32
+    var playing: Bool
+    var title: String
+    var artist: String
+}
+
+struct ChirpMsg: Equatable {
+    var streamId: UInt32
+    var clientId: UInt32
+    var mediaTimeUs: UInt64
+    var checkId: UInt16
+}
+
+struct OffsetMsg: Equatable {
+    var streamId: UInt32
+    var clientId: UInt32
+    var adjustUs: Int32
+    var checkId: UInt16
+    var errorUs: UInt16
 }
 
 struct DiscoverRespMsg: Equatable {
@@ -87,7 +114,11 @@ struct DiscoverRespMsg: Equatable {
 
 /// Stateless encode/decode helpers. Decoders return nil on anything malformed.
 enum Wire {
-    static let syncReqSize = 24
+    static let syncReqSize = 28
+    /// SYNC_REQ before the adjust field was added; still accepted.
+    static let syncReqMinSize = 24
+    static let chirpSize = 24
+    static let offsetSize = 20
     static let syncRespSize = 36
 
     // MARK: primitives
@@ -215,21 +246,25 @@ enum Wire {
 
     // MARK: SYNC_REQ (0x04) client -> host (also the keep-alive)
     //  4  u32 clientId   8  u64 t0 (client clock, us)   16  u32 rttUs
-    // 20  u16 bufferMs   22  u8 status   23  u8 reserved
+    // 20  u16 bufferMs   22  u8 status   23  u8 reserved   24  i32 adjustUs
+    // (the 24-byte form without adjustUs is still accepted)
 
-    static func encodeSyncReq(clientId: UInt32, t0Us: UInt64, rttUs: UInt32, bufferMs: UInt16, status: UInt8) -> [UInt8] {
+    static func encodeSyncReq(clientId: UInt32, t0Us: UInt64, rttUs: UInt32, bufferMs: UInt16, status: UInt8, adjustUs: Int32 = 0) -> [UInt8] {
         var b = header(syncReqSize, Proto.typeSyncReq)
         putU32(&b, 4, clientId)
         putU64(&b, 8, t0Us)
         putU32(&b, 16, rttUs)
         putU16(&b, 20, bufferMs)
         b[22] = status
+        putU32(&b, 24, UInt32(bitPattern: adjustUs))
         return b
     }
 
     static func decodeSyncReq(_ b: [UInt8]) -> SyncReqMsg? {
-        guard b.count >= syncReqSize else { return nil }
-        return SyncReqMsg(clientId: getU32(b, 4), t0Us: getU64(b, 8), rttUs: getU32(b, 16), bufferMs: getU16(b, 20), status: b[22])
+        guard b.count >= syncReqMinSize else { return nil }
+        let adjust = b.count >= syncReqSize ? Int32(bitPattern: getU32(b, 24)) : 0
+        return SyncReqMsg(
+            clientId: getU32(b, 4), t0Us: getU64(b, 8), rttUs: getU32(b, 16), bufferMs: getU16(b, 20), status: b[22], adjustUs: adjust)
     }
 
     // MARK: SYNC_RESP (0x05) host -> client
@@ -271,6 +306,66 @@ enum Wire {
 
     /// Body of LEAVE / BYE / DISCOVER: a single u32, or nil if truncated.
     static func decodeU32Body(_ b: [UInt8]) -> UInt32? { b.count < 8 ? nil : getU32(b, 4) }
+
+    // MARK: NOW_PLAYING (0x0A) host -> client
+    //  4  u32 streamId   8  u8 flags (bit 0: playing)   9  u8 titleLen   10  title   then u8 artistLen, artist
+
+    static func encodeNowPlaying(streamId: UInt32, playing: Bool, title: String, artist: String) -> [UInt8] {
+        let t = nameBytes(title)
+        let a = nameBytes(artist)
+        var b = header(9, Proto.typeNowPlaying)
+        putU32(&b, 4, streamId)
+        b[8] = playing ? 1 : 0
+        b.append(UInt8(t.count))
+        b.append(contentsOf: t)
+        b.append(UInt8(a.count))
+        b.append(contentsOf: a)
+        return b
+    }
+
+    static func decodeNowPlaying(_ b: [UInt8]) -> NowPlayingMsg? {
+        guard b.count >= 11, let title = readName(b, 9) else { return nil }
+        guard let artist = readName(b, 10 + Int(b[9])) else { return nil }
+        return NowPlayingMsg(streamId: getU32(b, 4), playing: b[8] & 1 != 0, title: title, artist: artist)
+    }
+
+    // MARK: CHIRP (0x0B) host -> client
+    //  4  u32 streamId   8  u32 clientId (who should chirp)   12  u64 mediaTimeUs   20  u16 checkId   22  u16 reserved
+
+    static func encodeChirp(streamId: UInt32, clientId: UInt32, mediaTimeUs: UInt64, checkId: UInt16) -> [UInt8] {
+        var b = header(chirpSize, Proto.typeChirp)
+        putU32(&b, 4, streamId)
+        putU32(&b, 8, clientId)
+        putU64(&b, 12, mediaTimeUs)
+        putU16(&b, 20, checkId)
+        return b
+    }
+
+    static func decodeChirp(_ b: [UInt8]) -> ChirpMsg? {
+        guard b.count >= chirpSize else { return nil }
+        return ChirpMsg(streamId: getU32(b, 4), clientId: getU32(b, 8), mediaTimeUs: getU64(b, 12), checkId: getU16(b, 20))
+    }
+
+    // MARK: OFFSET (0x0C) host -> client
+    //  4  u32 streamId   8  u32 clientId   12  i32 adjustUs (add to the current correction)
+    // 16  u16 checkId (apply each id once)   18  u16 errorUs (|error| measured, capped at 65535)
+
+    static func encodeOffset(streamId: UInt32, clientId: UInt32, adjustUs: Int32, checkId: UInt16, errorUs: UInt16) -> [UInt8] {
+        var b = header(offsetSize, Proto.typeOffset)
+        putU32(&b, 4, streamId)
+        putU32(&b, 8, clientId)
+        putU32(&b, 12, UInt32(bitPattern: adjustUs))
+        putU16(&b, 16, checkId)
+        putU16(&b, 18, errorUs)
+        return b
+    }
+
+    static func decodeOffset(_ b: [UInt8]) -> OffsetMsg? {
+        guard b.count >= offsetSize else { return nil }
+        return OffsetMsg(
+            streamId: getU32(b, 4), clientId: getU32(b, 8), adjustUs: Int32(bitPattern: getU32(b, 12)),
+            checkId: getU16(b, 16), errorUs: getU16(b, 18))
+    }
 
     // MARK: DISCOVER_RESP (0x09) host -> client
     //  4  u32 nonce (echo)   8  u32 streamId   12  u8 listeners   13  u8 nameLen   14  hostName

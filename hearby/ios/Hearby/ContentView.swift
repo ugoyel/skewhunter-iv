@@ -147,7 +147,7 @@ private struct JoinView: View {
                 .foregroundColor(manualError == nil ? Party.inkSoft : Party.coral)
         }
 
-        Text("iPhones join parties. To be the DJ you need an Android phone, because iOS doesn't let apps share what other apps are playing.")
+        Text("iPhones join parties. The DJ runs Hearby on an Android phone.")
             .font(Party.font(13))
             .foregroundColor(Party.inkFaint)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -204,7 +204,28 @@ private struct ListeningView: View {
             HeroRow(symbol: status.outputIsBluetooth ? "airpodspro" : "headphones", active: playing, level: status.level,
                     title: title, detail: detail)
             if playing {
+                if !status.songTitle.isEmpty {
+                    HStack(spacing: 8) {
+                        Image(systemName: "music.note").foregroundColor(Party.pink)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(status.songTitle).font(Party.font(17, .semibold)).foregroundColor(.white).lineLimit(1)
+                            let sub = status.songPlaying ? status.songArtist : "Paused by the DJ"
+                            if !sub.isEmpty {
+                                Text(sub).font(Party.font(13)).foregroundColor(Party.inkSoft).lineLimit(1)
+                            }
+                        }
+                    }
+                }
                 Equalizer(level: status.level)
+                if status.soundChecked {
+                    Text("Sound-checked by the DJ")
+                        .font(Party.font(12, .semibold))
+                        .foregroundColor(Party.lime)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(Party.lime.opacity(0.18)))
+                        .overlay(Capsule().strokeBorder(Party.lime.opacity(0.5), lineWidth: 1))
+                }
                 HStack(spacing: 8) {
                     let tight = abs(status.syncErrorMs) < 5 && status.lateBiasMs == 0
                     Stat(value: signed(status.syncErrorMs) + " ms", label: "sync", accent: tight ? Party.lime : Party.sun)
@@ -392,7 +413,8 @@ enum Demo: String {
         case .playing:
             return ReceiverStatus(
                 phase: .playing, hostName: "Mia's Pixel", syncErrorMs: 0.3, rttMs: 2.1, bufferMs: 184,
-                playoutDelayMs: 350, offsetMs: -120, outputName: "Bluetooth: AirPods Pro", outputIsBluetooth: true, level: 0.7)
+                playoutDelayMs: 350, offsetMs: 0, outputName: "Bluetooth: AirPods Pro", outputIsBluetooth: true, level: 0.7,
+                songTitle: "Midnight City", songArtist: "M83", songPlaying: true, soundChecked: true)
         case .syncing:
             return ReceiverStatus(phase: .syncing, hostName: "Mia's Pixel", playoutDelayMs: 350, outputName: "iPhone speaker")
         case .ended:
