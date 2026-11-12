@@ -375,11 +375,15 @@ struct Avatar: View {
         (Party.coral, Party.pink), (Party.violet, Party.pink), (Party.sun, Party.coral),
     ]
 
-    var body: some View {
-        // A stable hash: Swift's own hashValue changes on every launch.
+    /// A stable hash (FNV-1a): Swift's own hashValue changes on every launch.
+    private static func colors(for name: String) -> (Color, Color) {
         var hash: UInt32 = 2_166_136_261
         for byte in name.utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }
-        let colors = Avatar.palette[Int(hash % UInt32(Avatar.palette.count))]
+        return palette[Int(hash % UInt32(palette.count))]
+    }
+
+    var body: some View {
+        let colors = Avatar.colors(for: name)
         let initial = name.first(where: { $0.isLetter || $0.isNumber }).map { String($0).uppercased() } ?? "♪"
         Circle()
             .fill(LinearGradient(colors: [colors.0, colors.1], startPoint: .topLeading, endPoint: .bottomTrailing))

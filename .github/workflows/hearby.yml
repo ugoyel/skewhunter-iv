@@ -60,10 +60,12 @@ jobs:
         run: swift test
       - name: Build the app for the iOS Simulator
         run: |
-          set -o pipefail
+          # Keep the log quiet on success, but always surface compiler errors on failure.
           xcodebuild -project Hearby.xcodeproj -scheme Hearby -configuration Debug \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tail -25
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build > xcodebuild.log 2>&1 \
+            || { grep -E "error:" xcodebuild.log | sort -u | head -40; tail -15 xcodebuild.log; exit 1; }
+          tail -3 xcodebuild.log
       - name: Screenshots of every screen (demo data, in the simulator)
         run: |
           set -euo pipefail
