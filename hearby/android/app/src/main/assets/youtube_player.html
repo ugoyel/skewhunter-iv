@@ -1,0 +1,80 @@
+<!doctype html>
+<!--
+  Hearby's YouTube player page: YouTube's official IFrame Player API, nothing else. The app loads this
+  page with its own https origin (https://io.github.ugoyel.hearby/), so the player's requests carry an
+  HTTP Referer that identifies the app, as YouTube requires of embedded players. Shared by Android
+  (WebView) and iOS (WKWebView); ios/Hearby/YouTubePlayer.html is a copy.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  #player { position: absolute; inset: 0; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="player"></div>
+<script>
+  var player = null, ready = false, pending = null, lastError = 0;
+
+  function post(type, data) {
+    try {
+      if (window.HearbyAndroid) { window.HearbyAndroid.event(type, String(data)); }
+      else if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.hearby) {
+        window.webkit.messageHandlers.hearby.postMessage({ type: type, data: String(data) });
+      }
+    } catch (e) {}
+  }
+
+  var tag = document.createElement('script');
+  tag.src = 'https://www.youtube.com/iframe_api';
+  tag.onerror = function () { post('offline', ''); };
+  document.head.appendChild(tag);
+
+  function onYouTubeIframeAPIReady() {
+    player = new YT.Player('player', {
+      width: '100%', height: '100%',
+      playerVars: { playsinline: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, iv_load_policy: 3, origin: location.origin },
+      events: {
+        onReady: function () {
+          ready = true;
+          post('ready', '');
+          if (pending) { var id = pending; pending = null; hearbyLoad(id); }
+        },
+        onStateChange: function (e) {
+          post('state', e.data);
+          try { var d = player.getVideoData(); if (d && d.title) post('title', d.title); } catch (x) {}
+        },
+        onError: function (e) { lastError = e.data; post('error', e.data); }
+      }
+    });
+  }
+
+  function hearbyLoad(id) { if (!ready) { pending = id; return; } lastError = 0; player.cueVideoById({ videoId: id }); }
+  function hearbyPlay() { if (ready) player.playVideo(); }
+  function hearbyPause() { if (ready) player.pauseVideo(); }
+  function hearbySeek(seconds) { if (ready) player.seekTo(Number(seconds), true); }
+  function hearbyRate(rate) { if (ready) player.setPlaybackRate(Number(rate)); }
+
+  /** Everything the sync controller needs, stamped with the moment it was read (epoch ms). */
+  function hearbyStatus() {
+    var o = { ready: ready, err: lastError, at: performance.timeOrigin + performance.now() };
+    if (ready) {
+      try {
+        o.s = player.getPlayerState();
+        o.t = player.getCurrentTime();
+        o.r = player.getPlaybackRate();
+        o.rates = player.getAvailablePlaybackRates();
+        var d = player.getVideoData();
+        o.id = d ? d.video_id : '';
+        o.title = d ? d.title : '';
+      } catch (e) {}
+    }
+    return JSON.stringify(o);
+  }
+</script>
+</body>
+</html>

@@ -45,6 +45,7 @@ object Proto {
     const val TYPE_NOW_PLAYING = 0x0A
     const val TYPE_CHIRP = 0x0B
     const val TYPE_OFFSET = 0x0C
+    const val TYPE_VIDEO = 0x0D
 
     const val PLATFORM_ANDROID = 1
     const val PLATFORM_IOS = 2
@@ -85,6 +86,9 @@ class NowPlayingMsg(val streamId: Long, val playing: Boolean, val title: String,
 class ChirpMsg(val streamId: Long, val clientId: Long, val mediaTimeUs: Long, val checkId: Int)
 
 class OffsetMsg(val streamId: Long, val clientId: Long, val adjustUs: Long, val checkId: Int, val errorUs: Int)
+
+/** The party's YouTube video, or [timeline] null when no video is on. */
+class VideoMsg(val streamId: Long, val timeline: VideoTimeline?)
 
 /** Stateless encode/decode helpers. Decoders return null on anything malformed. */
 object Wire {
@@ -372,6 +376,40 @@ object WireParty {
     fun decodeOffset(b: ByteArray, len: Int): OffsetMsg? {
         if (len < Wire.OFFSET_SIZE) return null
         return OffsetMsg(Wire.getU32(b, 4), Wire.getU32(b, 8), Wire.getU32(b, 12).toInt().toLong(), Wire.getU16(b, 16), Wire.getU16(b, 18))
+    }
+}
+
+/** YouTube mode: the shared video timeline. */
+object WireVideo {
+    // ---- VIDEO (0x0D)  host -> client ---------------------------------------------------------------
+    //  4  u32 streamId   8  u32 version   12  u8 flags (bit 0: playing, bit 1: a video is on)
+    // 13  u64 anchorHostUs   21  i64 positionUs   29  u8 idLen, videoId   then u8 titleLen, title
+
+    fun encode(streamId: Long, t: VideoTimeline?): ByteArray {
+        val id = Wire.nameField(t?.videoId.orEmpty())
+        val title = Wire.nameField(t?.title.orEmpty())
+        val b = ByteArray(29 + id.size + title.size)
+        Wire.writeHeader(b, Proto.TYPE_VIDEO)
+        Wire.putU32(b, 4, streamId)
+        Wire.putU32(b, 8, (t?.version ?: 0) and 0xFFFFFFFFL)
+        b[12] = ((if (t?.playing == true) 1 else 0) or (if (t != null) 2 else 0)).toByte()
+        Wire.putU64(b, 13, t?.anchorHostUs ?: 0)
+        Wire.putU64(b, 21, t?.positionUs ?: 0)
+        id.copyInto(b, 29)
+        title.copyInto(b, 29 + id.size)
+        return b
+    }
+
+    fun decode(b: ByteArray, len: Int): VideoMsg? {
+        if (len < 31) return null
+        val id = Wire.readNameField(b, 29, len) ?: return null
+        val title = Wire.readNameField(b, 30 + Wire.getU8(b, 29), len) ?: return null
+        val flags = Wire.getU8(b, 12)
+        val timeline = if (flags and 2 == 0 || id.isEmpty()) null else VideoTimeline(
+            videoId = id, title = title, playing = flags and 1 != 0,
+            anchorHostUs = Wire.getU64(b, 13), positionUs = Wire.getU64(b, 21), version = Wire.getU32(b, 8),
+        )
+        return VideoMsg(Wire.getU32(b, 4), timeline)
     }
 }
 

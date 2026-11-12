@@ -101,6 +101,25 @@ class ProtocolTest {
     }
 
     @Test
+    fun video() {
+        val t = VideoTimeline("dQw4w9WgXcQ", "Hit", playing = true, anchorHostUs = 0x0000000102030405L, positionUs = -2_000_000, version = 3)
+        val b = WireVideo.encode(0x0A0B0C0DL, t)
+        assertEquals(
+            "4842010d" + "0a0b0c0d" + "00000003" + "03" + "0000000102030405" + "ffffffffffe17b80" +
+                "0b" + "6451773477395767586351" + "03" + "486974",
+            hex(b),
+        )
+        val m = WireVideo.decode(b, b.size)!!
+        assertEquals(0x0A0B0C0DL, m.streamId)
+        assertEquals(t, m.timeline)
+        // No video on (back to music).
+        val off = WireVideo.encode(0x0A0B0C0DL, null)
+        assertEquals("4842010d" + "0a0b0c0d" + "00000000" + "00" + "0000000000000000" + "0000000000000000" + "00" + "00", hex(off))
+        assertNull(WireVideo.decode(off, off.size)!!.timeline)
+        assertNull(WireVideo.decode(b, 30))
+    }
+
+    @Test
     fun offset() {
         val b = WireParty.encodeOffset(0x0A0B0C0DL, 0xDEADBEEFL, -6_500, 7, 6_500)
         assertEquals("4842010c" + "0a0b0c0d" + "deadbeef" + "ffffe69c" + "0007" + "1964", hex(b))

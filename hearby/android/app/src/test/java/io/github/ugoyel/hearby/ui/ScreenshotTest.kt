@@ -8,6 +8,7 @@ import io.github.ugoyel.hearby.client.DiscoveredHost
 import io.github.ugoyel.hearby.client.Phase
 import io.github.ugoyel.hearby.client.ReceiverUiState
 import io.github.ugoyel.hearby.core.Proto
+import io.github.ugoyel.hearby.core.VideoTimeline
 import io.github.ugoyel.hearby.host.CheckResult
 import io.github.ugoyel.hearby.host.HostUiState
 import io.github.ugoyel.hearby.host.ListenerInfo
@@ -121,6 +122,28 @@ class ScreenshotTest {
     fun findingTheBeat() = shot("6_finding_the_beat", tab = 1, energy = 0f) {
         Listening(
             ReceiverUiState(phase = Phase.SYNCING, hostName = "Mia's Pixel", playoutDelayMs = 350, outputName = "Phone speaker"),
+            onOffset = {}, onResync = {}, onLeave = {}, onUnmute = {},
+        )
+    }
+
+    private val video = VideoTimeline("dQw4w9WgXcQ", "Kesariya | Brahmāstra | Official Video", playing = true, anchorHostUs = 0, positionUs = 0, version = 1)
+
+    @Test
+    fun djYouTube() = shot("9_dj_youtube", tab = 0, energy = 1f) {
+        HostLive(
+            HostUiState(running = true, addresses = listOf("192.168.43.1"), listeners = crowd, video = video, queue = songs),
+            DjActions(),
+        )
+    }
+
+    @Test
+    fun guestYouTube() = shot("10_guest_youtube", tab = 1, energy = 1f) {
+        Listening(
+            ReceiverUiState(
+                phase = Phase.PLAYING, hostName = "Mia's Pixel", syncErrorMs = 0.3f, rttMs = 2.1f, bufferMs = 184,
+                playoutDelayMs = 350, outputName = "Phone speaker", video = video,
+                songTitle = video.title, songArtist = "YouTube", songPlaying = true,
+            ),
             onOffset = {}, onResync = {}, onLeave = {}, onUnmute = {},
         )
     }

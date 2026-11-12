@@ -261,6 +261,12 @@ struct ReceiverStatus: Equatable {
     var songPlaying = false
     /// True once the DJ's sound check has lined this phone up.
     var soundChecked = false
+    /// The YouTube video the DJ is playing on every phone, or nil.
+    var video: VideoTimeline?
+    /// DJ clock minus this phone's clock (`HostClock`), µs.
+    var clockOffsetUs: Int64 = 0
+    /// This phone's own correction (slider + sound check), µs; positive plays later.
+    var correctionUs: Int64 = 0
 }
 
 // MARK: - Receiver
@@ -381,6 +387,7 @@ private final class ListenSession {
     private var calibrationUs: Int64 = 0
     private var lastCheckId: Int = -1
     private var soundChecked = false
+    private var video: VideoTimeline?
     private var syncsSent = 0
     private var startNs: Int64 = 0
     private var lastPacketNs: Int64 = 0
@@ -633,6 +640,7 @@ private final class ListenSession {
                 calibrationUs = 0
                 lastCheckId = -1
                 soundChecked = false
+                video = nil
                 engine.setCalibrationUs(0)
                 engine.requestStreamReset()
             }
@@ -648,6 +656,11 @@ private final class ListenSession {
             songTitle = m.title
             songArtist = m.artist
             songPlaying = m.playing
+
+        case Proto.typeVideo:
+            // YouTube mode: every phone plays the video itself; this says what, and where on the DJ's clock.
+            guard let m = Wire.decodeVideo(b), m.streamId == streamId else { return }
+            video = m.timeline
 
         case Proto.typeChirp:
             // The DJ's sound check: play the chirp at exactly this point of the shared timeline.
@@ -750,7 +763,8 @@ private final class ListenSession {
             syncErrorMs: snap.syncErrorMs, rttMs: Float(clock.rttUs) / 1000, bufferMs: snap.cushionMs,
             lateBiasMs: snap.lateBiasMs, playoutDelayMs: playoutDelayMs, offsetMs: offset,
             outputName: output, outputIsBluetooth: bluetooth, lossPercent: lossPercent, level: snap.level,
-            songTitle: songTitle, songArtist: songArtist, songPlaying: songPlaying, soundChecked: soundChecked))
+            songTitle: songTitle, songArtist: songArtist, songPlaying: songPlaying, soundChecked: soundChecked,
+            video: video, clockOffsetUs: clock.offsetUs, correctionUs: Int64(offset) * 1000 + calibrationUs))
     }
 }
 

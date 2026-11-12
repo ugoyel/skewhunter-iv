@@ -5,6 +5,8 @@ import android.os.Process
 import android.util.Log
 import io.github.ugoyel.hearby.LocalNet
 import io.github.ugoyel.hearby.core.ClockSync
+import io.github.ugoyel.hearby.core.VideoTimeline
+import io.github.ugoyel.hearby.core.WireVideo
 import io.github.ugoyel.hearby.core.JitterBuffer
 import io.github.ugoyel.hearby.core.PlayoutEngine
 import io.github.ugoyel.hearby.core.Proto
@@ -49,6 +51,12 @@ data class ReceiverUiState(
     val soundChecked: Boolean = false,
     /** Sound-check correction applied to this phone, ms (negative = plays earlier). */
     val soundCheckMs: Float = 0f,
+    /** YouTube mode: the video the DJ is playing on every phone, or null. */
+    val video: VideoTimeline? = null,
+    /** DJ clock minus this phone's clock, µs. */
+    val clockOffsetUs: Long = 0,
+    /** This phone's own correction (slider + sound check), µs; positive plays later. */
+    val correctionUs: Long = 0,
 )
 
 /**
@@ -98,6 +106,7 @@ class AndroidSyncReceiver(
     @Volatile private var songPlaying = false
     @Volatile private var lastCheckId = -1
     @Volatile private var soundChecked = false
+    @Volatile private var video: VideoTimeline? = null
 
     fun start() {
         if (running) return
@@ -217,6 +226,7 @@ class AndroidSyncReceiver(
                     syncsSent = 0
                     lastCheckId = -1
                     soundChecked = false
+                    video = null
                     playout.resetStream()
                 }
                 hostName = m.hostName.ifBlank { hostName }
@@ -231,6 +241,10 @@ class AndroidSyncReceiver(
                 songTitle = m.title
                 songArtist = m.artist
                 songPlaying = m.playing
+            }
+            Proto.TYPE_VIDEO -> {
+                val m = WireVideo.decode(buf, len) ?: return
+                if (m.streamId == streamId) video = m.timeline
             }
             Proto.TYPE_CHIRP -> {
                 val m = WireParty.decodeChirp(buf, len) ?: return
@@ -370,6 +384,9 @@ class AndroidSyncReceiver(
                 songPlaying = songPlaying,
                 soundChecked = soundChecked,
                 soundCheckMs = playout.calibrationUs / 1000f,
+                video = video,
+                clockOffsetUs = clock.offsetUs,
+                correctionUs = playout.userOffsetMs * 1000L + playout.calibrationUs,
             ),
         )
     }

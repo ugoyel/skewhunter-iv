@@ -191,6 +191,29 @@ difference between its own value and the host phone's (`adjustUs`, negative = pl
 host phone chirps first and last in each round, which cancels its microphone's latency and any
 clock drift during the round. Corrections reset when a new stream starts.
 
+### 0x0D VIDEO (host → listeners): YouTube mode
+
+In YouTube mode the host sends no music: every phone plays the same YouTube video itself, over the
+internet, in YouTube's official embedded player, and this message says where the video should be on
+the host's clock. Sent when anything changes (`version` goes up), and once a second for anyone who
+missed it. AUDIO keeps flowing (silence) so the clock sync and the playout keep running.
+
+```
+ 4   u32  streamId
+ 8   u32  version      bumped on every change
+ 12  u8   flags        bit 0: playing   bit 1: a video is on (clear: back to music, ignore the rest)
+ 13  u64  anchorHostUs host clock, µs
+ 21  i64  positionUs   video position at anchorHostUs, µs
+ 29  u8   idLen        then the 11-character YouTube video id (ASCII)
+ ..  u8   titleLen     then the title (UTF-8, may be empty until the host's player knows it)
+```
+
+While playing, the video should be at `positionUs + max(0, hostNow − anchorHostUs)`: a start or a
+resume is announced with an anchor a little in the future (2.5 s for a new video, 0.8 s for a
+resume), and phones hold at `positionUs` until then. While paused it stays at `positionUs`. Each
+phone converts host time to its own clock with the SYNC offset and applies its own correction
+(slider plus sound check, positive = later) before steering its player.
+
 ## Discovery
 
 | Mechanism | Host | Android listener | iOS listener |
@@ -217,6 +240,8 @@ Hex, exactly as on the wire.
 | NOW_PLAYING `streamId=0x0A0B0C0D`, playing, `"Song"`, `"Band"` | `4842010a 0a0b0c0d 01 04 536f6e67 04 42616e64` |
 | CHIRP `streamId=0x0A0B0C0D`, `clientId=0xDEADBEEF`, `mediaTimeUs=0x0102030405`, check 7 | `4842010b 0a0b0c0d deadbeef 0000000102030405 0007 0000` |
 | OFFSET `streamId=0x0A0B0C0D`, `clientId=0xDEADBEEF`, adjust −6 500 µs, check 7, error 6 500 µs | `4842010c 0a0b0c0d deadbeef ffffe69c 0007 1964` |
+| VIDEO `streamId=0x0A0B0C0D`, version 3, playing, `anchorHostUs=0x0102030405`, `positionUs=−2 000 000`, `"dQw4w9WgXcQ"`, `"Hit"` | `4842010d 0a0b0c0d 00000003 03 0000000102030405 ffffffffffe17b80 0b 6451773477395767586351 03 486974` |
+| VIDEO, no video on | `4842010d 0a0b0c0d 00000000 00 0000000000000000 0000000000000000 00 00` |
 | Chirp samples 50, 100, 500, 1500, 1900 | −0.2020977, 0.2314788, 0.2541216, 0.0428987, 0.0263643 |
 
 ## Security note

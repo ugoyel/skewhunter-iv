@@ -5,6 +5,11 @@ the same music at the same moment, the DJ's own phone included. It works over th
 the DJ's own hotspot, through each phone's speaker or its own Bluetooth earbuds or speaker. No
 internet, no accounts, no screen sharing, no paid SDKs.
 
+**YouTube mode** (AmpMe style): the DJ pastes a YouTube link, or shares a video from the YouTube
+app to Hearby, and every phone plays that video itself, over the internet, in YouTube's official
+embedded player. Hearby keeps the players on one shared timeline: they start together, pause and
+resume together, and stay in time while they play. See [YouTube mode](#youtube-mode).
+
 A **sound check** then lines every phone up to within about a millisecond: each phone beeps in turn
 and the DJ phone's microphone times the beeps.
 
@@ -51,8 +56,8 @@ Screens can be rendered without a phone:
 
 - Android: `./gradlew testDebugUnitTest --tests '*ScreenshotTest*'` writes every screen, with sample
   data, to `app/build/outputs/roborazzi/`.
-- iOS: launch a debug build with `-demo join`, `-demo playing`, `-demo syncing` or `-demo ended` to
-  show a screen with sample data and no network. CI does this in the simulator.
+- iOS: launch a debug build with `-demo join`, `-demo playing`, `-demo syncing`, `-demo ended` or
+  `-demo youtube` to show a screen with sample data and no network. CI does this in the simulator.
 
 CI publishes both sets as downloadable artifacts (`hearby-android-screens`, `hearby-ios-screens`) on
 every run. The images above come from those renders.
@@ -142,6 +147,42 @@ is when each phone *emits* the sound, and that is what the sound check aligns: i
 below, a phone whose speaker is secretly 8 ms late and a Bluetooth speaker that is 148 ms late both
 end up within 0.3 ms of the DJ. For the check itself, hold the phones together, near the DJ phone.
 
+## YouTube mode
+
+Every phone plays the video itself, so YouTube mode needs internet on every phone, but almost no
+Wi-Fi bandwidth between them: the DJ only sends a small VIDEO message ("video X, at position P, at
+DJ time T, playing or paused", see `docs/PROTOCOL.md`).
+
+How each phone stays in time with the others:
+
+1. **One clock.** The clock sync Hearby already runs for music tells each phone the DJ's time to
+   within a fraction of a millisecond, and the DJ announces every start and resume a moment ahead
+   (2.5 s for a new video, 0.8 s for a resume). Each phone loads the video and waits, paused, on the
+   right frame.
+2. **Pressing play early enough.** A YouTube player takes a moment to start. Each phone presses
+   play that much early, and learns its own player's delay from how its previous starts landed.
+3. **Steering while it plays.** Five times a second each phone compares its player's position with
+   where the shared timeline says it should be. Big jumps (joining late, after an ad, after a stall)
+   are fixed with a seek that aims ahead by a learned amount. Smaller drift is pulled in with a
+   precisely timed speed change (for example 0.75× for 80 ms to drop back 20 ms), the same way a
+   DJ nudges a record. The player keeps the pitch.
+4. **Per-phone corrections.** The fine-tune slider and the sound check results apply to YouTube too,
+   so a phone with Bluetooth earbuds is lined up the same way as for music.
+
+Everything goes through YouTube's IFrame Player API (load, play, pause, seek, speed). Hearby never
+downloads, records, or re-streams the video, never hides or covers the player, and never plays it
+in the background: the video plays only while the app is on screen with the player visible, as
+YouTube's terms require. Ads play as YouTube decides; a phone that gets an ad catches up after it.
+
+In simulations with realistic players (start delays of 150 to 650 ms that vary every time, seeks
+that land on a keyframe until that part of the video has loaded, clocks that drift by up to 55 ppm,
+a noisy position reading, ads), across 40 randomised runs, phones stay within about 14 ms of the
+shared timeline while playing with YouTube's standard speed steps (0.25×, 0.5× … 2×, which is what
+the embedded player usually offers), and within about 6 ms if a player offers finer steps (Hearby
+uses them when it does). A resume is back in time within a few seconds. That is looser than music
+files, which play within about a millisecond after a sound check, and none of it has been measured
+on real phones yet.
+
 ## Building
 
 ### Android
@@ -205,6 +246,10 @@ are no package dependencies.
 
 The DJ phone plays along in sync, so there is no echo between it and the others.
 
+**YouTube:** on the DJ screen, paste a link into *Play from YouTube* and tap *Play*, or in the
+YouTube app tap *Share › Hearby*. Every phone with internet loads the video and they start together.
+The DJ can pause, resume, or go *Back to music*. Keep Hearby open on screen while the video plays.
+
 ## Limitations and edge cases
 
 **Music**
@@ -214,6 +259,18 @@ The DJ phone plays along in sync, so there is no echo between it and the others.
 - Streaming apps (Spotify, YouTube Music, Apple Music) are not sources: their songs are protected
   and only their own apps can play them. That is also why Hearby does not need screen capture.
 - Picking songs is per party; the queue is not saved yet.
+
+**YouTube mode**
+
+- Every phone needs internet. A phone that cannot reach YouTube says so; the others carry on.
+- Some videos cannot play in other apps (their owner turned off embedding, or they are age-
+  restricted or private); every phone then shows why, and the DJ picks another one.
+- Playback runs only while Hearby is on screen with the player visible. Switching apps or locking
+  the phone pauses that phone; it rejoins the timeline when it comes back.
+- Ads are YouTube's: a phone that gets one is late until the ad ends, then catches up.
+- Sync is looser than with music files (see [YouTube mode](#youtube-mode)), and it depends on each
+  player reporting its position accurately, which has not been measured on real phones yet.
+- iPhones follow along as guests; the DJ is an Android phone.
 
 **Sync accuracy**
 
@@ -280,6 +337,8 @@ Play accepts new apps as an **App Bundle** (`.aab`), not an APK. Besides uploadi
 | Android build | Unit tests, lint, signed and 16 KB-aligned release build; also built on a clean GitHub runner | Pass |
 | iOS build | `swift test` and an `xcodebuild` simulator build on a macOS runner | Pass |
 | Screen design | Every Android screen rendered on the JVM with sample data; every iOS screen screenshotted in the iOS Simulator through the demo mode | Reviewed by eye |
+| YouTube sync (controller) | Simulated YouTube players on both platforms, Kotlin and Swift: start, pause and resume together, a late joiner, an ad on one phone, fine and coarse speed steps, and 40 randomised runs | Within 14 ms with YouTube's standard speed steps, 6.5 ms with fine steps, 6.3 ms a few seconds after a resume |
+| YouTube links | Watch, share (`youtu.be`), Shorts, live, embed, YouTube Music and mobile links, with or without surrounding text, on both platforms | Pass |
 | DJ on an Android 14 emulator | Release APK 1.2.0: party starts as a plain `mediaPlayback` service (no screen-capture prompt); a 44.1 kHz MP3 opened with Hearby was decoded, resampled and played, with its title and artist; a Python guest received the Opus stream with no loss plus "now playing", pause and resume; the sound check sent the guest its chirp request and reported that it could not hear itself (the emulator has no speaker-to-microphone path) | Pass |
 
 **Not verified yet, and needed before a store release:**
@@ -292,6 +351,9 @@ Play accepts new apps as an **App Bundle** (`.aab`), not an APK. Besides uploadi
 - Real Wi-Fi and hotspot behaviour, including discovery across devices.
 - The iOS app at runtime. It compiles and its sync core passes the same tests as Android, but the
   AudioToolbox Opus decoder and AVAudioEngine timing have not been exercised on a device.
+- **YouTube mode with real YouTube.** YouTube was not reachable from the build machine, so the
+  embedded player itself (its start and seek delays, how accurately it reports its position, which
+  speeds it offers) has only been simulated. Try it on two or three real phones first.
 
 `.github/workflows/hearby.yml` runs the Android and iOS builds and tests on every change under
 `hearby/`.

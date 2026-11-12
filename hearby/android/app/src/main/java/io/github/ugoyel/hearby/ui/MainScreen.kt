@@ -12,6 +12,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import io.github.ugoyel.hearby.core.YouTubeLinks
+import io.github.ugoyel.hearby.core.VideoTimeline
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.material.icons.rounded.SmartDisplay
+import androidx.compose.material.icons.rounded.PlayCircle
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -130,8 +137,8 @@ fun MainScreen() {
     val host by PartyHostService.state.collectAsStateWithLifecycle()
     val listen by ReceiverService.state.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(if (listen.phase != Phase.IDLE && !host.running) 1 else 0) }
-    val sharedSongs by PartyHostService.pendingSongs.collectAsStateWithLifecycle()
-    LaunchedEffect(sharedSongs) { if (sharedSongs > 0) tab = 0 }
+    val djRequests by PartyHostService.djRequests.collectAsStateWithLifecycle()
+    LaunchedEffect(djRequests) { if (djRequests > 0) tab = 0 }
     val listening = listen.phase != Phase.IDLE && listen.phase != Phase.ENDED
 
     // Confetti for the two happy moments: someone joins your party, or you lock in to someone else's.
@@ -198,6 +205,7 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
     var micNotice by rememberSaveable { mutableStateOf<String?>(null) }
     var pickerMissing by rememberSaveable { mutableStateOf(false) }
     val waitingSongs by PartyHostService.pendingSongs.collectAsStateWithLifecycle()
+    val waitingVideo by PartyHostService.pendingVideoId.collectAsStateWithLifecycle()
 
     // Only for the "you're the DJ" notification; the party starts either way.
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -261,6 +269,11 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
                 onRemove = { PartyHostService.removeSong(it) },
                 onSoundCheck = ::soundCheck,
                 onStop = { PartyHostService.stop(context) },
+                onPlayVideo = { PartyHostService.playVideo(it) },
+                onToggleVideo = { PartyHostService.toggleVideo() },
+                onStopVideo = { PartyHostService.stopVideo() },
+                onVideoTitle = { id, title -> PartyHostService.videoTitle(id, title) },
+                onVideoEnded = { PartyHostService.videoEnded(it) },
             ),
             micNotice = micNotice,
             notice = if (pickerMissing) {
@@ -273,10 +286,11 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
         HostIdle(
             bitrate = bitrate, onBitrate = { bitrate = it },
             delayMs = delayMs, onDelay = { delayMs = it },
-            notice = state.message ?: when (waitingSongs) {
-                0 -> null
-                1 -> "1 song is ready. Start the party to play it."
-                else -> "$waitingSongs songs are ready. Start the party to play them."
+            notice = state.message ?: when {
+                waitingVideo != null -> "A YouTube video is ready. Start the party to play it on every phone."
+                waitingSongs == 1 -> "1 song is ready. Start the party to play it."
+                waitingSongs > 1 -> "$waitingSongs songs are ready. Start the party to play them."
+                else -> null
             },
             busyListening = listening,
             onStart = ::start,
@@ -293,6 +307,11 @@ internal class DjActions(
     val onRemove: (Int) -> Unit = {},
     val onSoundCheck: () -> Unit = {},
     val onStop: () -> Unit = {},
+    val onPlayVideo: (String) -> Unit = {},
+    val onToggleVideo: () -> Unit = {},
+    val onStopVideo: () -> Unit = {},
+    val onVideoTitle: (String, String) -> Unit = { _, _ -> },
+    val onVideoEnded: (String) -> Unit = {},
 )
 
 @Composable
@@ -342,6 +361,25 @@ internal fun HostIdle(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String? = null, notice: String? = null) {
+    val video = state.video
+    if (video != null) {
+        val correction by rememberUpdatedState(state.correctionUs)
+        VideoCard(
+            video = video, hostOffsetUs = { 0L }, correctionUs = { correction },
+            onTitle = { actions.onVideoTitle(video.videoId, it) },
+            onEnded = { actions.onVideoEnded(video.videoId) },
+        ) {
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                PlayButton(video.playing, actions.onToggleVideo)
+                Spacer(Modifier.width(4.dp))
+                GhostButton("Back to music", actions.onStopVideo, Modifier.weight(1f), icon = Icons.Rounded.LibraryMusic, height = 52.dp)
+            }
+        }
+        Crowd(state.listeners)
+        GradientButton("End the party", actions.onStop, Modifier.fillMaxWidth(), icon = Icons.Rounded.Stop, brush = Party.Stop, glow = Party.Coral)
+        return
+    }
     val song = state.queue.getOrNull(state.current)
     GlassCard(lit = true) {
         HeroRow(
@@ -392,12 +430,141 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
 
     if (state.queue.isNotEmpty()) Queue(state, actions)
 
+    YouTubeCard(actions.onPlayVideo)
+
     SoundCheckCard(state, actions.onSoundCheck, micNotice)
 
     Crowd(state.listeners)
 
     GradientButton("End the party", actions.onStop, Modifier.fillMaxWidth(), icon = Icons.Rounded.Stop, brush = Party.Stop, glow = Party.Coral)
 }
+
+/** Pick a YouTube video for every phone: paste a link, or share it from the YouTube app. */
+@Composable
+private fun YouTubeCard(onPlay: (String) -> Unit) {
+    var link by rememberSaveable { mutableStateOf("") }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
+    fun play() {
+        val id = YouTubeLinks.videoId(link)
+        if (id == null) {
+            error = "That doesn't look like a YouTube link."
+        } else {
+            error = null
+            link = ""
+            onPlay(id)
+        }
+    }
+    GlassCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.SmartDisplay, null, tint = Party.Coral)
+            Spacer(Modifier.width(10.dp))
+            Text("Play from YouTube", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = Color.White)
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Every phone plays the video itself, over the internet, and Hearby keeps them in time. " +
+                "Paste a link, or in the YouTube app tap Share › Hearby.",
+            style = MaterialTheme.typography.bodyMedium, color = Party.InkSoft,
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = link,
+                onValueChange = {
+                    link = it
+                    error = null
+                },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                placeholder = { Text("youtu.be/…", color = Party.InkFaint) },
+                isError = error != null,
+                shape = RoundedCornerShape(18.dp),
+                colors = partyFieldColors(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
+                keyboardActions = KeyboardActions(onGo = { play() }),
+            )
+            Spacer(Modifier.width(12.dp))
+            GradientButton("Play", ::play, enabled = link.isNotBlank(), height = 52.dp)
+        }
+        error?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(it, style = MaterialTheme.typography.bodySmall, color = Party.Coral)
+        }
+    }
+}
+
+/** The party's YouTube video on this phone: the synced player, its title, and how far off it is. */
+@Composable
+internal fun VideoCard(
+    video: VideoTimeline,
+    hostOffsetUs: () -> Long,
+    correctionUs: () -> Long,
+    onTitle: (String) -> Unit = {},
+    onEnded: () -> Unit = {},
+    controls: @Composable () -> Unit = {},
+) {
+    var notice by remember { mutableStateOf(PlayerNotice()) }
+    val title = video.title.ifBlank { notice.title.orEmpty() }
+    GlassCard(lit = video.playing) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Tag("YouTube", Party.Coral)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                if (video.playing) "Playing on every phone" else "Paused",
+                style = MaterialTheme.typography.labelLarge, color = Party.InkSoft, modifier = Modifier.weight(1f),
+            )
+            notice.offErrorMs?.let { off ->
+                if (notice.error == null && video.playing) {
+                    Tag(if (abs(off) < 1f) "in sync" else "${signed1(off)} ms", if (abs(off) < 15f) Party.Lime else Party.Sun)
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))) {
+            if (LocalMotion.current) {
+                SyncedYouTubePlayer(
+                    video, hostOffsetUs, correctionUs,
+                    onNotice = { n ->
+                        notice = n
+                        n.title?.let(onTitle)
+                    },
+                    onEnded = onEnded,
+                )
+            } else {
+                VideoPlaceholder()
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            title.ifBlank { "Loading video…" }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+            color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis,
+        )
+        notice.error?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = Party.Sun)
+        }
+        controls()
+    }
+}
+
+/** What screenshots show instead of the live YouTube player. */
+@Composable
+private fun VideoPlaceholder() {
+    Box(
+        Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Brush.linearGradient(listOf(Color(0xFF1A1030), Color(0xFF301848)))),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Rounded.PlayCircle, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(64.dp))
+    }
+}
+
+@Composable
+private fun partyFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = Party.Pink, unfocusedBorderColor = Party.GlassStroke, cursorColor = Party.Pink,
+    focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+    focusedContainerColor = Party.Glass, unfocusedContainerColor = Party.Glass,
+    errorBorderColor = Party.Coral, errorContainerColor = Party.Glass, errorTextColor = Color.White,
+)
 
 @Composable
 private fun Queue(state: HostUiState, actions: DjActions) {
@@ -728,7 +895,11 @@ internal fun Listening(
     }
     val dj = state.hostName.ifBlank { state.hostAddress }
     val output = state.outputName.removePrefix("Bluetooth: ") // the icon already says Bluetooth
-    GlassCard(lit = playing) {
+    val video = state.video
+    if (video != null && state.phase != Phase.CONNECTING) {
+        val latest by rememberUpdatedState(state)
+        VideoCard(video, hostOffsetUs = { latest.clockOffsetUs }, correctionUs = { latest.correctionUs })
+    } else GlassCard(lit = playing) {
         HeroRow(
             icon = if (state.outputIsBluetooth) Icons.Rounded.Bluetooth else Icons.Rounded.Headphones,
             active = playing, level = state.level, title = title,

@@ -28,6 +28,8 @@ import io.github.ugoyel.hearby.R
 import io.github.ugoyel.hearby.client.PlayoutRunner
 import io.github.ugoyel.hearby.codec.MediaCodecOpusEncoder
 import io.github.ugoyel.hearby.core.ClockSync
+import io.github.ugoyel.hearby.core.VideoTimeline
+import io.github.ugoyel.hearby.core.WireVideo
 import io.github.ugoyel.hearby.core.JitterBuffer
 import io.github.ugoyel.hearby.core.Proto
 import io.github.ugoyel.hearby.core.Wire
@@ -89,6 +91,10 @@ data class HostUiState(
     val outputName: String = "",
     val outputIsBluetooth: Boolean = false,
     val soundCheck: SoundCheckUi = SoundCheckUi(),
+    /** YouTube mode: the video every phone plays, or null for music. */
+    val video: VideoTimeline? = null,
+    /** This phone's own correction (slider + sound check), µs, applied to its video player too. */
+    val correctionUs: Long = 0,
 )
 
 /**
@@ -147,10 +153,12 @@ class PartyHostService : Service() {
         _state.value = HostUiState(
             running = true, port = s.port, addresses = LocalNet.localIpv4Addresses(), bitrate = bitrate, playoutDelayMs = delayMs,
         )
-        // Songs shared to Hearby before the party started.
+        // Songs or a video shared to Hearby before the party started.
         val waiting = synchronized(pending) { pending.toList().also { pending.clear() } }
         _pendingSongs.value = 0
         if (waiting.isNotEmpty()) s.player.addUris(waiting)
+        pendingVideo.getAndSet(null)?.let { s.playVideo(it) }
+        _pendingVideoId.value = null
     }
 
     /** Tear everything down. Safe to call repeatedly. */
@@ -234,6 +242,10 @@ class PartyHostService : Service() {
         val localId = SecureRandom().nextInt().toLong() and 0xFFFFFFFFL
 
         @Volatile private var lastSentTimestampUs = 0L
+        @Volatile private var video: VideoTimeline? = null
+        private var videoVersion = 0L
+        private var sentVideoVersion = -1L
+        private var lastVideoNs = 0L
         @Volatile private var checkRunner: SoundCheckRunner? = null
         @Volatile private var checkIds = 0
         @Volatile private var soundCheck = SoundCheckUi()
@@ -376,7 +388,8 @@ class PartyHostService : Service() {
                         continue
                     }
                     if (now - nextNs > MAX_LAG_NS) nextNs = now // starved for a while: jump (phones re-align once)
-                    player.pull(frame)
+                    // While a YouTube video is on, every phone plays it from YouTube: the stream carries silence.
+                    if (video == null) player.pull(frame) else java.util.Arrays.fill(frame, 0f)
                     toPcm16(frame, pcm)
                     enc.encode(pcm, nextNs / 1000, send)
                     if (enc.unsupportedFraming) {
@@ -492,11 +505,22 @@ class PartyHostService : Service() {
             val song = music.queue.getOrNull(music.index)
 
             // Tell everyone what is playing: on every change, and once a second for anyone who missed it.
-            val nowPlaying = "${song?.title}|${song?.artist}|${music.playing && !player.hold}"
+            val v = video
+            val title = if (v != null) v.title.ifBlank { "YouTube video" } else song?.title.orEmpty()
+            val artist = if (v != null) "YouTube" else song?.artist.orEmpty()
+            val on = if (v != null) v.playing else music.playing && !player.hold
+            val nowPlaying = "$title|$artist|$on"
             if (nowPlaying != lastNowPlaying || nowNs - lastNowPlayingNs > 1_000_000_000L) {
                 lastNowPlaying = nowPlaying
                 lastNowPlayingNs = nowNs
-                val msg = WireParty.encodeNowPlaying(streamId, music.playing && !player.hold, song?.title.orEmpty(), song?.artist.orEmpty())
+                val msg = WireParty.encodeNowPlaying(streamId, on, title, artist)
+                for (c in snapshot) reply(sock, msg, c.address)
+            }
+            // ... and the video timeline: on every change, then once a second.
+            if (videoVersion != sentVideoVersion || nowNs - lastVideoNs > 1_000_000_000L) {
+                sentVideoVersion = videoVersion
+                lastVideoNs = nowNs
+                val msg = WireVideo.encode(streamId, v)
                 for (c in snapshot) reply(sock, msg, c.address)
             }
 
@@ -517,6 +541,8 @@ class PartyHostService : Service() {
                     outputName = local.routeName,
                     outputIsBluetooth = local.routeIsBluetooth,
                     soundCheck = soundCheck,
+                    video = v,
+                    correctionUs = local.userOffsetMs * 1000L + local.calibrationUs,
                 )
             }
             val note = snapshot.size to (if (music.playing) song?.title.orEmpty() else "")
@@ -529,6 +555,57 @@ class PartyHostService : Service() {
                     // notifications disabled
                 }
             }
+        }
+
+        // ---- YouTube mode ----------------------------------------------------------------------------
+        // The timeline is defined on this phone's clock; every phone (this one too) steers its own
+        // YouTube player onto it. Changes are announced a moment ahead so all phones act together.
+
+        private fun nowUs() = System.nanoTime() / 1000
+
+        @Synchronized
+        fun playVideo(videoId: String) {
+            player.pause()
+            videoVersion++
+            video = VideoTimeline(videoId, "", playing = true, anchorHostUs = nowUs() + VIDEO_START_LEAD_US, positionUs = 0, version = videoVersion)
+            lastVideoNs = 0
+        }
+
+        @Synchronized
+        fun toggleVideo() {
+            val v = video ?: return
+            val now = nowUs()
+            videoVersion++
+            video = if (v.playing) {
+                v.copy(playing = false, anchorHostUs = now, positionUs = v.positionAt(now), version = videoVersion)
+            } else {
+                v.copy(playing = true, anchorHostUs = now + VIDEO_RESUME_LEAD_US, version = videoVersion)
+            }
+        }
+
+        @Synchronized
+        fun stopVideo() {
+            if (video == null) return
+            videoVersion++
+            video = null
+        }
+
+        @Synchronized
+        fun videoTitle(videoId: String, title: String) {
+            val v = video ?: return
+            if (v.videoId != videoId || v.title == title || title.isBlank()) return
+            videoVersion++
+            video = v.copy(title = title.take(120), version = videoVersion)
+        }
+
+        @Synchronized
+        fun videoEnded(videoId: String) {
+            val v = video ?: return
+            if (v.videoId != videoId || !v.playing) return
+            val now = nowUs()
+            if (v.startsInUs(now) > 0) return
+            videoVersion++
+            video = v.copy(playing = false, anchorHostUs = now, positionUs = v.positionAt(now), version = videoVersion)
         }
 
         // ---- sound check -------------------------------------------------------------------------
@@ -641,6 +718,9 @@ class PartyHostService : Service() {
         private const val CLIENT_TIMEOUT_NS = 6_000_000_000L
         private const val MAX_SESSION_MS = 12 * 60 * 60 * 1000L
         private const val MAX_LAG_NS = 200_000_000L
+        /** Time for every phone to load the video before it starts. */
+        private const val VIDEO_START_LEAD_US = 2_500_000L
+        private const val VIDEO_RESUME_LEAD_US = 800_000L
 
         private val _state = MutableStateFlow(HostUiState())
         val state: StateFlow<HostUiState> = _state.asStateFlow()
@@ -684,6 +764,7 @@ class PartyHostService : Service() {
                     _pendingSongs.value = pending.size
                 }
             }
+            _djRequests.value++
         }
 
         fun playSong(index: Int) = player?.play(index)
@@ -697,5 +778,40 @@ class PartyHostService : Service() {
         fun removeSong(index: Int) = player?.remove(index)
 
         fun soundCheck() = instance?.session?.startSoundCheck()
+
+        private val pendingVideo = java.util.concurrent.atomic.AtomicReference<String?>(null)
+        private val _pendingVideoId = MutableStateFlow<String?>(null)
+
+        /** A YouTube video shared to Hearby that starts as soon as the party does. */
+        val pendingVideoId: StateFlow<String?> = _pendingVideoId.asStateFlow()
+
+        private val _djRequests = MutableStateFlow(0)
+
+        /** Counts songs or videos shared to Hearby: the screen switches to the DJ tab when it changes. */
+        val djRequests: StateFlow<Int> = _djRequests.asStateFlow()
+
+        /** Play a YouTube video on every phone now, or as soon as the party starts. */
+        fun queueVideo(videoId: String) {
+            val s = instance?.session
+            if (s != null) {
+                s.playVideo(videoId)
+            } else {
+                pendingVideo.set(videoId)
+                _pendingVideoId.value = videoId
+            }
+            _djRequests.value++
+        }
+
+        fun playVideo(videoId: String) = instance?.session?.playVideo(videoId)
+
+        fun toggleVideo() = instance?.session?.toggleVideo()
+
+        fun stopVideo() = instance?.session?.stopVideo()
+
+        fun videoTitle(videoId: String, title: String) = instance?.session?.videoTitle(videoId, title)
+
+        fun videoEnded(videoId: String) = instance?.session?.videoEnded(videoId)
+
+
     }
 }

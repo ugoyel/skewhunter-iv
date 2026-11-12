@@ -200,38 +200,42 @@ private struct ListeningView: View {
 
     var body: some View {
         let playing = status.phase == .playing
-        GlassCard(lit: playing) {
-            HeroRow(symbol: status.outputIsBluetooth ? "airpodspro" : "headphones", active: playing, level: status.level,
-                    title: title, detail: detail)
-            if playing {
-                if !status.songTitle.isEmpty {
-                    HStack(spacing: 8) {
-                        Image(systemName: "music.note").foregroundColor(Party.pink)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(status.songTitle).font(Party.font(17, .semibold)).foregroundColor(.white).lineLimit(1)
-                            let sub = status.songPlaying ? status.songArtist : "Paused by the DJ"
-                            if !sub.isEmpty {
-                                Text(sub).font(Party.font(13)).foregroundColor(Party.inkSoft).lineLimit(1)
+        if let video = status.video, status.phase != .connecting {
+            VideoCard(status: status, video: video)
+        } else {
+            GlassCard(lit: playing) {
+                HeroRow(symbol: status.outputIsBluetooth ? "airpodspro" : "headphones", active: playing, level: status.level,
+                        title: title, detail: detail)
+                if playing {
+                    if !status.songTitle.isEmpty {
+                        HStack(spacing: 8) {
+                            Image(systemName: "music.note").foregroundColor(Party.pink)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(status.songTitle).font(Party.font(17, .semibold)).foregroundColor(.white).lineLimit(1)
+                                let sub = status.songPlaying ? status.songArtist : "Paused by the DJ"
+                                if !sub.isEmpty {
+                                    Text(sub).font(Party.font(13)).foregroundColor(Party.inkSoft).lineLimit(1)
+                                }
                             }
                         }
                     }
-                }
-                Equalizer(level: status.level)
-                if status.soundChecked {
-                    Text("Sound-checked by the DJ")
-                        .font(Party.font(12, .semibold))
-                        .foregroundColor(Party.lime)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(Party.lime.opacity(0.18)))
-                        .overlay(Capsule().strokeBorder(Party.lime.opacity(0.5), lineWidth: 1))
-                }
-                HStack(spacing: 8) {
-                    let tight = abs(status.syncErrorMs) < 5 && status.lateBiasMs == 0
-                    Stat(value: signed(status.syncErrorMs) + " ms", label: "sync", accent: tight ? Party.lime : Party.sun)
-                    Stat(value: String(format: "%.1f ms", status.rttMs), label: "ping")
-                    Stat(value: "\(status.bufferMs) ms", label: "buffer")
-                    Stat(value: String(format: "%.1f%%", status.lossPercent), label: "drops", accent: status.lossPercent < 1 ? .white : Party.sun)
+                    Equalizer(level: status.level)
+                    if status.soundChecked {
+                        Text("Sound-checked by the DJ")
+                            .font(Party.font(12, .semibold))
+                            .foregroundColor(Party.lime)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(Party.lime.opacity(0.18)))
+                            .overlay(Capsule().strokeBorder(Party.lime.opacity(0.5), lineWidth: 1))
+                    }
+                    HStack(spacing: 8) {
+                        let tight = abs(status.syncErrorMs) < 5 && status.lateBiasMs == 0
+                        Stat(value: signed(status.syncErrorMs) + " ms", label: "sync", accent: tight ? Party.lime : Party.sun)
+                        Stat(value: String(format: "%.1f ms", status.rttMs), label: "ping")
+                        Stat(value: "\(status.bufferMs) ms", label: "buffer")
+                        Stat(value: String(format: "%.1f%%", status.lossPercent), label: "drops", accent: status.lossPercent < 1 ? .white : Party.sun)
+                    }
                 }
             }
         }
@@ -277,6 +281,67 @@ private struct ListeningView: View {
 
     private func signed(_ value: Float) -> String {
         abs(value) < 0.05 ? "±0.0" : String(format: "%+.1f", value)
+    }
+}
+
+/// The DJ's YouTube video, playing on this iPhone in time with every other phone.
+private struct VideoCard: View {
+    let status: ReceiverStatus
+    let video: VideoTimeline
+    @State private var notice = PlayerNotice()
+
+    var body: some View {
+        GlassCard(lit: video.playing) {
+            HStack(spacing: 10) {
+                pill("YouTube", Party.coral)
+                Text(video.playing ? "Playing on every phone" : "Paused by the DJ")
+                    .font(Party.font(14, .semibold)).foregroundColor(Party.inkSoft).lineLimit(1)
+                Spacer(minLength: 0)
+                if let off = notice.offErrorMs, notice.error == nil, video.playing {
+                    pill(abs(off) < 1 ? "in sync" : String(format: "%+.0f ms", Double(off)), abs(off) < 15 ? Party.lime : Party.sun)
+                }
+            }
+            Color.black
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                .overlay(player)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            Text(title).font(Party.font(20, .bold)).foregroundColor(.white).lineLimit(2)
+            if let error = notice.error {
+                Text(error).font(Party.font(15)).foregroundColor(Party.sun)
+            }
+        }
+    }
+
+    private var title: String {
+        if !video.title.isEmpty { return video.title }
+        return notice.title ?? "Loading video…"
+    }
+
+    @ViewBuilder private var player: some View {
+        if Demo.requested != nil {
+            // Screenshots: no network, so a stand-in for YouTube's player.
+            ZStack {
+                LinearGradient(colors: [Color(red: 0.10, green: 0.06, blue: 0.19), Color(red: 0.19, green: 0.09, blue: 0.28)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                Image(systemName: "play.circle.fill").font(.system(size: 56)).foregroundColor(.white.opacity(0.85))
+            }
+        } else {
+            SyncedYouTubePlayer(
+                timeline: video,
+                hostOffsetUs: { status.clockOffsetUs },
+                correctionUs: { status.correctionUs },
+                onNotice: { notice = $0 })
+        }
+    }
+
+    private func pill(_ text: String, _ color: Color) -> some View {
+        Text(text)
+            .font(Party.font(12, .semibold))
+            .foregroundColor(color)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(color.opacity(0.18)))
+            .overlay(Capsule().strokeBorder(color.opacity(0.5), lineWidth: 1))
     }
 }
 
@@ -397,7 +462,7 @@ private struct HeroRow: View {
 /// Launch with `-demo join|playing|syncing|ended` to show a screen with sample data and no network.
 /// Used to take screenshots in the simulator; compiled into debug builds only.
 enum Demo: String {
-    case join, playing, syncing, ended
+    case join, playing, syncing, ended, youtube
 
     static var requested: Demo? {
         #if DEBUG
@@ -417,6 +482,13 @@ enum Demo: String {
                 songTitle: "Midnight City", songArtist: "M83", songPlaying: true, soundChecked: true)
         case .syncing:
             return ReceiverStatus(phase: .syncing, hostName: "Mia's Pixel", playoutDelayMs: 350, outputName: "iPhone speaker")
+        case .youtube:
+            return ReceiverStatus(
+                phase: .playing, hostName: "Mia's Pixel", syncErrorMs: 0.3, rttMs: 2.1, bufferMs: 184,
+                playoutDelayMs: 350, offsetMs: 0, outputName: "iPhone speaker", level: 0.5,
+                songTitle: "Kesariya | Brahmāstra | Official Video", songArtist: "YouTube", songPlaying: true,
+                video: VideoTimeline(videoId: "dQw4w9WgXcQ", title: "Kesariya | Brahmāstra | Official Video", playing: true,
+                                     anchorHostUs: 0, positionUs: 0, version: 1))
         case .ended:
             return ReceiverStatus(phase: .ended, message: "The DJ ended the party.")
         }

@@ -19,6 +19,9 @@
 		F3BA8E1741A5024111043325 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9D12909EC911253F87D4CDF5 /* Assets.xcassets */; };
 		528AD6FBC460625518CE0991 /* PartyKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52F6453CE27187EB28E93FE9 /* PartyKit.swift */; };
 		7A707CE831BD1AD06E899FF8 /* SoundCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAF0774A7813C6C8AF802442 /* SoundCheck.swift */; };
+		883E09C94ACA7E7DC3DE06AD /* VideoSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D495C64063A66925255D58D /* VideoSync.swift */; };
+		DD8A5A0219ED6D7C3D7FDEAB /* YouTubePlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE7D78DA8EC19D4073DC096E /* YouTubePlayer.swift */; };
+		EE49D9F005931EB85618B8C2 /* YouTubePlayer.html in Resources */ = {isa = PBXBuildFile; fileRef = 898121C6D616E5E3BF35D9F9 /* YouTubePlayer.html */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -36,6 +39,9 @@
 		C8E224AB45141C06C0264D9D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		52F6453CE27187EB28E93FE9 /* PartyKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PartyKit.swift; sourceTree = "<group>"; };
 		FAF0774A7813C6C8AF802442 /* SoundCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundCheck.swift; sourceTree = "<group>"; };
+		2D495C64063A66925255D58D /* VideoSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoSync.swift; sourceTree = "<group>"; };
+		EE7D78DA8EC19D4073DC096E /* YouTubePlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubePlayer.swift; sourceTree = "<group>"; };
+		898121C6D616E5E3BF35D9F9 /* YouTubePlayer.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = YouTubePlayer.html; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -73,6 +79,8 @@
 				5E59EB3D66F21381D7642B16 /* IOSSyncReceiver.swift */,
 				42AD76F9A2C52B02998135CB /* HostBrowser.swift */,
 				52F6453CE27187EB28E93FE9 /* PartyKit.swift */,
+				898121C6D616E5E3BF35D9F9 /* YouTubePlayer.html */,
+				EE7D78DA8EC19D4073DC096E /* YouTubePlayer.swift */,
 				27352A50C042D80BBB0D19B2 /* Core */,
 				9D12909EC911253F87D4CDF5 /* Assets.xcassets */,
 				C8E224AB45141C06C0264D9D /* Info.plist */,
@@ -89,6 +97,7 @@
 				1E2062EE85740B9CE52C8732 /* Resampler.swift */,
 				FBDA240384BCE33120737161 /* PlayoutEngine.swift */,
 				FAF0774A7813C6C8AF802442 /* SoundCheck.swift */,
+				2D495C64063A66925255D58D /* VideoSync.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -151,6 +160,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EE49D9F005931EB85618B8C2 /* YouTubePlayer.html in Resources */,
 				F3BA8E1741A5024111043325 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -162,6 +172,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DD8A5A0219ED6D7C3D7FDEAB /* YouTubePlayer.swift in Sources */,
+				883E09C94ACA7E7DC3DE06AD /* VideoSync.swift in Sources */,
 				E07B2B02B2EFAE0CE034113F /* HearbyApp.swift in Sources */,
 				473C2DE2C28486AF08F94B36 /* ContentView.swift in Sources */,
 				BD521A1AAE85617147D234B4 /* IOSSyncReceiver.swift in Sources */,
@@ -228,7 +240,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 4;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Hearby/Info.plist;
@@ -236,7 +248,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.ugoyel.hearby;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -250,7 +262,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 4;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Hearby/Info.plist;
@@ -258,7 +270,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.ugoyel.hearby;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

@@ -98,6 +98,9 @@ class MusicPlayer(context: Context) {
         if (playing && stale) openLocked() // e.g. after a song failed to open: try again on request
     }
 
+    /** Pause (for example when the DJ switches to a YouTube video). */
+    fun pause() = synchronized(lock) { playing = false }
+
     fun next() = synchronized(lock) { advanceLocked() }
 
     /** Restart the song, or go to the previous one if it has only just started. */

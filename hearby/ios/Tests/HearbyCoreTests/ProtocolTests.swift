@@ -74,6 +74,24 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(Wire.decodeChirp(b), ChirpMsg(streamId: 0x0A0B_0C0D, clientId: 0xDEAD_BEEF, mediaTimeUs: 0x0000_0001_0203_0405, checkId: 7))
     }
 
+    func testVideo() {
+        let t = VideoTimeline(videoId: "dQw4w9WgXcQ", title: "Hit", playing: true, anchorHostUs: 0x0000_0001_0203_0405, positionUs: -2_000_000, version: 3)
+        let b = Wire.encodeVideo(streamId: 0x0A0B_0C0D, timeline: t)
+        XCTAssertEqual(
+            hex(b),
+            "4842010d" + "0a0b0c0d" + "00000003" + "03" + "0000000102030405" + "ffffffffffe17b80"
+                + "0b" + "6451773477395767586351" + "03" + "486974")
+        let m = Wire.decodeVideo(b)
+        XCTAssertEqual(m?.streamId, 0x0A0B_0C0D)
+        XCTAssertEqual(m?.timeline, t)
+        // No video on (back to music).
+        let off = Wire.encodeVideo(streamId: 0x0A0B_0C0D, timeline: nil)
+        XCTAssertEqual(hex(off), "4842010d" + "0a0b0c0d" + "00000000" + "00" + "0000000000000000" + "0000000000000000" + "00" + "00")
+        XCTAssertNotNil(Wire.decodeVideo(off))
+        XCTAssertNil(Wire.decodeVideo(off)?.timeline)
+        XCTAssertNil(Wire.decodeVideo(Array(b.prefix(30))))
+    }
+
     func testOffset() {
         let b = Wire.encodeOffset(streamId: 0x0A0B_0C0D, clientId: 0xDEAD_BEEF, adjustUs: -6_500, checkId: 7, errorUs: 6_500)
         XCTAssertEqual(hex(b), "4842010c" + "0a0b0c0d" + "deadbeef" + "ffffe69c" + "0007" + "1964")

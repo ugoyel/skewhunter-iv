@@ -24,7 +24,7 @@ import time
 MAGIC = b"HB"
 VERSION = 1
 PORT = 47800
-AUDIO, JOIN, JOIN_ACK, SYNC_REQ, SYNC_RESP, LEAVE, BYE, DISCOVER, DISCOVER_RESP, NOW_PLAYING, CHIRP, OFFSET = range(1, 13)
+AUDIO, JOIN, JOIN_ACK, SYNC_REQ, SYNC_RESP, LEAVE, BYE, DISCOVER, DISCOVER_RESP, NOW_PLAYING, CHIRP, OFFSET, VIDEO = range(1, 14)
 FRAME_US = 20_000
 # The canonical Opus "silence" packet: TOC 0xF8 = CELT fullband, 20 ms, mono, one frame.
 OPUS_SILENCE = bytes([0xF8, 0xFF, 0xFE])
@@ -93,6 +93,7 @@ def listen(args):
     spacings, sizes, durations, arrivals = [], [], set(), []
     last_arrival = None
     now_playing = None
+    video = None
     started = last_report = time.monotonic()
 
     while time.monotonic() - started < args.seconds:
@@ -149,6 +150,20 @@ def listen(args):
             if (song, playing) != now_playing:
                 now_playing = (song, playing)
                 print(f"now playing: {song}{'' if playing else ' (paused)'}")
+        elif kind == VIDEO and len(data) >= 31:
+            version, flags, anchor, position = struct.unpack(">IBQq", data[8:29])
+            vid = read_name(data, 29)
+            title = read_name(data, 30 + data[29])
+            state = (vid, flags, anchor, position)
+            if state != video:
+                video = state
+                if not flags & 2:
+                    print("youtube: off (back to music)")
+                else:
+                    # anchor is on the host's clock; best[1] is host minus our clock
+                    starts = f", starts in {(anchor - (now_us() + best[1])) / 1e6:.2f} s" if best and flags & 1 else ""
+                    print(f"youtube: {vid} '{title}' v{version} {'playing' if flags & 1 else 'paused'} "
+                          f"from {position / 1e6:.2f} s{starts}")
         elif kind == CHIRP:
             target, media_us = struct.unpack(">IQ", data[8:20])
             if target == client_id:

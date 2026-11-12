@@ -112,8 +112,9 @@ object Party {
 }
 
 /**
- * Set to false to freeze every looping animation at a pleasant pose. Used when rendering still
- * screenshots, where an animation that never ends would never let the renderer settle.
+ * Set to false for still rendering (screenshots): every looping animation freezes at a pleasant
+ * pose, and the embedded YouTube player is replaced by a placeholder. An animation that never ends
+ * would never let the renderer settle.
  */
 val LocalMotion = staticCompositionLocalOf { true }
 

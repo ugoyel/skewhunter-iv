@@ -40,6 +40,7 @@ enum Proto {
     static let typeNowPlaying: UInt8 = 0x0A
     static let typeChirp: UInt8 = 0x0B
     static let typeOffset: UInt8 = 0x0C
+    static let typeVideo: UInt8 = 0x0D
 
     static let platformAndroid: UInt8 = 1
     static let platformIOS: UInt8 = 2
@@ -103,6 +104,12 @@ struct OffsetMsg: Equatable {
     var adjustUs: Int32
     var checkId: UInt16
     var errorUs: UInt16
+}
+
+struct VideoMsg: Equatable {
+    var streamId: UInt32
+    /// The party's video, or nil when the DJ went back to music.
+    var timeline: VideoTimeline?
 }
 
 struct DiscoverRespMsg: Equatable {
@@ -365,6 +372,37 @@ enum Wire {
         return OffsetMsg(
             streamId: getU32(b, 4), clientId: getU32(b, 8), adjustUs: Int32(bitPattern: getU32(b, 12)),
             checkId: getU16(b, 16), errorUs: getU16(b, 18))
+    }
+
+    // MARK: VIDEO (0x0D) host -> client
+    //  4  u32 streamId   8  u32 version   12  u8 flags (bit 0: playing, bit 1: a video is on)
+    // 13  u64 anchorHostUs   21  i64 positionUs   29  u8 idLen, videoId   then u8 titleLen, title
+
+    static func encodeVideo(streamId: UInt32, timeline t: VideoTimeline?) -> [UInt8] {
+        let id = nameBytes(t?.videoId ?? "")
+        let title = nameBytes(t?.title ?? "")
+        var b = header(29, Proto.typeVideo)
+        putU32(&b, 4, streamId)
+        putU32(&b, 8, t?.version ?? 0)
+        b[12] = (t?.playing == true ? 1 : 0) | (t != nil ? 2 : 0)
+        putU64(&b, 13, UInt64(bitPattern: t?.anchorHostUs ?? 0))
+        putU64(&b, 21, UInt64(bitPattern: t?.positionUs ?? 0))
+        b.append(UInt8(id.count))
+        b.append(contentsOf: id)
+        b.append(UInt8(title.count))
+        b.append(contentsOf: title)
+        return b
+    }
+
+    static func decodeVideo(_ b: [UInt8]) -> VideoMsg? {
+        guard b.count >= 31, let id = readName(b, 29) else { return nil }
+        guard let title = readName(b, 30 + Int(b[29])) else { return nil }
+        let flags = b[12]
+        let timeline = flags & 2 == 0 || id.isEmpty ? nil : VideoTimeline(
+            videoId: id, title: title, playing: flags & 1 != 0,
+            anchorHostUs: Int64(bitPattern: getU64(b, 13)), positionUs: Int64(bitPattern: getU64(b, 21)),
+            version: getU32(b, 8))
+        return VideoMsg(streamId: getU32(b, 4), timeline: timeline)
     }
 
     // MARK: DISCOVER_RESP (0x09) host -> client

@@ -76,7 +76,7 @@ jobs:
           xcrun simctl bootstatus "$UDID" -b
           xcrun simctl install "$UDID" "$APP"
           mkdir -p screens
-          for screen in join playing syncing ended; do
+          for screen in join playing syncing ended youtube; do
             xcrun simctl launch "$UDID" io.github.ugoyel.hearby -demo "$screen"
             sleep 8
             xcrun simctl io "$UDID" screenshot "screens/ios_$screen.png"
