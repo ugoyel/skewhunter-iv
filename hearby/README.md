@@ -321,6 +321,11 @@ Play accepts new apps as an **App Bundle** (`.aab`), not an APK. Besides uploadi
 - `RECORD_AUDIO` (for the optional sound check) requires a privacy policy URL and a Data safety
   form. Hearby collects nothing; the microphone is used on the DJ phone for a few seconds to time
   beeps, in memory only.
+- YouTube mode uses YouTube's embedded player, so YouTube's API Services Terms apply. The store
+  listing and privacy policy must say the app uses YouTube API Services, link to the YouTube Terms
+  of Service (https://www.youtube.com/t/terms) and the Google Privacy Policy
+  (https://policies.google.com/privacy), and Data safety should note that YouTube itself may
+  collect data while a video plays. Hearby needs no YouTube API key for this.
 - Only share songs you have the rights to play to your guests.
 - Target API level is 36.
 
@@ -338,6 +343,7 @@ Play accepts new apps as an **App Bundle** (`.aab`), not an APK. Besides uploadi
 | iOS build | `swift test` and an `xcodebuild` simulator build on a macOS runner | Pass |
 | Screen design | Every Android screen rendered on the JVM with sample data; every iOS screen screenshotted in the iOS Simulator through the demo mode | Reviewed by eye |
 | YouTube sync (controller) | Simulated YouTube players on both platforms, Kotlin and Swift: start, pause and resume together, a late joiner, an ad on one phone, fine and coarse speed steps, and 40 randomised runs | Within 14 ms with YouTube's standard speed steps, 6.5 ms with fine steps, 6.3 ms a few seconds after a resume |
+| YouTube mode on an Android 14 emulator | Release and debug APK 1.3.0: a link shared to Hearby from another app waits for the party, then plays on the DJ screen; a Python guest received the VIDEO timeline (video id, playing, position) and silent audio that keeps clock sync running. The emulator's own WebView (version 113, software rendering) hung and crashed its page process: Hearby now replaces a crashed player instead of crashing (checked by killing the page process) and says when the player cannot start | Pass, except YouTube itself, which the build machine cannot reach |
 | YouTube links | Watch, share (`youtu.be`), Shorts, live, embed, YouTube Music and mobile links, with or without surrounding text, on both platforms | Pass |
 | DJ on an Android 14 emulator | Release APK 1.2.0: party starts as a plain `mediaPlayback` service (no screen-capture prompt); a 44.1 kHz MP3 opened with Hearby was decoded, resampled and played, with its title and artist; a Python guest received the Opus stream with no loss plus "now playing", pause and resume; the sound check sent the guest its chirp request and reported that it could not hear itself (the emulator has no speaker-to-microphone path) | Pass |
 

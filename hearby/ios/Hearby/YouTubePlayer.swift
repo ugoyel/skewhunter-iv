@@ -19,13 +19,16 @@ final class YouTubeWebPlayer: NSObject, WKNavigationDelegate, WKUIDelegate {
     static let baseURL = URL(string: "https://io.github.ugoyel.hearby/")!
     private static let tickInterval = 0.2
     private static let offlineAfter = 12.0
+    private static let notStarted = "The video player didn't start on this iPhone. Restart Hearby and try again."
 
     let webView: WKWebView
-    private let controller = VideoSyncController()
+    private var controller = VideoSyncController()
+    private var html: String?
     private var timer: Timer?
     private var active = true
     private var startedAt = Date()
     private var everReady = false
+    private var lastAnswer = Date.distantPast
     private var lastNotice: PlayerNotice?
     /// Timed play presses and speed restores (selector timers fire on the main run loop, to the ms).
     private var scheduled: [Timer] = []
@@ -53,15 +56,27 @@ final class YouTubeWebPlayer: NSObject, WKNavigationDelegate, WKUIDelegate {
         webView.backgroundColor = .black
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
-        if let url = Bundle.main.url(forResource: "YouTubePlayer", withExtension: "html"),
-           let html = try? String(contentsOf: url, encoding: .utf8) {
-            // An https origin of our own: the player's requests then carry a Referer naming the app.
-            webView.loadHTMLString(html, baseURL: YouTubeWebPlayer.baseURL)
+        if let url = Bundle.main.url(forResource: "YouTubePlayer", withExtension: "html") {
+            html = try? String(contentsOf: url, encoding: .utf8)
         }
+        loadPage()
         active = UIApplication.shared.applicationState == .active
         let center = NotificationCenter.default
         center.addObserver(self, selector: #selector(resignActive), name: UIApplication.willResignActiveNotification, object: nil)
         center.addObserver(self, selector: #selector(becomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
+    }
+
+    private func loadPage() {
+        // An https origin of our own: the player's requests then carry a Referer naming the app.
+        if let html { webView.loadHTMLString(html, baseURL: YouTubeWebPlayer.baseURL) }
+    }
+
+    /// The page's process crashed or iOS reclaimed it: the view is blank now, so start over.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        controller = VideoSyncController()
+        everReady = false
+        startedAt = Date()
+        loadPage()
     }
 
     @objc private func resignActive() {
@@ -104,6 +119,11 @@ final class YouTubeWebPlayer: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     @objc private func tick() {
+        // A page that never answers at all (its process hung) cannot report anything itself.
+        if timeline != nil, !everReady, Date().timeIntervalSince(startedAt) > YouTubeWebPlayer.offlineAfter,
+           Date().timeIntervalSince(lastAnswer) > 2 {
+            notify(PlayerNotice(error: YouTubeWebPlayer.notStarted))
+        }
         webView.evaluateJavaScript("hearbyStatus()") { [weak self] result, _ in
             self?.onStatus(result as? String)
         }
@@ -111,7 +131,14 @@ final class YouTubeWebPlayer: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     private func onStatus(_ raw: String?) {
         guard let data = raw?.data(using: .utf8),
-              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            // The page itself never came up (it is bundled with the app, so this is not the network).
+            if timeline != nil, Date().timeIntervalSince(startedAt) > YouTubeWebPlayer.offlineAfter {
+                notify(PlayerNotice(error: YouTubeWebPlayer.notStarted))
+            }
+            return
+        }
+        lastAnswer = Date()
         let ready = json["ready"] as? Bool ?? false
         if ready { everReady = true }
         if !everReady, timeline != nil, Date().timeIntervalSince(startedAt) > YouTubeWebPlayer.offlineAfter {
