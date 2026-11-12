@@ -121,19 +121,35 @@ class MediaCodecOpusEncoder(bitrate: Int) {
         }
     }
 
-    /** OpusHead (RFC 7845 §5.1): "OpusHead", version, channels, pre-skip (u16 LE) at byte 10. */
+    /**
+     * Read the encoder look-ahead (pre-skip) from the codec-specific data.
+     *
+     * OpusHead (RFC 7845 §5.1) is "OpusHead", version, channel count, then pre-skip as u16 LE at
+     * byte 10. Android wraps it in its own container ("AOPUSHDR", length, OpusHead, "AOPUSDLY", ...),
+     * so look for the marker rather than assuming it comes first.
+     */
     private fun parseOpusHead(buffer: ByteBuffer) {
         val b = buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN)
-        val start = b.position()
-        if (b.remaining() < 12) return
-        val magic = ByteArray(8)
-        b.get(magic)
-        if (String(magic, Charsets.US_ASCII) != "OpusHead") return
-        val preSkip = b.getShort(start + 10).toInt() and 0xFFFF
+        val bytes = ByteArray(minOf(b.remaining(), 256))
+        b.get(bytes)
+        val at = indexOf(bytes, OPUS_HEAD)
+        if (at < 0 || at + 12 > bytes.size) return
+        val preSkip = (bytes[at + 10].toInt() and 0xFF) or ((bytes[at + 11].toInt() and 0xFF) shl 8)
         if (preSkip in 0..MAX_PRE_SKIP) {
             preSkipSamples = preSkip
             Log.i(TAG, "Opus encoder look-ahead: $preSkip samples")
         }
+    }
+
+    private fun indexOf(haystack: ByteArray, needle: ByteArray): Int {
+        var i = 0
+        while (i + needle.size <= haystack.size) {
+            var j = 0
+            while (j < needle.size && haystack[i + j] == needle[j]) j++
+            if (j == needle.size) return i
+            i++
+        }
+        return -1
     }
 
     private fun checkFraming(packet: ByteBuffer, size: Int) {
@@ -162,6 +178,7 @@ class MediaCodecOpusEncoder(bitrate: Int) {
         const val PCM_BLOCK_BYTES = Proto.FRAME_SAMPLES * Proto.CHANNELS * 2
         const val DEFAULT_PRE_SKIP = 312 // libopus look-ahead at 48 kHz (6.5 ms)
         private const val MAX_PRE_SKIP = 4800
+        private val OPUS_HEAD = "OpusHead".toByteArray(Charsets.US_ASCII)
         private const val INPUT_TIMEOUT_US = 10_000L
         private const val OUTPUT_TIMEOUT_US = 8_000L
     }

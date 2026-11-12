@@ -14,6 +14,8 @@ hearby/
   android/   Android Studio project: host + listener app
   ios/       Xcode project: listener app, plus a Swift package for testing the sync core
   docs/      PROTOCOL.md: byte-level packet spec and test vectors
+  tools/     hearby_probe.py: a Python peer for debugging (join a host, or act as one)
+  store/     Play Store icon and feature graphic
 ```
 
 ## How it works
@@ -124,6 +126,16 @@ Requirements: Xcode 15 or newer.
 
 The sync core can be tested without a device: `cd ios && swift test`.
 
+### Debugging with a laptop
+
+`tools/hearby_probe.py` needs only Python 3 and speaks the same protocol:
+
+```bash
+python3 tools/hearby_probe.py listen 192.168.43.1   # join a host, print packet and clock statistics
+python3 tools/hearby_probe.py host                  # be a host that streams Opus silence
+python3 tools/hearby_probe.py discover              # find hosts by broadcast
+```
+
 Opus decoding uses AudioToolbox's built-in `kAudioFormatOpus` through `AVAudioConverter`, so there
 are no package dependencies.
 
@@ -206,11 +218,24 @@ Play accepts new apps as an **App Bundle** (`.aab`), not an APK. Besides uploadi
 
 ## Verification status
 
-| Area | Checked how |
-|---|---|
-| Wire format, Android ↔ iOS | Identical hex vectors asserted in Kotlin and Swift unit tests |
-| Clock sync, jitter buffer, resampler | Unit tests on both platforms |
-| Playout engine | Simulations with clock drift, DAC drift, jitter, loss, host pauses, slider changes, over-budget latency; sync error stays under 1.5 ms |
-| Android app | Compiles, lint clean, release build signed and aligned |
-| iOS app | Built for the simulator in CI |
-| **On-device behaviour** | **Not yet verified on physical phones.** MediaProjection capture, the MediaCodec and AudioToolbox Opus codecs, Bluetooth latency reporting and real Wi-Fi all need testing on real devices before a store release. |
+| Area | How it was checked | Result |
+|---|---|---|
+| Wire format, Android ↔ iOS | The same hex vectors asserted by Kotlin and Swift unit tests; a third implementation in Python (`tools/hearby_probe.py`) interoperates with the Android app | Pass |
+| Clock sync, jitter buffer, resampler | Unit tests on both platforms | Pass |
+| Playout engine | Simulations with clock drift, DAC drift, jitter, 3 % loss, delay spikes, host pauses, slider changes and over-budget latency, in Kotlin and in Swift | Sync error stays under 1.5 ms |
+| Android build | Unit tests, lint, signed and 16 KB-aligned release build; also built on a clean GitHub runner | Pass |
+| iOS build | `swift test` and an `xcodebuild` simulator build on a macOS runner | Pass |
+| Android host, on an Android 14 emulator | Release APK: capture consent, `mediaProjection` foreground service, capture of a tone played by another process, Opus at the configured 96 kbit/s in 20 ms packets, received by the Python listener with no loss; mDNS registration accepted; clean stop | Pass |
+| Android listener, on an Android 14 emulator | Release APK: joined the Python host, clock sync, MediaCodec Opus decode, AudioTrack playout reaching "Playing in sync", offset controls and per-output memory, leave | Pass |
+
+**Not verified yet, and needed before a store release:**
+
+- Anything on physical phones. The emulator had no hardware acceleration and its audio device ran
+  slower than real time, so it shows that the pipelines work, not how tightly they sync.
+- Real Wi-Fi and hotspot behaviour, including discovery across devices.
+- Bluetooth outputs and how well each phone reports its own output latency.
+- The iOS app at runtime. It compiles and its sync core passes the same tests as Android, but the
+  AudioToolbox Opus decoder and AVAudioEngine timing have not been exercised on a device.
+
+`.github/workflows/hearby.yml` runs the Android and iOS builds and tests on every change under
+`hearby/`.

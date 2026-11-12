@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -593,12 +594,20 @@ private fun OffsetCard(state: ReceiverUiState) {
             }
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Five buttons share one row, so drop the wide default padding and never wrap labels.
+                val tight = PaddingValues(horizontal = 4.dp)
                 for (step in intArrayOf(-10, -1)) {
-                    OutlinedButton(onClick = { apply(state.offsetMs + step) }, modifier = Modifier.weight(1f)) { Text("$step") }
+                    OutlinedButton(onClick = { apply(state.offsetMs + step) }, modifier = Modifier.weight(1f), contentPadding = tight) {
+                        Text("$step", maxLines = 1, softWrap = false)
+                    }
                 }
-                OutlinedButton(onClick = { apply(0) }, enabled = state.offsetMs != 0, modifier = Modifier.weight(1.2f)) { Text("Reset") }
+                OutlinedButton(onClick = { apply(0) }, enabled = state.offsetMs != 0, modifier = Modifier.weight(1.3f), contentPadding = tight) {
+                    Text("Reset", maxLines = 1, softWrap = false)
+                }
                 for (step in intArrayOf(1, 10)) {
-                    OutlinedButton(onClick = { apply(state.offsetMs + step) }, modifier = Modifier.weight(1f)) { Text("+$step") }
+                    OutlinedButton(onClick = { apply(state.offsetMs + step) }, modifier = Modifier.weight(1f), contentPadding = tight) {
+                        Text("+$step", maxLines = 1, softWrap = false)
+                    }
                 }
             }
             Spacer(Modifier.height(12.dp))

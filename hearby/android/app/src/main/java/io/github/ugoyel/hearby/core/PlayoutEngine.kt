@@ -219,6 +219,7 @@ class PlayoutEngine(
 
         jitter.dropBelow(seq)
         nextSeq = seq
+        cushionMs = ((newestTs - mediaUs) / 1000).toInt().coerceAtLeast(0)
         lastTimestampUs = NO_TS
         resampler.reset()
         haveTail = false

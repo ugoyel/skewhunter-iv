@@ -155,8 +155,11 @@ class AudioCaptureAndOpusService : Service() {
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
             // Revoked from the status bar chip, by another capture starting, or (Android 15 QPR1+)
-            // by the device being locked.
-            finish("Android stopped the capture (screen locked, or sharing ended from the status bar).")
+            // by the device being locked. Ignore the echo of our own shutdown: by then the session
+            // is already gone.
+            if (session != null) {
+                finish("Android stopped the capture (screen locked, or sharing ended from the status bar).")
+            }
         }
     }
 
@@ -627,7 +630,15 @@ class AudioCaptureAndOpusService : Service() {
         }
 
         fun stop(context: Context) {
-            context.stopService(Intent(context, AudioCaptureAndOpusService::class.java))
+            // Go through the service so it can release the projection itself, in order. Simply
+            // calling stopService() makes Android revoke the projection first (the foreground
+            // service is gone), which would look like the system ended the capture.
+            val intent = Intent(context, AudioCaptureAndOpusService::class.java).setAction(ACTION_STOP)
+            try {
+                context.startService(intent)
+            } catch (e: Exception) {
+                context.stopService(intent)
+            }
         }
 
         fun clearMessage() = _state.update { it.copy(message = null) }
