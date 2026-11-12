@@ -163,23 +163,26 @@ struct PartyButtonStyle: ButtonStyle {
 struct GhostButtonStyle: ButtonStyle {
     var height: CGFloat = 56
     var fullWidth = true
+    var sidePadding: CGFloat = 14
 
     func makeBody(configuration: Configuration) -> some View {
-        Pill(configuration: configuration, height: height, fullWidth: fullWidth)
+        Pill(configuration: configuration, height: height, fullWidth: fullWidth, sidePadding: sidePadding)
     }
 
     private struct Pill: View {
         let configuration: ButtonStyleConfiguration
         let height: CGFloat
         let fullWidth: Bool
+        let sidePadding: CGFloat
         @Environment(\.isEnabled) private var isEnabled
 
         var body: some View {
             configuration.label
                 .font(Party.font(16, .semibold))
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
                 .foregroundColor(isEnabled ? .white : Party.inkFaint)
-                .padding(.horizontal, 14)
+                .padding(.horizontal, sidePadding)
                 .frame(maxWidth: fullWidth ? .infinity : nil, minHeight: height)
                 .background(Capsule().fill(configuration.isPressed ? Party.glassBright : Party.glass))
                 .overlay(Capsule().strokeBorder(Party.glassStroke, lineWidth: 1))
@@ -374,8 +377,9 @@ struct Avatar: View {
 
     var body: some View {
         // A stable hash: Swift's own hashValue changes on every launch.
-        let hash = name.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0x7FFF_FFFF }
-        let colors = Avatar.palette[hash % Avatar.palette.count]
+        var hash: UInt32 = 2_166_136_261
+        for byte in name.utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }
+        let colors = Avatar.palette[Int(hash % UInt32(Avatar.palette.count))]
         let initial = name.first(where: { $0.isLetter || $0.isNumber }).map { String($0).uppercased() } ?? "♪"
         Circle()
             .fill(LinearGradient(colors: [colors.0, colors.1], startPoint: .topLeading, endPoint: .bottomTrailing))

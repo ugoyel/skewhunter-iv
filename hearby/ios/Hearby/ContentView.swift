@@ -313,7 +313,7 @@ private struct OffsetCard: View {
                     Button("+\(step)") { onOffset(applied + step) }
                 }
             }
-            .buttonStyle(GhostButtonStyle(height: 46))
+            .buttonStyle(GhostButtonStyle(height: 46, sidePadding: 2)) // five share one row
 
             Text(verbatim: hint)
                 .font(Party.font(13))

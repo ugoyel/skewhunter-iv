@@ -82,7 +82,7 @@ jobs:
             xcrun simctl io "$UDID" screenshot "screens/ios_$screen.png"
             xcrun simctl terminate "$UDID" io.github.ugoyel.hearby || true
           done
-          sips -Z 1400 screens/*.png > /dev/null
+          sips -Z 1100 screens/*.png > /dev/null
           ls -la screens
       - uses: actions/upload-artifact@v4
         with:
