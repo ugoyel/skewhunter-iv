@@ -35,6 +35,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Unit tests, lint and debug build
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+      - name: Safari guest page logic (Node)
+        run: node --test app/src/test/js/*.test.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: hearby-debug-apk

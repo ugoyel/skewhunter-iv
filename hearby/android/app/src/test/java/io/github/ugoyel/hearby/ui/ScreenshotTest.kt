@@ -44,6 +44,10 @@ class ScreenshotTest {
         ListenerInfo(3, "Zoya", Proto.PLATFORM_ANDROID, "192.168.43.52", 6.8f, 60, Proto.STATUS_BUFFERING),
     )
 
+    private val safari = listOf(
+        ListenerInfo(4, "Meera", Proto.PLATFORM_WEB, "192.168.43.60", 4.2f, 410, Proto.STATUS_SYNCED, CheckResult(true, 38.5f, 0.6f)),
+    )
+
     private val songs = listOf(
         SongInfo("Midnight City", "M83", 243_000),
         SongInfo("Kesariya", "Arijit Singh", 268_000),
@@ -73,7 +77,8 @@ class ScreenshotTest {
     fun djLiveFull() = shot("8_dj_live_full", tab = 0, energy = 1f) {
         HostLive(
             HostUiState(
-                running = true, addresses = listOf("192.168.43.1"), listeners = crowd, level = 0.55f, bitrate = 96_000, playoutDelayMs = 350,
+                running = true, addresses = listOf("192.168.43.1"), listeners = crowd + safari, level = 0.55f, bitrate = 96_000, playoutDelayMs = 350,
+                webUrls = listOf("http://192.168.43.1:47801"),
                 queue = songs, current = 0, playing = true, positionMs = 83_000,
                 soundCheck = SoundCheckUi(done = true, message = "Every phone lined up to within 0.3 ms."),
             ),

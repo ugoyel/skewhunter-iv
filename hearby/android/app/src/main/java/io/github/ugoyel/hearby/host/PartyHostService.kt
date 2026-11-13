@@ -97,6 +97,8 @@ data class HostUiState(
     val correctionUs: Long = 0,
     /** This phone went quiet: another app took the sound, or its headphones were unplugged. */
     val muted: Boolean = false,
+    /** The guest page for phones without the app (iPhones), e.g. http://192.168.43.1:47801, or null. */
+    val webUrls: List<String> = emptyList(),
 )
 
 /**
@@ -243,6 +245,16 @@ class PartyHostService : Service() {
         private val local = PlayoutRunner(this@PartyHostService, localJitter, localClock)
         val localId = SecureRandom().nextInt().toLong() and 0xFFFFFFFFL
 
+        // Phones without the app join in their browser (iPhones in Safari): see WebGuests.
+        private val web = WebGuests(
+            files = { name -> readAsset("web/$name") },
+            helloJson = { id ->
+                """{"t":"hello","id":$id,"stream":$streamId,"host":${FlatJson.quote(hostName)},"delay":$playoutDelayMs}"""
+            },
+            log = { m, e -> Log.w(TAG, m, e) },
+        )
+        @Volatile private var webPort = 0
+
         @Volatile private var lastSentTimestampUs = 0L
         @Volatile private var video: VideoTimeline? = null
         private var videoVersion = 0L
@@ -312,6 +324,13 @@ class PartyHostService : Service() {
             local.playoutDelayMs = playoutDelayMs
             local.start()
 
+            webPort = try {
+                web.start()
+            } catch (e: IOException) {
+                Log.w(TAG, "guest page unavailable", e)
+                0
+            }
+
             running = true
             senderThread = Thread(::sendLoop, "hearby-sender").also { it.start() }
             controlThread = Thread(::controlLoop, "hearby-control").also { it.start() }
@@ -339,6 +358,7 @@ class PartyHostService : Service() {
                 }.apply { start(); join(500) }
             }
             s?.close()
+            if (wasRunning) web.stop("The DJ ended the party.") else web.stop()
             senderThread?.join(1500)
             controlThread?.join(1500)
             local.stop()
@@ -381,6 +401,7 @@ class PartyHostService : Service() {
                 }
             }
 
+            var webSeq = 0L
             var nextNs = System.nanoTime()
             try {
                 while (running) {
@@ -393,6 +414,9 @@ class PartyHostService : Service() {
                     // While a YouTube video is on, every phone plays it from YouTube: the stream carries silence.
                     if (video == null) player.pull(frame) else java.util.Arrays.fill(frame, 0f)
                     toPcm16(frame, pcm)
+                    // Browsers get the same frame as PCM (silence is skipped: they keep time by clock sync).
+                    if (frame.any { it != 0f }) web.pushAudio(webSeq, nextNs / 1000, pcm, Proto.FRAME_SAMPLES * Proto.CHANNELS * 2)
+                    webSeq++
                     enc.encode(pcm, nextNs / 1000, send)
                     if (enc.unsupportedFraming) {
                         fail("This device's Opus encoder uses an unsupported frame size.")
@@ -483,6 +507,21 @@ class PartyHostService : Service() {
             }
         }
 
+        /** What is playing, for the guest page (see WebGuests). */
+        private fun webState(title: String, artist: String, playing: Boolean, v: VideoTimeline?): String {
+            val video = v?.let {
+                """{"id":${FlatJson.quote(it.videoId)},"title":${FlatJson.quote(it.title)},"playing":${it.playing},""" +
+                    """"anchor":${it.anchorHostUs},"pos":${it.positionUs},"v":${it.version}}"""
+            } ?: "null"
+            return """{"t":"state","title":${FlatJson.quote(title)},"artist":${FlatJson.quote(artist)},"playing":$playing,"video":$video}"""
+        }
+
+        private fun readAsset(path: String): ByteArray? = try {
+            assets.open(path).use { it.readBytes() }
+        } catch (e: IOException) {
+            null
+        }
+
         private fun reply(sock: DatagramSocket, data: ByteArray, to: InetSocketAddress) {
             try {
                 sock.send(DatagramPacket(data, data.size, to))
@@ -502,7 +541,9 @@ class PartyHostService : Service() {
                     clients = clients.filter { nowNs - it.lastSeenNs <= CLIENT_TIMEOUT_NS }.toTypedArray()
                 }
             }
+            web.dropSilent(CLIENT_TIMEOUT_NS, nowNs)
             val snapshot = clients
+            val browsers = web.guests
             val music = player.snapshot()
             val song = music.queue.getOrNull(music.index)
 
@@ -525,12 +566,15 @@ class PartyHostService : Service() {
                 val msg = WireVideo.encode(streamId, v)
                 for (c in snapshot) reply(sock, msg, c.address)
             }
+            web.setState(webState(title, artist, on, v))
 
             _state.update {
                 if (!it.running) it
                 else it.copy(
                     listeners = snapshot.map { c ->
                         ListenerInfo(c.id, c.name, c.platform, c.address.address?.hostAddress ?: "?", c.rttUs / 1000f, c.bufferMs, c.status, c.check)
+                    } + browsers.map { g ->
+                        ListenerInfo(g.id, g.name, Proto.PLATFORM_WEB, g.address, g.rttUs / 1000f, g.bufferMs, g.status, g.check)
                     },
                     level = if (local.muted) 0f else local.engine?.outputLevel ?: 0f,
                     addresses = if (it.addresses.isEmpty()) LocalNet.localIpv4Addresses() else it.addresses,
@@ -546,9 +590,11 @@ class PartyHostService : Service() {
                     video = v,
                     correctionUs = local.userOffsetMs * 1000L + local.calibrationUs,
                     muted = local.muted,
+                    webUrls = if (webPort == 0) emptyList() else (if (it.addresses.isEmpty()) LocalNet.localIpv4Addresses() else it.addresses)
+                        .map { a -> "http://$a:$webPort" },
                 )
             }
-            val note = snapshot.size to (if (music.playing) song?.title.orEmpty() else "")
+            val note = snapshot.size + browsers.size to (if (music.playing) song?.title.orEmpty() else "")
             if (note != notified) {
                 notified = note
                 try {
@@ -619,8 +665,10 @@ class PartyHostService : Service() {
 
         fun startSoundCheck() {
             if (checkRunner != null) return
-            val guests = clients.filter { it.status == Proto.STATUS_SYNCED || it.status == Proto.STATUS_LATE }
-            if (guests.isEmpty()) {
+            val inSync = { status: Int -> status == Proto.STATUS_SYNCED || status == Proto.STATUS_LATE }
+            val guests = clients.filter { inSync(it.status) }
+            val browsers = web.guests.filter { inSync(it.status) }
+            if (guests.isEmpty() && browsers.isEmpty()) {
                 soundCheck = SoundCheckUi(message = "Wait until your friends show \"In sync\", then run the sound check.")
                 return
             }
@@ -630,10 +678,18 @@ class PartyHostService : Service() {
                 this@PartyHostService, localId, playoutDelayMs,
                 mediaNowUs = { lastSentTimestampUs },
                 requestChirp = { id, mediaUs, checkId ->
-                    if (id == localId) local.scheduleTone(mediaUs) else sendToClient(id, WireParty.encodeChirp(streamId, id, mediaUs, checkId))
+                    when {
+                        id == localId -> local.scheduleTone(mediaUs)
+                        browsers.any { it.id == id } -> web.send(id, """{"t":"chirp","media":$mediaUs,"check":$checkId}""")
+                        else -> sendToClient(id, WireParty.encodeChirp(streamId, id, mediaUs, checkId))
+                    }
                 },
                 applyCorrection = { id, adjustUs, checkId, errorUs ->
-                    repeat(3) { sendToClient(id, WireParty.encodeOffset(streamId, id, adjustUs, checkId, errorUs)) }
+                    if (browsers.any { it.id == id }) {
+                        web.send(id, """{"t":"offset","adjust":$adjustUs,"check":$checkId,"err":$errorUs}""") // TCP: once is enough
+                    } else {
+                        repeat(3) { sendToClient(id, WireParty.encodeOffset(streamId, id, adjustUs, checkId, errorUs)) }
+                    }
                 },
                 onProgress = { text, progress -> soundCheck = SoundCheckUi(running = true, progress = progress, message = text) },
             )
@@ -643,7 +699,8 @@ class PartyHostService : Service() {
                 player.hold = true // the beeps need a quiet moment
                 val outcome = try {
                     runner.run(
-                        guests.map { c -> CheckParticipant(c.id, c.name) { c.adjustUs } },
+                        guests.map { c -> CheckParticipant(c.id, c.name) { c.adjustUs } } +
+                            browsers.map { g -> CheckParticipant(g.id, g.name) { g.adjustUs } },
                         CheckParticipant(localId, "DJ") { local.adjustUs() },
                         base,
                     )
@@ -652,6 +709,7 @@ class PartyHostService : Service() {
                     checkRunner = null
                 }
                 for (c in guests) outcome.results[c.id]?.let { c.check = it }
+                for (g in browsers) outcome.results[g.id]?.let { g.check = it }
                 soundCheck = summarize(outcome)
             }, "hearby-soundcheck").start()
         }

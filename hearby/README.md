@@ -16,11 +16,12 @@ and the DJ phone's microphone times the beeps.
 | | DJ (plays the music) | Guest (plays along) |
 |---|---|---|
 | Android 10+ (Kotlin, Jetpack Compose) | yes | yes |
-| iOS 15+ (Swift, SwiftUI) | not yet | yes |
+| iPhone in Safari, no install (a page the DJ phone serves) | no | yes |
+| iOS 15+ app (Swift, SwiftUI; not in the App Store yet) | not yet | yes |
 
 ```
 hearby/
-  android/   Android Studio project: host + listener app
+  android/   Android Studio project: host + listener app, and the Safari guest page (app/src/main/assets/web)
   ios/       Xcode project: listener app, plus a Swift package for testing the sync core
   docs/      PROTOCOL.md: byte-level packet spec and test vectors
   tools/     hearby_probe.py: a Python peer for debugging (join a host, or act as one)
@@ -183,6 +184,28 @@ uses them when it does). A resume is back in time within a few seconds. That is 
 files, which play within about a millisecond after a sound check, and none of it has been measured
 on real phones yet.
 
+## iPhones without the app (Safari)
+
+There is no Hearby iPhone app in the App Store yet, so the DJ phone also serves a web page. iPhone
+guests join the DJ's Wi-Fi or hotspot, scan the QR code on the DJ screen with the Camera, and tap
+*Join the party* in Safari. Any phone with a modern browser can join the same way.
+
+- **Songs:** the DJ phone streams each 20 ms frame to the page over a WebSocket, stamped with its
+  moment on the shared timeline. The page keeps its own clock sync with the DJ (the same filter as
+  the apps), works out when each frame will actually come out of the speaker from Web Audio's
+  output timestamps, and schedules the frames back to back, pulling any drift in with speed changes
+  of at most 0.3 %.
+- **YouTube:** the page runs the same sync controller as the apps (ported to JavaScript) on
+  YouTube's embedded player. iPhones only start a video on their own while it is muted, so the
+  video starts in sync and silent, and the guest taps the speaker on the video once for sound.
+- **Sound check and slider:** Safari guests take part in the DJ's sound check like the apps do, and
+  have the same fine-tune slider (remembered on that phone).
+- They show up in the DJ's crowd list with a globe icon.
+
+What a web page can't do on an iPhone: play with the screen locked or with Safari in the
+background. The page plays a tiny silent, invisible video to discourage auto-lock, but turning
+Auto-Lock off (Settings › Display & Brightness) is the sure way.
+
 ## Building
 
 ### Android
@@ -192,6 +215,7 @@ Requirements: JDK 17 or newer, Android SDK platform 36. Open `android/` in Andro
 ```bash
 cd android
 ./gradlew testDebugUnitTest      # protocol vectors, clock sync, resampler, playout simulations
+node --test app/src/test/js/*.test.mjs   # the Safari guest page's sync logic (Node 18+)
 ./gradlew assembleDebug          # app/build/outputs/apk/debug/app-debug.apk
 ```
 
@@ -246,6 +270,9 @@ are no package dependencies.
 
 The DJ phone plays along in sync, so there is no echo between it and the others.
 
+**iPhones:** they join the DJ's Wi-Fi or hotspot, then scan the QR code in the DJ screen's *iPhone?*
+card and tap *Join the party* in Safari. Keep the page open with the screen on.
+
 **YouTube:** on the DJ screen, paste a link into *Play from YouTube* and tap *Play*, or in the
 YouTube app tap *Share › Hearby*. Every phone with internet loads the video and they start together.
 The DJ can pause, resume, or go *Back to music*. Keep Hearby open on screen while the video plays:
@@ -279,6 +306,20 @@ the screen stays on by itself until the video ends.
 - Sync is looser than with music files (see [YouTube mode](#youtube-mode)), and it depends on each
   player reporting its position accurately, which has not been measured on real phones yet.
 - iPhones follow along as guests; the DJ is an Android phone.
+
+**iPhones in Safari**
+
+- Safari stops a page's sound when the screen locks or Safari goes to the background. Guests keep
+  the page open; turning Auto-Lock off is the reliable way.
+- A browser gets plain 16-bit PCM (about 1.5 Mbit/s each), because Safari can't decode the apps'
+  Opus packets on a plain-http page. Up to 16 browsers per party; on a phone hotspot, a handful of
+  iPhones plus the Android guests is comfortable.
+- Until a guest taps the speaker on the video, an iPhone plays YouTube videos muted (Apple's rule
+  for videos that start on their own).
+- Web Audio's own idea of its output delay varies by browser and Bluetooth device. The sound check
+  measures what is left; without one, use the slider.
+- The page has been tested in Chromium against the real DJ-side server, not yet in Safari on a
+  real iPhone.
 
 **Sync accuracy**
 
@@ -352,6 +393,10 @@ Play accepts new apps as an **App Bundle** (`.aab`), not an APK. Besides uploadi
 | Screen design | Every Android screen rendered on the JVM with sample data; every iOS screen screenshotted in the iOS Simulator through the demo mode | Reviewed by eye |
 | YouTube sync (controller) | Simulated YouTube players on both platforms, Kotlin and Swift: start, pause and resume together, a late joiner, an ad on one phone, fine and coarse speed steps, and 40 randomised runs | Within 14 ms with YouTube's standard speed steps, 6.5 ms with fine steps, 6.3 ms a few seconds after a resume |
 | YouTube mode on an Android 14 emulator | Release and debug APK 1.3.0: a link shared to Hearby from another app waits for the party, then plays on the DJ screen; a Python guest received the VIDEO timeline (video id, playing, position) and silent audio that keeps clock sync running. The emulator's own WebView (version 113, software rendering) hung and crashed its page process: Hearby now replaces a crashed player instead of crashing (checked by killing the page process) and says when the player cannot start | Pass, except YouTube itself, which the build machine cannot reach |
+| Safari guest page: sync logic | Node tests of the page's clock sync, YouTube controller (the same simulations as Kotlin and Swift), audio scheduler (clock drift of ±300 ppm, jittery output timestamps, lost frames, a wandering start) and chirp samples | Audio within 1 ms of steady, constant under 0.5 ms; video as in the apps |
+| Safari guest page: end to end | The real DJ-side server (`WebGuestsLiveTest`) and the real page in headless Chromium: join, clock sync, 45 s of streamed audio, a sound-check chirp and correction, then a YouTube timeline on a stand-in player with variable start and seek delays and standard speed steps | Synced in 1 s; audio within 0.11 ms of target with no gaps or late frames; video within 0.13 ms; no page errors |
+| DJ-side web server | JVM tests over real sockets: page, 404s, WebSocket handshake (RFC 6455 vector), masked and fragmented frames, clock-sync replies, audio frames, stats, sound-check messages, a full party, goodbye | Pass |
+| QR code | The DJ screen's QR code decoded from the rendered screenshot | `http://192.168.43.1:47801` |
 | YouTube links | Watch, share (`youtu.be`), Shorts, live, embed, YouTube Music and mobile links, with or without surrounding text, on both platforms | Pass |
 | DJ on an Android 14 emulator | Release APK 1.2.0: party starts as a plain `mediaPlayback` service (no screen-capture prompt); a 44.1 kHz MP3 opened with Hearby was decoded, resampled and played, with its title and artist; a Python guest received the Opus stream with no loss plus "now playing", pause and resume; the sound check sent the guest its chirp request and reported that it could not hear itself (the emulator has no speaker-to-microphone path) | Pass |
 
@@ -365,6 +410,8 @@ Play accepts new apps as an **App Bundle** (`.aab`), not an APK. Besides uploadi
 - Real Wi-Fi and hotspot behaviour, including discovery across devices.
 - The iOS app at runtime. It compiles and its sync core passes the same tests as Android, but the
   AudioToolbox Opus decoder and AVAudioEngine timing have not been exercised on a device.
+- **The Safari page on a real iPhone**: Safari's autoplay and silent-switch rules, its Web Audio
+  output timestamps, keeping the screen awake, and Bluetooth on iOS.
 - **YouTube mode with real YouTube.** YouTube was not reachable from the build machine, so the
   embedded player itself (its start and seek delays, how accurately it reports its position, which
   speeds it offers) has only been simulated. Try it on two or three real phones first.

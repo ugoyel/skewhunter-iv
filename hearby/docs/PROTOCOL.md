@@ -214,6 +214,37 @@ resume), and phones hold at `positionUs` until then. While paused it stays at `p
 phone converts host time to its own clock with the SYNC offset and applies its own correction
 (slider plus sound check, positive = later) before steering its player.
 
+## Browser guests (TCP 47801)
+
+Phones without the app (iPhones in Safari) join through a page the DJ phone serves over plain HTTP
+on port 47801 (or any free port; the DJ screen shows it, with a QR code):
+
+| Request | |
+|---|---|
+| `GET /` | the guest page |
+| `GET /hearby-web.js` | its sync logic |
+| `GET /ws` | a WebSocket (RFC 6455) for everything else |
+
+On the WebSocket, text messages are JSON objects with a type `t`; times are microseconds, on the
+host's clock (`r`, `s`, `anchor`, `media`) or the browser's (`c`, `performance.now() × 1000`).
+
+| Direction | Message |
+|---|---|
+| host → guest | `{"t":"hello","id":<guest id>,"stream":<streamId>,"host":"<name>","delay":<playout delay ms>}` on connect |
+| guest → host | `{"t":"hello","name":"<name>"}` when the guest joins (it is not counted before) |
+| guest → host | `{"t":"sync","c":<t0>}`: clock sync, a burst of 12 then once a second |
+| host → guest | `{"t":"sync","c":<t0 echoed>,"r":<t1>,"s":<t2>}`, sent ahead of any queued audio |
+| host → guest | `{"t":"state","title":..,"artist":..,"playing":<bool>,"video":null \| {"id","title","playing","anchor","pos","v"}}` on join and on every change; `video` is the VIDEO timeline |
+| guest → host | `{"t":"stat","buf":<ms scheduled>,"st":<status as in SYNC_REQ>,"adj":<adjustments µs>,"rtt":<µs>}` once a second |
+| host → guest | `{"t":"chirp","media":<mediaTimeUs>,"check":<id>}` and `{"t":"offset","adjust":<µs>,"check":<id>,"err":<µs>}`: the sound check, as CHIRP and OFFSET |
+| host → guest | `{"t":"bye","msg":".."}` when the party ends, `{"t":"full"}` when 16 browsers are already in |
+| guest → host | `{"t":"leave"}` |
+
+Binary messages (host → guest) carry the audio: `u32 seq`, `u64 timestampUs` (big-endian, as in
+AUDIO), then 960 stereo samples of 16-bit little-endian PCM, 3852 bytes in all. A guest plays the
+frame at `timestampUs + delay + adjustments` on the shared timeline. Silent frames are not sent
+(`seq` still advances), so a gap simply means silence.
+
 ## Discovery
 
 | Mechanism | Host | Android listener | iOS listener |

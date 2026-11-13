@@ -49,6 +49,8 @@ object Proto {
 
     const val PLATFORM_ANDROID = 1
     const val PLATFORM_IOS = 2
+    /** A browser on the DJ phone's guest page (host/WebGuests.kt); never sent over UDP. */
+    const val PLATFORM_WEB = 3
 
     const val STATUS_CONNECTING = 0
     const val STATUS_BUFFERING = 1

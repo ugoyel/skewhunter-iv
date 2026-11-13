@@ -12,6 +12,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.WriterException
+import com.google.zxing.EncodeHintType
+import com.google.zxing.BarcodeFormat
+import androidx.compose.material.icons.rounded.QrCode2
+import androidx.compose.material.icons.rounded.Language
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.Canvas
 import io.github.ugoyel.hearby.core.YouTubeLinks
 import io.github.ugoyel.hearby.core.VideoTimeline
 import androidx.compose.ui.graphics.Brush
@@ -378,6 +388,7 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
                 GhostButton("Back to music", actions.onStopVideo, Modifier.weight(1f), icon = Icons.Rounded.LibraryMusic, height = 52.dp)
             }
         }
+        if (state.webUrls.isNotEmpty()) IPhoneCard(state.webUrls)
         Crowd(state.listeners)
         GradientButton("End the party", actions.onStop, Modifier.fillMaxWidth(), icon = Icons.Rounded.Stop, brush = Party.Stop, glow = Party.Coral)
         return
@@ -447,6 +458,7 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
 
     SoundCheckCard(state, actions.onSoundCheck, micNotice)
 
+    if (state.webUrls.isNotEmpty()) IPhoneCard(state.webUrls)
     Crowd(state.listeners)
 
     GradientButton("End the party", actions.onStop, Modifier.fillMaxWidth(), icon = Icons.Rounded.Stop, brush = Party.Stop, glow = Party.Coral)
@@ -700,8 +712,16 @@ private fun Crowd(listeners: List<ListenerInfo>) {
                     Text(l.name.ifBlank { l.address }, style = MaterialTheme.typography.titleMedium, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            if (l.platform == Proto.PLATFORM_IOS) Icons.Rounded.PhoneIphone else Icons.Rounded.Android,
-                            contentDescription = if (l.platform == Proto.PLATFORM_IOS) "iPhone" else "Android",
+                            when (l.platform) {
+                                Proto.PLATFORM_IOS -> Icons.Rounded.PhoneIphone
+                                Proto.PLATFORM_WEB -> Icons.Rounded.Language
+                                else -> Icons.Rounded.Android
+                            },
+                            contentDescription = when (l.platform) {
+                                Proto.PLATFORM_IOS -> "iPhone"
+                                Proto.PLATFORM_WEB -> "Browser"
+                                else -> "Android"
+                            },
                             modifier = Modifier.size(14.dp), tint = Party.InkFaint,
                         )
                         Spacer(Modifier.width(4.dp))
@@ -719,6 +739,55 @@ private fun Crowd(listeners: List<ListenerInfo>) {
                     l.status == Proto.STATUS_LATE -> Tag("Behind", Party.Coral)
                     else -> Tag("Tuning in", Party.Sun)
                 }
+            }
+        }
+    }
+}
+
+/** iPhones (and any phone without the app) join in the browser: scan, tap, done. */
+@Composable
+private fun IPhoneCard(urls: List<String>) {
+    GlassCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.QrCode2, null, tint = Party.Blue)
+            Spacer(Modifier.width(10.dp))
+            Text("iPhone? No app needed", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = Color.White)
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Join this phone's Wi-Fi or hotspot first, then open the Camera, point it here and tap the link. " +
+                "The party plays in Safari, with the screen on.",
+            style = MaterialTheme.typography.bodyMedium, color = Party.InkSoft,
+        )
+        Spacer(Modifier.height(14.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            QrCode(urls.first(), Modifier.size(132.dp))
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Or type", style = MaterialTheme.typography.labelMedium, color = Party.InkFaint)
+                for (u in urls) {
+                    Text(u.removePrefix("http://"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            }
+        }
+    }
+}
+
+/** A QR code, drawn module by module (black on white, as every camera expects). */
+@Composable
+private fun QrCode(text: String, modifier: Modifier = Modifier) {
+    val matrix = remember(text) {
+        try {
+            QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, 0, 0, mapOf(EncodeHintType.MARGIN to 1, EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M))
+        } catch (e: WriterException) {
+            null
+        }
+    } ?: return
+    Canvas(modifier.clip(RoundedCornerShape(16.dp)).background(Color.White).padding(8.dp)) {
+        val cell = size.minDimension / matrix.width
+        for (y in 0 until matrix.height) {
+            for (x in 0 until matrix.width) {
+                if (matrix[x, y]) drawRect(Color.Black, topLeft = Offset(x * cell, y * cell), size = Size(cell + 0.6f, cell + 0.6f))
             }
         }
     }

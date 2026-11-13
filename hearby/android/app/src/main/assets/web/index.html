@@ -1,0 +1,672 @@
+<!doctype html>
+<!--
+  Hearby's guest page, served by the DJ phone itself (host/WebGuests.kt) for phones without the app,
+  above all iPhones in Safari. Everything is in this file and hearby-web.js: no internet is needed
+  except for YouTube videos. Protocol: docs/PROTOCOL.md (Browser guests).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E0A1F">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Hearby party</title>
+<style>
+  :root {
+    --bg: #0E0A1F; --ink: #ffffff; --ink-soft: rgba(255,255,255,0.72); --ink-faint: rgba(255,255,255,0.45);
+    --glass: rgba(255,255,255,0.07); --glass-bright: rgba(255,255,255,0.11); --stroke: rgba(255,255,255,0.14);
+    --pink: #FF3D9A; --violet: #8B5CF6; --blue: #38BDF8; --lime: #B8F35A; --sun: #FFC857; --coral: #FF6B5B;
+    --brand: linear-gradient(110deg, #FF3D9A, #8B5CF6 55%, #38BDF8);
+    --stop: linear-gradient(110deg, #FF4D6D, #FF8C5A);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); }
+  body {
+    font-family: ui-rounded, "SF Pro Rounded", "Nunito", system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased; overflow-x: hidden;
+  }
+  .stage { position: fixed; inset: -20%; z-index: 0; pointer-events: none; filter: blur(60px); opacity: 0.85; }
+  .stage i { position: absolute; border-radius: 50%; width: 60vmax; height: 60vmax; animation: drift 18s ease-in-out infinite alternate; }
+  .stage i:nth-child(1) { background: radial-gradient(circle, rgba(255,61,154,0.55), transparent 65%); left: -10%; top: -10%; }
+  .stage i:nth-child(2) { background: radial-gradient(circle, rgba(56,189,248,0.45), transparent 65%); right: -15%; top: 30%; animation-duration: 23s; }
+  .stage i:nth-child(3) { background: radial-gradient(circle, rgba(139,92,246,0.5), transparent 65%); left: 10%; bottom: -20%; animation-duration: 27s; }
+  @keyframes drift { to { transform: translate(8%, 6%) scale(1.12); } }
+  @media (prefers-reduced-motion: reduce) { .stage i, .bars span { animation: none !important; } }
+
+  main { position: relative; z-index: 1; max-width: 520px; margin: 0 auto;
+    padding: max(18px, env(safe-area-inset-top)) 16px max(28px, env(safe-area-inset-bottom)); }
+  header { text-align: center; margin: 6px 0 18px; }
+  .wordmark { font-size: 44px; font-weight: 800; letter-spacing: -1px; margin: 0;
+    background: var(--brand); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .tagline { margin: 2px 0 0; font-size: 12px; letter-spacing: 3px; color: var(--ink-faint); font-weight: 600; }
+
+  .card { background: var(--glass); border: 1px solid var(--stroke); border-radius: 28px; padding: 20px; margin-bottom: 14px;
+    -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
+  .card.lit { background: var(--glass-bright); border-color: transparent;
+    background-image: linear-gradient(var(--glass-bright), var(--glass-bright)), var(--brand);
+    background-origin: border-box; background-clip: padding-box, border-box; border: 1px solid transparent; }
+  h2 { margin: 0 0 6px; font-size: 24px; font-weight: 800; }
+  h3 { margin: 0; font-size: 19px; font-weight: 700; }
+  p { margin: 0; line-height: 1.4; }
+  .soft { color: var(--ink-soft); }
+  .faint { color: var(--ink-faint); font-size: 13px; }
+  .row { display: flex; align-items: center; gap: 12px; }
+  .grow { flex: 1; min-width: 0; }
+  .gap { height: 14px; }
+
+  button { font: inherit; color: inherit; border: 0; cursor: pointer; }
+  .btn { width: 100%; height: 60px; border-radius: 30px; font-size: 19px; font-weight: 800; color: #fff;
+    background: var(--brand); box-shadow: 0 10px 34px rgba(255,61,154,0.35); transition: transform 0.12s ease; }
+  .btn:active { transform: scale(0.96); }
+  .btn.stop { background: var(--stop); box-shadow: 0 10px 30px rgba(255,107,91,0.3); }
+  .btn.ghost { background: var(--glass); border: 1px solid var(--stroke); box-shadow: none; font-weight: 700; }
+  .btn.small { height: 44px; font-size: 16px; }
+  .pill { display: inline-block; padding: 4px 11px; border-radius: 999px; font-size: 12px; font-weight: 700;
+    border: 1px solid currentColor; background: color-mix(in srgb, currentColor 16%, transparent); white-space: nowrap; }
+  .pill.solid { color: #fff; background: #FF3B3B; border-color: #FF3B3B; }
+  .lime { color: var(--lime); } .sun { color: var(--sun); } .coral { color: var(--coral); } .pink { color: var(--pink); }
+
+  input[type=text] { width: 100%; height: 52px; border-radius: 18px; border: 1px solid var(--stroke); background: var(--glass);
+    color: #fff; font: inherit; font-size: 17px; padding: 0 16px; outline: none; }
+  input[type=text]:focus { border-color: var(--pink); }
+
+  .orb { width: 64px; height: 64px; border-radius: 50%; flex: none; display: grid; place-items: center; font-size: 28px;
+    background: var(--brand); box-shadow: 0 0 0 6px rgba(255,61,154,0.14), 0 0 40px rgba(139,92,246,0.5); }
+  .orb.idle { background: rgba(255,255,255,0.1); box-shadow: none; }
+  .bars { display: flex; align-items: flex-end; gap: 5px; height: 46px; margin: 16px 0 4px; }
+  .bars span { flex: 1; border-radius: 6px; background: var(--brand); background-size: 900% 100%; height: 12%;
+    transition: height 0.12s ease-out; }
+  .stats { display: flex; gap: 8px; margin-top: 14px; }
+  .stat { flex: 1; text-align: center; padding: 8px 4px; border-radius: 16px; background: rgba(255,255,255,0.06); }
+  .stat b { display: block; font-size: 15px; }
+  .stat small { color: var(--ink-faint); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+
+  .video { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 18px; overflow: hidden; background: #000; margin: 12px 0; }
+  .video > div, .video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+  .notice { border-radius: 22px; padding: 14px 16px; margin-bottom: 14px; display: flex; gap: 10px;
+    background: rgba(255,200,87,0.12); border: 1px solid rgba(255,200,87,0.4); }
+  .notice.pinkish { background: rgba(255,61,154,0.12); border-color: rgba(255,61,154,0.4); }
+
+  .slider { width: 100%; margin: 16px 0 6px; accent-color: var(--pink); height: 32px; }
+  .nudges { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px; }
+  .nudges button { height: 44px; border-radius: 22px; background: var(--glass); border: 1px solid var(--stroke); font-weight: 700; }
+  .ends { display: flex; justify-content: space-between; color: var(--ink-faint); font-size: 12px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  [hidden] { display: none !important; }
+  .awake { position: fixed; width: 1px; height: 1px; opacity: 0.01; pointer-events: none; bottom: 0; right: 0; }
+</style>
+</head>
+<body>
+<div class="stage"><i></i><i></i><i></i></div>
+<main>
+  <header>
+    <h1 class="wordmark">Hearby</h1>
+    <p class="tagline">ONE BEAT · EVERY PHONE</p>
+  </header>
+
+  <!-- Before joining -->
+  <section id="join">
+    <div class="card lit">
+      <div class="row">
+        <div class="orb">🎉</div>
+        <div class="grow">
+          <h2 id="joinTitle">You're invited!</h2>
+          <p class="soft" id="joinDetail">Finding the DJ…</p>
+        </div>
+      </div>
+      <div class="gap"></div>
+      <input type="text" id="name" maxlength="32" placeholder="Your name (so the DJ sees you)" autocomplete="nickname">
+      <div class="gap"></div>
+      <button class="btn" id="joinBtn" disabled>Join the party</button>
+    </div>
+    <div class="card">
+      <h3>Before you join</h3>
+      <div class="gap" style="height:8px"></div>
+      <p class="soft">🔊 Turn the volume up (and the silent switch off).</p>
+      <p class="soft">📱 Keep this page open with the screen on. A locked iPhone can't play web audio.</p>
+      <p class="soft">🎧 Bluetooth speaker? Join, then the DJ's sound check lines it up.</p>
+    </div>
+  </section>
+
+  <!-- At the party -->
+  <section id="live" hidden>
+    <div class="card" id="hero">
+      <div class="row">
+        <div class="orb idle" id="orb">🎧</div>
+        <div class="grow">
+          <h2 id="liveTitle">Finding the beat…</h2>
+          <p class="soft" id="liveDetail"></p>
+        </div>
+      </div>
+      <div id="song" hidden>
+        <div class="gap" style="height:12px"></div>
+        <p style="font-size:17px;font-weight:700" id="songTitle"></p>
+        <p class="faint" id="songSub"></p>
+      </div>
+      <div class="bars" id="bars"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      <div id="checked" hidden><span class="pill lime">Sound-checked by the DJ</span></div>
+      <div class="stats" id="stats">
+        <div class="stat"><b id="statSync">–</b><small>sync</small></div>
+        <div class="stat"><b id="statPing">–</b><small>ping</small></div>
+        <div class="stat"><b id="statBuf">–</b><small>buffer</small></div>
+      </div>
+    </div>
+
+    <div class="card lit" id="videoCard" hidden>
+      <div class="row">
+        <span class="pill solid">YouTube</span>
+        <span class="soft grow" id="videoState">Playing on every phone</span>
+        <span class="pill lime" id="videoSync" hidden></span>
+      </div>
+      <div class="video"><div id="yt"></div></div>
+      <h3 id="videoTitle">Loading video…</h3>
+      <p class="sun" id="videoError" hidden style="margin-top:8px"></p>
+      <p class="pink" id="videoUnmute" hidden style="margin-top:8px">🔇 Tap the speaker on the video to turn its sound on.</p>
+      <p class="faint" style="margin-top:8px">YouTube plays only while this page is open. If you leave it, only this phone pauses, and it catches up when you come back.</p>
+    </div>
+
+    <div class="notice pinkish" id="resumeNotice" hidden>
+      <div class="grow">
+        <p>Your iPhone paused the sound while the page was away.</p>
+        <div class="gap" style="height:10px"></div>
+        <button class="btn small" id="resumeBtn">Bring the sound back</button>
+      </div>
+    </div>
+    <div class="notice" id="lateNotice" hidden><p id="lateText"></p></div>
+    <div class="notice" id="msgNotice" hidden><p id="msgText"></p></div>
+
+    <div class="card">
+      <div class="row">
+        <h3 class="grow">Fine-tune the beat</h3>
+        <b style="font-size:22px" class="pink" id="offsetLabel">0 ms</b>
+      </div>
+      <input class="slider" id="offset" type="range" min="-500" max="500" step="1" value="0">
+      <div class="ends"><span>−500 earlier</span><span>later +500</span></div>
+      <div class="nudges">
+        <button data-d="-10">−10</button><button data-d="-1">−1</button><button data-d="0">Reset</button><button data-d="1">+1</button><button data-d="10">+10</button>
+      </div>
+      <div class="gap" style="height:10px"></div>
+      <p class="faint">Sounds late next to the others (hello, Bluetooth)? Slide toward −. Early? Slide toward +. Remembered on this phone.</p>
+    </div>
+
+    <div class="two">
+      <button class="btn ghost" id="resyncBtn">Re-sync</button>
+      <button class="btn stop" id="leaveBtn">Leave</button>
+    </div>
+  </section>
+
+  <!-- Over -->
+  <section id="over" hidden>
+    <div class="card lit" style="text-align:center">
+      <div style="font-size:52px">🪩</div>
+      <h2>That's a wrap!</h2>
+      <p class="soft" id="overText">The DJ ended the party.</p>
+      <div class="gap"></div>
+      <button class="btn" id="againBtn">Back</button>
+    </div>
+  </section>
+</main>
+<video class="awake" id="awake" playsinline muted loop src="data:video/mp4;base64,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"></video>
+
+<script src="hearby-web.js"></script>
+<script>
+(function () {
+  'use strict';
+  const H = window.Hearby;
+  const $ = (id) => document.getElementById(id);
+  const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const nowUs = () => performance.now() * 1000;
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } },
+  };
+
+  // ---- state ----
+  let ws = null, hello = null, party = { title: '', artist: '', playing: false, video: null };
+  let joined = false, ended = false, phase = 'connecting', message = null;
+  const clock = new H.ClockSync();
+  let syncsSent = 0, syncTimer = null, statTimer = null;
+  let ctx = null, gain = null, silentAudio = null;
+  const outClock = new H.OutputClock();
+  const sched = new H.AudioScheduler();
+  let userOffsetMs = parseInt(store.get('hearby.offsetMs', '0'), 10) || 0;
+  let calibrationUs = 0, lateBiasUs = 0, lastCheckId = -1, soundChecked = false;
+  const chirpsSeen = new Set();
+  let chirpBuffer = null;
+  let level = 0, lastAudioMs = 0;
+
+  const delayUs = () => (hello ? hello.delay : 350) * 1000;
+  const correctionUs = () => userOffsetMs * 1000 + calibrationUs;
+
+  // ---- connection ----
+  function connect() {
+    if (ws || ended) return;
+    const socket = new WebSocket('ws://' + location.host + '/ws');
+    socket.binaryType = 'arraybuffer';
+    ws = socket;
+    socket.onmessage = (e) => {
+      if (typeof e.data === 'string') {
+        let m;
+        try { m = JSON.parse(e.data); } catch (x) { return; }
+        onText(m);
+      } else {
+        onAudio(e.data);
+      }
+    };
+    socket.onclose = () => {
+      if (ws !== socket) return;
+      ws = null;
+      stopTimers();
+      if (!ended) {
+        phase = joined ? 'reconnecting' : 'connecting';
+        render();
+        setTimeout(connect, 1500);
+      }
+    };
+  }
+
+  function send(obj) {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+  }
+
+  function onText(m) {
+    switch (m.t) {
+      case 'hello': {
+        if (hello && hello.stream !== m.stream) newParty();
+        hello = m;
+        $('joinTitle').textContent = 'Join ' + (m.host || 'the DJ') + "'s party";
+        $('joinDetail').textContent = 'Every phone plays the same beat at the same moment.';
+        $('joinBtn').disabled = false;
+        if (joined) sendHello();
+        startTimers();
+        break;
+      }
+      case 'state':
+        party = m;
+        render();
+        break;
+      case 'sync': {
+        const t3 = nowUs();
+        clock.addSample(Number(m.c), m.r, m.s, t3);
+        if (clock.synced && phase !== 'playing' && joined) { phase = 'playing'; render(); }
+        break;
+      }
+      case 'chirp': chirp(m.media); break;
+      case 'offset':
+        if (m.check !== lastCheckId) {
+          lastCheckId = m.check;
+          calibrationUs = Math.max(-1e6, Math.min(1e6, calibrationUs + m.adjust));
+          soundChecked = true;
+          sched.reset();
+          render();
+        }
+        break;
+      case 'full':
+        ended = true;
+        showOver('This party is full. Ask the DJ, or get the Hearby app.');
+        break;
+      case 'bye':
+        ended = true;
+        showOver(m.msg || 'The DJ ended the party.');
+        break;
+    }
+  }
+
+  function newParty() {
+    clock.reset();
+    calibrationUs = 0;
+    lateBiasUs = 0;
+    lastCheckId = -1;
+    soundChecked = false;
+    chirpsSeen.clear();
+    sched.reset();
+  }
+
+  function sendHello() {
+    send({ t: 'hello', name: $('name').value.trim() || 'iPhone' });
+  }
+
+  function startTimers() {
+    stopTimers();
+    syncsSent = 0;
+    const tick = () => {
+      send({ t: 'sync', c: nowUs() });
+      syncsSent++;
+      syncTimer = setTimeout(tick, syncsSent < 12 ? 60 : 1000); // a quick burst for a first fix, then follow drift
+    };
+    tick();
+    statTimer = setInterval(() => {
+      if (!joined) return;
+      const st = !clock.synced ? 1 : lateBiasUs > 0 ? 3 : 2;
+      const buf = ctx ? Math.round(sched.bufferedS(ctx.currentTime) * 1000) : 0;
+      send({ t: 'stat', buf, st, adj: correctionUs() + lateBiasUs, rtt: clock.rttUs });
+      render();
+    }, 1000);
+  }
+
+  function stopTimers() {
+    clearTimeout(syncTimer);
+    clearInterval(statTimer);
+  }
+
+  // ---- audio ----
+  function unlockAudio() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!ctx) {
+      try { ctx = new AC({ sampleRate: 48000, latencyHint: 'playback' }); } catch (e) { ctx = new AC(); }
+      gain = ctx.createGain();
+      gain.connect(ctx.destination);
+    }
+    ctx.resume();
+    // Older iOS needs a sound started inside the tap.
+    const b = ctx.createBuffer(1, 1, 22050);
+    const s = ctx.createBufferSource();
+    s.buffer = b;
+    s.connect(ctx.destination);
+    s.start(0);
+    if (IOS) {
+      // Play through the silent switch, like a music app (Safari 17+), or with a silent <audio> loop.
+      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) { /* older */ }
+      if (!silentAudio) {
+        silentAudio = new Audio(silentWav());
+        silentAudio.loop = true;
+        silentAudio.setAttribute('playsinline', '');
+      }
+      silentAudio.play().catch(() => {});
+    }
+    $('awake').play().catch(() => {}); // a muted looping video keeps the screen from locking
+  }
+
+  function silentWav() {
+    const n = 4000, buf = new ArrayBuffer(44 + n), v = new DataView(buf);
+    const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, 'RIFF'); v.setUint32(4, 36 + n, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+    v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true);
+    v.setUint16(34, 8, true); w(36, 'data'); v.setUint32(40, n, true);
+    for (let i = 0; i < n; i++) v.setUint8(44 + i, 128);
+    return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  }
+
+  function readOutputClock() {
+    if (ctx.getOutputTimestamp) {
+      const ts = ctx.getOutputTimestamp();
+      if (ts && ts.contextTime > 0 && ts.performanceTime > 0) return outClock.update(ts.contextTime, ts.performanceTime);
+    }
+    outClock.updateFallback(ctx.currentTime, performance.now(), (ctx.outputLatency || 0) + (ctx.baseLatency || 0));
+  }
+
+  /** Context time at which something meant for host time hostUs must start. */
+  function contextTimeForHost(hostUs) {
+    return outClock.contextTimeFor((hostUs - clock.offsetUs) / 1000);
+  }
+
+  function onAudio(data) {
+    if (!joined || !ctx || ctx.state !== 'running' || !clock.synced) return;
+    const m = H.parseAudio(data);
+    if (!m) return;
+    readOutputClock();
+    const want = contextTimeForHost(m.ts + delayUs() + correctionUs() + lateBiasUs);
+    const placed = sched.place(m.seq, want, ctx.currentTime, outClock.drift);
+    if (placed.late !== undefined) {
+      // This phone needs more time than the DJ's cushion allows: play a little behind instead.
+      lateBiasUs = Math.min(lateBiasUs + Math.round(placed.late * 1e6) + 30000, 2000000);
+      return;
+    }
+    const frames = m.samples.length >> 1;
+    const buffer = ctx.createBuffer(2, frames, 48000);
+    const L = buffer.getChannelData(0), R = buffer.getChannelData(1);
+    let peak = 0;
+    for (let i = 0, j = 0; i < frames; i++, j += 2) {
+      const l = m.samples[j] / 32768, r = m.samples[j + 1] / 32768;
+      L[i] = l; R[i] = r;
+      const a = l < 0 ? -l : l, b = r < 0 ? -r : r;
+      if (a > peak) peak = a;
+      if (b > peak) peak = b;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.playbackRate.value = placed.rate;
+    src.connect(gain);
+    src.start(placed.when);
+    level = Math.max(peak, level * 0.85);
+    lastAudioMs = performance.now();
+  }
+
+  /** The DJ's sound check: play the chirp at exactly this point of the shared timeline. */
+  function chirp(mediaUs) {
+    if (!ctx || chirpsSeen.has(mediaUs)) return;
+    chirpsSeen.add(mediaUs);
+    if (!chirpBuffer) {
+      const samples = H.chirpSamples();
+      chirpBuffer = ctx.createBuffer(1, samples.length, 48000);
+      chirpBuffer.getChannelData(0).set(samples);
+    }
+    readOutputClock();
+    const when = contextTimeForHost(mediaUs + delayUs() + correctionUs() + lateBiasUs);
+    if (when < ctx.currentTime + 0.01) return;
+    const src = ctx.createBufferSource();
+    src.buffer = chirpBuffer;
+    src.connect(gain);
+    src.start(when);
+  }
+
+  // ---- YouTube mode ----
+  const yt = { player: null, ready: false, loading: false, failed: false, error: 0, controller: new H.VideoSyncController(), title: '' };
+
+  function ensureYouTube() {
+    if (yt.loading || yt.player) return;
+    yt.loading = true;
+    window.onYouTubeIframeAPIReady = () => {
+      yt.player = new YT.Player('yt', {
+        width: '100%', height: '100%',
+        playerVars: { playsinline: 1, controls: 1, disablekb: 1, fs: 0, rel: 0, iv_load_policy: 3, origin: location.origin },
+        events: {
+          onReady: () => {
+            yt.ready = true;
+            if (IOS) yt.player.mute(); // iPhones only start videos on their own when muted; tap the speaker for sound
+          },
+          onError: (e) => { yt.error = e.data; render(); },
+          onStateChange: () => {
+            try { const d = yt.player.getVideoData(); if (d && d.title) yt.title = d.title; } catch (x) { /* not yet */ }
+          },
+        },
+      });
+    };
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    tag.onerror = () => { yt.failed = true; yt.loading = false; render(); };
+    document.head.appendChild(tag);
+  }
+
+  function videoTick() {
+    const v = party.video;
+    if (v && joined) ensureYouTube();
+    if (!yt.player || !yt.ready || !clock.synced) return;
+    const p = yt.player;
+    let report;
+    try {
+      report = {
+        ready: true, state: p.getPlayerState(), positionUs: Math.round(p.getCurrentTime() * 1e6), measuredAtUs: nowUs(),
+        rate: p.getPlaybackRate(), rates: p.getAvailablePlaybackRates(), error: yt.error,
+      };
+    } catch (e) { return; }
+    const now = nowUs();
+    const hostNow = now + clock.offsetUs - correctionUs(); // playing later = looking at an earlier moment
+    const target = v ? H.positionAt(v, hostNow) : 0;
+    const startsIn = v ? H.startsInUs(v, hostNow) : 0;
+    const mayStart = document.visibilityState === 'visible' && visibleEnough($('videoCard'));
+    for (const a of yt.controller.step(now, v && joined ? v : null, target, startsIn, report, mayStart)) {
+      switch (a.type) {
+        case 'load': yt.error = 0; p.cueVideoById({ videoId: a.id }); break;
+        case 'play': if (a.afterUs > 0) setTimeout(() => p.playVideo(), a.afterUs / 1000); else p.playVideo(); break;
+        case 'pause': p.pauseVideo(); break;
+        case 'seek': p.seekTo(a.seconds, true); break;
+        case 'rate':
+          p.setPlaybackRate(a.rate);
+          if (a.forUs > 0) setTimeout(() => p.setPlaybackRate(1), a.forUs / 1000);
+          break;
+      }
+    }
+    let muted = false;
+    try { muted = p.isMuted(); } catch (e) { /* not ready */ }
+    $('videoUnmute').hidden = !(IOS && muted && v);
+    const off = yt.controller.lastErrorUs;
+    const tag = $('videoSync');
+    tag.hidden = off === null || !v || !v.playing || yt.error !== 0;
+    if (!tag.hidden) {
+      const ms = Math.round(off / 1000);
+      tag.textContent = Math.abs(ms) < 1 ? 'in sync' : (ms > 0 ? '+' : '') + ms + ' ms';
+      tag.className = 'pill ' + (Math.abs(ms) < 15 ? 'lime' : 'sun');
+    }
+  }
+
+  function visibleEnough(el) {
+    const r = el.getBoundingClientRect();
+    const h = Math.max(0, Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0));
+    return r.height > 0 && h * 2 >= r.height;
+  }
+
+  function videoError(code) {
+    switch (code) {
+      case 2: return "That doesn't look like a valid YouTube video.";
+      case 5: return "This phone can't play that video.";
+      case 100: return 'That video was removed or is private.';
+      case 101: case 150: return "The video's owner doesn't allow it to play in other apps. Ask the DJ to pick another one.";
+      default: return "YouTube couldn't play that video (error " + code + ').';
+    }
+  }
+
+  // ---- screen ----
+  function render() {
+    $('join').hidden = joined || ended;
+    $('live').hidden = !joined || ended;
+    $('over').hidden = !ended;
+    if (!joined || ended) return;
+    const synced = clock.synced && phase === 'playing';
+    const title = phase === 'reconnecting' ? 'Lost the DJ, reconnecting…'
+      : !synced ? 'Finding the beat…'
+      : lateBiasUs > 0 ? 'Playing, ' + Math.round(lateBiasUs / 1000) + ' ms behind' : "You're in sync!";
+    $('liveTitle').textContent = title;
+    $('liveDetail').textContent = 'DJ: ' + ((hello && hello.host) || '');
+    $('hero').classList.toggle('lit', synced);
+    $('orb').classList.toggle('idle', !synced);
+    $('orb').textContent = synced ? '🎶' : '🎧';
+    const v = party.video;
+    $('song').hidden = !party.title || !!v; // the video card says it all
+    $('bars').hidden = !!v;
+    $('stats').hidden = !!v;
+    $('songTitle').textContent = party.title || '';
+    $('songSub').textContent = party.playing ? (party.artist || '') : 'Paused by the DJ';
+    $('checked').hidden = !soundChecked;
+    $('statSync').textContent = synced ? '±' + (sched.lastErrorS * 1000).toFixed(1) + ' ms' : '–';
+    $('statPing').textContent = clock.synced ? (clock.rttUs / 1000).toFixed(1) + ' ms' : '–';
+    $('statBuf').textContent = ctx ? Math.round(sched.bufferedS(ctx.currentTime) * 1000) + ' ms' : '–';
+
+    $('videoCard').hidden = !v;
+    if (v) {
+      $('videoState').textContent = v.playing ? 'Playing on every phone' : 'Paused by the DJ';
+      $('videoTitle').textContent = v.title || yt.title || 'Loading video…';
+      const err = yt.failed ? "Can't reach YouTube. This phone needs internet for YouTube mode."
+        : yt.error ? videoError(yt.error) : null;
+      $('videoError').hidden = !err;
+      $('videoError').textContent = err || '';
+    }
+    $('resumeNotice').hidden = !ctx || ctx.state === 'running';
+    $('lateNotice').hidden = lateBiasUs === 0;
+    $('lateText').textContent = 'This phone needs more runway than the DJ\'s ' + ((hello && hello.delay) || 350) +
+      ' ms sync cushion, so it plays ' + Math.round(lateBiasUs / 1000) + ' ms behind the crowd. Ask the DJ for a bigger cushion.';
+    $('msgNotice').hidden = !message;
+    $('msgText').textContent = message || '';
+    $('offsetLabel').textContent = (userOffsetMs > 0 ? '+' : '') + userOffsetMs + ' ms';
+  }
+
+  function showOver(text) {
+    stopTimers();
+    $('overText').textContent = text;
+    try { if (yt.player) yt.player.pauseVideo(); } catch (e) { /* gone */ }
+    if (ws) { const s = ws; ws = null; s.close(); }
+    render();
+  }
+
+  function animateBars() {
+    const bars = $('bars').children;
+    const recent = performance.now() - lastAudioMs < 300;
+    level *= 0.92;
+    const t = performance.now() / 1000;
+    for (let i = 0; i < bars.length; i++) {
+      const wobble = 0.55 + 0.45 * Math.sin(t * (3 + i * 0.7) + i * 1.3);
+      bars[i].style.height = (recent ? 12 + 88 * Math.min(1, level * 1.6) * wobble : 12) + '%';
+    }
+    requestAnimationFrame(animateBars);
+  }
+
+  function setOffset(ms) {
+    userOffsetMs = Math.max(-500, Math.min(500, Math.round(ms)));
+    $('offset').value = userOffsetMs;
+    store.set('hearby.offsetMs', String(userOffsetMs));
+    lateBiasUs = 0;
+    sched.reset();
+    render();
+  }
+
+  // ---- wiring ----
+  $('name').value = store.get('hearby.name', '');
+  $('offset').value = userOffsetMs;
+  $('joinBtn').addEventListener('click', () => {
+    store.set('hearby.name', $('name').value.trim());
+    unlockAudio();
+    joined = true;
+    phase = clock.synced ? 'playing' : 'connecting';
+    sendHello();
+    render();
+  });
+  $('offset').addEventListener('input', () => { $('offsetLabel').textContent = $('offset').value + ' ms'; });
+  $('offset').addEventListener('change', () => setOffset(parseInt($('offset').value, 10)));
+  for (const b of document.querySelectorAll('.nudges button')) {
+    b.addEventListener('click', () => {
+      const d = parseInt(b.dataset.d, 10);
+      setOffset(d === 0 ? 0 : userOffsetMs + d);
+    });
+  }
+  $('resyncBtn').addEventListener('click', () => {
+    clock.reset();
+    lateBiasUs = 0;
+    sched.reset();
+    phase = 'connecting';
+    startTimers();
+    render();
+  });
+  $('leaveBtn').addEventListener('click', () => {
+    send({ t: 'leave' });
+    joined = false;
+    try { if (yt.player) yt.player.pauseVideo(); } catch (e) { /* gone */ }
+    if (gain) gain.gain.value = 0;
+    setTimeout(() => location.reload(), 150);
+  });
+  $('againBtn').addEventListener('click', () => location.reload());
+  $('resumeBtn').addEventListener('click', () => { unlockAudio(); if (gain) gain.gain.value = 1; sched.reset(); render(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      if (ctx) ctx.resume().then(render, render);
+      if (!ws && !ended) connect();
+      sched.reset();
+    } else {
+      try { if (yt.player) yt.player.pauseVideo(); } catch (e) { /* YouTube may not play in the background */ }
+    }
+    render();
+  });
+
+  setInterval(videoTick, 200);
+  requestAnimationFrame(animateBars);
+  render();
+  connect();
+
+  // For tests and debugging (Hearby's own page; nothing is sent anywhere).
+  window.__hearby = { clock, sched, outClock, get ctx() { return ctx; }, get party() { return party; }, get lateBiasUs() { return lateBiasUs; },
+    get calibrationUs() { return calibrationUs; }, get joined() { return joined; }, yt };
+})();
+</script>
+</body>
+</html>
