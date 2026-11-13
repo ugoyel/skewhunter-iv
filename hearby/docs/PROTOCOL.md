@@ -167,6 +167,7 @@ Sent when the song or play state changes, and once a second for anyone who misse
 ```
  4   u32  streamId
  8   u8   flags        bit 0: playing (clear while paused or during a sound check)
+                       bit 1: the DJ is on the mic (karaoke); guests show a banner
  9   u8   titleLen     then title (UTF-8)
  ..  u8   artistLen    then artist (UTF-8)
 ```

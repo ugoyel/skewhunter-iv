@@ -240,6 +240,9 @@ private struct ListeningView: View {
             }
         }
 
+        if status.djOnMic {
+            Notice(text: "The DJ is on the mic.", symbol: "mic.fill", color: Party.pink)
+        }
         if let message = status.message {
             Notice(text: message)
         }

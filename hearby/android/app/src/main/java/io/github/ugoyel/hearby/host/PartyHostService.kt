@@ -105,6 +105,9 @@ data class HostUiState(
     /** Karaoke: the DJ's microphone is on (and how loud the voice is, 0..1). */
     val micOn: Boolean = false,
     val micLevel: Float = 0f,
+    /** The mic hears someone right now, and which mic it is ("Phone mic", "Headset mic"). */
+    val micHearing: Boolean = false,
+    val micInput: String = "",
     /** This phone went quiet: another app took the sound, or its headphones were unplugged. */
     val muted: Boolean = false,
     /** The guest page for phones without the app (iPhones), e.g. http://192.168.43.1:47801, or null. */
@@ -475,7 +478,7 @@ class PartyHostService : Service() {
             fun toGuests(ts: Long, f: FloatArray, tape: VoiceTape?, duck: Float) {
                 guestDucker.process(f, Proto.FRAME_SAMPLES, duck)
                 if (tape != null) {
-                    tape.read(Karaoke.sungAtUs(ts, local.adjustUs()), Proto.FRAME_SAMPLES, voice)
+                    tape.next(Karaoke.sungAtUs(ts, local.adjustUs()), Proto.FRAME_SAMPLES, voice)
                     Karaoke.mix(f, voice, Proto.FRAME_SAMPLES)
                 }
                 toPcm16(f, pcm)
@@ -515,7 +518,13 @@ class PartyHostService : Service() {
 
                     if (m != null) {
                         lastTape = m.tape
-                        lookahead = maxOf(lookahead, Karaoke.lookaheadFrames(local.adjustUs()))
+                        // How long the guests' stream waits for the voice: follows this phone's own
+                        // timing, never more than MAX_LOOKAHEAD_FRAMES, so it can't stall the party.
+                        val wanted = Karaoke.lookaheadFrames(local.adjustUs())
+                        if (wanted != lookahead && (wanted > lookahead || lookahead - wanted >= 3)) {
+                            Log.i(TAG, "karaoke: guests' stream waits ${wanted * Proto.FRAME_MS} ms for the voice")
+                            lookahead = wanted
+                        }
                         held.addLast(ts to frame.copyOf())
                         while (held.size > lookahead) {
                             val (t, f) = held.removeFirst()
@@ -693,11 +702,11 @@ class PartyHostService : Service() {
             val title = if (v != null) v.title.ifBlank { "YouTube video" } else song?.title.orEmpty()
             val artist = if (v != null) "YouTube" else song?.artist.orEmpty()
             val on = if (v != null) v.playing else music.playing && !player.hold
-            val nowPlaying = "$title|$artist|$on"
+            val nowPlaying = "$title|$artist|$on|$micOpen"
             if (nowPlaying != lastNowPlaying || nowNs - lastNowPlayingNs > 1_000_000_000L) {
                 lastNowPlaying = nowPlaying
                 lastNowPlayingNs = nowNs
-                val msg = WireParty.encodeNowPlaying(streamId, on, title, artist)
+                val msg = WireParty.encodeNowPlaying(streamId, on, title, artist, micOn = micOpen)
                 for (c in snapshot) reply(sock, msg, c.address)
             }
             // ... and the video timeline: on every change, then once a second.
@@ -748,6 +757,8 @@ class PartyHostService : Service() {
                     },
                     micOn = micOpen,
                     micLevel = if (micOpen) mic?.level ?: 0f else 0f,
+                    micHearing = micOpen && mic?.hearing == true,
+                    micInput = mic?.inputName.orEmpty(),
                     bitrate = tuner.bitrate,
                     playoutDelayMs = playoutDelayMs,
                     suggestSoundCheck = tuner.suggestSoundCheck,
@@ -823,6 +834,7 @@ class PartyHostService : Service() {
                 micReadyUntilNs = System.nanoTime() + MIC_READY_NS
             }
             lastVideoNs = 0 // tell every phone's YouTube player to duck (or not) right away
+            lastNowPlaying = "" // ... and every phone that the DJ is on the mic
             return true
         }
 

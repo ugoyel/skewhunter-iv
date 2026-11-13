@@ -18,7 +18,6 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
-import android.os.SystemClock
 import androidx.compose.material.icons.rounded.MicNone
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.AutoAwesome
@@ -231,12 +230,10 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
         }
     }
     val karaokeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        micNotice = if (granted && PartyHostService.setMicOpen(true)) {
-            null
-        } else if (granted) {
-            "Couldn't open the microphone. Is another app using it?"
+        micNotice = if (granted) {
+            "Ready. Hold the mic button and talk; let go to stop."
         } else {
-            "Karaoke needs the microphone to send your voice to every phone. It's only on while you have it switched on."
+            "The mic button needs the microphone to send your voice to every phone. It only listens while you hold it."
         }
     }
     val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -383,7 +380,7 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
                 GhostButton("Back to music", actions.onStopVideo, Modifier.weight(1f), icon = Icons.Rounded.LibraryMusic, height = 52.dp)
             }
         }
-        if (state.micOn) MicNotice()
+        if (state.micOn) MicNotice(state)
         micNotice?.let { Notice(it) }
         if (state.webUrls.isNotEmpty()) IPhoneCard(state.webUrls)
         Crowd(state.listeners)
@@ -424,7 +421,11 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
             }
         } else {
             Spacer(Modifier.height(16.dp))
-            GradientButton("Add songs", actions.onAddSongs, Modifier.fillMaxWidth(), icon = Icons.Rounded.LibraryMusic)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                GradientButton("Add songs", actions.onAddSongs, Modifier.weight(1f), icon = Icons.Rounded.LibraryMusic)
+                Spacer(Modifier.width(12.dp))
+                MicButton(state.micOn, state.micLevel, actions.onMicDown, actions.onMicUp) // announcements need no music
+            }
         }
         Spacer(Modifier.height(14.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -438,7 +439,7 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
 
     state.songError?.let { Notice(it) }
     notice?.let { Notice(it) }
-    if (state.micOn) MicNotice()
+    if (state.micOn) MicNotice(state)
     val checkCardShown = state.suggestSoundCheck || state.soundCheck.running || state.soundCheck.message != null
     if (!checkCardShown) micNotice?.let { Notice(it) } // otherwise the sound check card shows it
 
@@ -827,17 +828,14 @@ private fun PlayButton(playing: Boolean, onClick: () -> Unit) {
     }
 }
 
-/**
- * The DJ's mic. Hold it to talk (push-to-talk: it closes when you let go), or tap it to keep it on
- * (tap again to stop). Lit and breathing with the voice while it's open.
- */
+/** The DJ's mic, push-to-talk: on air while held, muted the moment it's let go. Glows with the voice. */
 @Composable
 private fun MicButton(on: Boolean, level: Float, onDown: () -> Boolean, onUp: () -> Unit) {
     val isOpen by rememberUpdatedState(on)
     val down by rememberUpdatedState(onDown)
     val up by rememberUpdatedState(onUp)
     val ring = 1.dp + (6.dp * level.coerceIn(0f, 1f))
-    val label = if (on) "Mic on. Tap to turn it off" else "Mic: hold to talk to every phone, or tap to keep it on"
+    val label = if (on) "Mic on air" else "Mic: hold to talk to every phone"
     Box(
         Modifier
             .size(52.dp)
@@ -846,12 +844,9 @@ private fun MicButton(on: Boolean, level: Float, onDown: () -> Boolean, onUp: ()
             .then(if (on) Modifier.background(Party.Stop) else Modifier.background(Party.Glass).border(1.dp, Party.GlassStroke, CircleShape))
             .pointerInput(Unit) {
                 detectTapGestures(onPress = {
-                    val wasOpen = isOpen
-                    if (!wasOpen && !down()) return@detectTapGestures
-                    val pressedAt = SystemClock.uptimeMillis()
+                    if (!down()) return@detectTapGestures // asking for the microphone first
                     tryAwaitRelease()
-                    // Held: push-to-talk, so it closes now. A quick tap keeps it on (tap again to stop).
-                    if (wasOpen || SystemClock.uptimeMillis() - pressedAt >= HOLD_TO_TALK_MS) up()
+                    up() // let go: muted
                 })
             }
             .semantics {
@@ -868,17 +863,19 @@ private fun MicButton(on: Boolean, level: Float, onDown: () -> Boolean, onUp: ()
     }
 }
 
-/** Pressed longer than this, the mic button is push-to-talk; shorter, it's a tap that keeps it on. */
-private const val HOLD_TO_TALK_MS = 350L
 
-/** While the karaoke mic is on: what is happening, and how to hold the phone. */
+
+/** While the mic button is held: whether the mic hears you, and where the voice goes. */
 @Composable
-private fun MicNotice() {
-    Notice(
-        "Mic on: your voice is on every phone and the music dips. Holding the mic? Let go to stop. Tapped it? Tap " +
-            "again. Sing along to this phone: it plays a moment ahead of the room so your voice lands on the beat.",
-        icon = Icons.Rounded.Mic,
-    )
+private fun MicNotice(state: HostUiState) {
+    val phones = state.listeners.size
+    val text = when {
+        phones == 0 -> "On air, but nobody has joined yet."
+        state.micHearing -> "On air: ${state.micInput.ifBlank { "Phone mic" }} to $phones ${if (phones == 1) "phone" else "phones"}. " +
+            "Let go to mute."
+        else -> "Can't hear you yet: talk close to the ${if (state.micInput == "Headset mic") "headset's microphone" else "phone's microphone (at the bottom edge)"}."
+    }
+    Notice(text, icon = Icons.Rounded.Mic)
 }
 
 @Composable
@@ -1042,6 +1039,7 @@ internal fun Listening(
     }
     val dj = state.hostName.ifBlank { state.hostAddress }
     val output = state.outputName.removePrefix("Bluetooth: ") // the icon already says Bluetooth
+    if (state.djOnMic) Notice("The DJ is on the mic.", icon = Icons.Rounded.Mic)
     val video = state.video
     if (video != null && state.phase != Phase.CONNECTING) {
         val latest by rememberUpdatedState(state)

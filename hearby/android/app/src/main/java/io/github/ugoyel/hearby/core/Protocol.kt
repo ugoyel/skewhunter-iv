@@ -88,7 +88,8 @@ class SyncRespMsg(val streamId: Long, val t0Us: Long, val t1Us: Long, val t2Us: 
 
 class DiscoverRespMsg(val nonce: Long, val streamId: Long, val listeners: Int, val hostName: String)
 
-class NowPlayingMsg(val streamId: Long, val playing: Boolean, val title: String, val artist: String)
+/** [micOn]: the DJ is talking or singing into the mic right now. */
+class NowPlayingMsg(val streamId: Long, val playing: Boolean, val title: String, val artist: String, val micOn: Boolean = false)
 
 class ChirpMsg(val streamId: Long, val clientId: Long, val mediaTimeUs: Long, val checkId: Int)
 
@@ -330,15 +331,16 @@ object Wire {
 /** Messages added for the DJ's own music and the sound check. */
 object WireParty {
     // ---- NOW_PLAYING (0x0A)  host -> client ---------------------------------------------------------
-    //  4  u32 streamId   8  u8 flags (bit 0: playing)   9  u8 titleLen   10  title   then u8 artistLen, artist
+    //  4  u32 streamId   8  u8 flags (bit 0: playing, bit 1: the DJ's mic is open)   9  u8 titleLen
+    // 10  title   then u8 artistLen, artist
 
-    fun encodeNowPlaying(streamId: Long, playing: Boolean, title: String, artist: String): ByteArray {
+    fun encodeNowPlaying(streamId: Long, playing: Boolean, title: String, artist: String, micOn: Boolean = false): ByteArray {
         val t = Wire.nameField(title)
         val a = Wire.nameField(artist)
         val b = ByteArray(9 + t.size + a.size)
         Wire.writeHeader(b, Proto.TYPE_NOW_PLAYING)
         Wire.putU32(b, 4, streamId)
-        b[8] = if (playing) 1 else 0
+        b[8] = ((if (playing) 1 else 0) or (if (micOn) 2 else 0)).toByte()
         t.copyInto(b, 9)
         a.copyInto(b, 9 + t.size)
         return b
@@ -349,7 +351,8 @@ object WireParty {
         val title = Wire.readNameField(b, 9, len) ?: return null
         val artistAt = 10 + Wire.getU8(b, 9)
         val artist = Wire.readNameField(b, artistAt, len) ?: return null
-        return NowPlayingMsg(Wire.getU32(b, 4), Wire.getU8(b, 8) and 1 != 0, title, artist)
+        val flags = Wire.getU8(b, 8)
+        return NowPlayingMsg(Wire.getU32(b, 4), flags and 1 != 0, title, artist, micOn = flags and 2 != 0)
     }
 
     // ---- CHIRP (0x0B)  host -> client ---------------------------------------------------------------

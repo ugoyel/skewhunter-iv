@@ -28,14 +28,18 @@ object Karaoke {
     /** Music level while the mic is on: −7 dB, so the voice sits on top without the party stopping. */
     const val DUCK_GAIN = 0.45f
 
+    /** The guests' stream never waits longer than this for the voice (300 ms). */
+    const val MAX_LOOKAHEAD_FRAMES = 15
+
     /**
      * Frames the guest stream is held back: the voice for a frame is sung while the DJ phone plays
      * it (its timestamp + [MONITOR_DELAY_MS] + the DJ phone's own corrections) and must be captured
-     * before the frame goes out.
+     * before the frame goes out. Capped: a DJ phone running late (Bluetooth, a hiccup) must never
+     * stall the party; beyond the cap the newest voice goes out instead, a little off the beat.
      */
     fun lookaheadFrames(djAdjustUs: Long): Int {
         val ms = MONITOR_DELAY_MS + (djAdjustUs / 1000).coerceAtLeast(0) + MIC_LATENCY_MS + Proto.FRAME_MS
-        return ((ms + Proto.FRAME_MS - 1) / Proto.FRAME_MS).toInt()
+        return ((ms + Proto.FRAME_MS - 1) / Proto.FRAME_MS).toInt().coerceAtMost(MAX_LOOKAHEAD_FRAMES)
     }
 
     /** When the voice for the frame stamped [timestampUs] was sung (DJ phone clock, µs). */
@@ -181,6 +185,41 @@ class VoiceTape(private val sampleRate: Int = Proto.SAMPLE_RATE, seconds: Int = 
     }
 
     val samplesWritten: Long get() = written
+
+    private var cursor = -1L // where the next frame's voice starts (reader only)
+
+    /**
+     * The voice for the next 20 ms frame: [n] samples from the moment [fromUs], continuing seamlessly
+     * from the previous frame. The capture timestamps decide where to start and catch any drift. If
+     * they point at audio not captured yet, or long gone (a phone whose timestamps can't be trusted),
+     * the newest voice is used instead: the voice always gets through, at worst a little off the beat.
+     */
+    fun next(fromUs: Long, n: Int, out: FloatArray): Int {
+        val end = written
+        val oldest = maxOf(0L, end - ring.size + sampleRate / 10)
+        val want = indexFor(fromUs)
+        if (want != null && (cursor < 0 || abs(want - cursor) > sampleRate / 100)) cursor = want
+        if (cursor < 0 || cursor + n > end) cursor = end - n // not captured yet: the newest there is
+        if (cursor < oldest) cursor = maxOf(oldest, end - n)
+        var got = 0
+        for (i in 0 until n) {
+            val idx = cursor + i
+            if (idx in oldest until end) {
+                out[i] = ring[(idx % ring.size).toInt()]
+                got++
+            } else {
+                out[i] = 0f
+            }
+        }
+        cursor += n
+        return got
+    }
+
+    private fun indexFor(us: Long): Long? {
+        val (aIndex, aUs) = synchronized(lock) { anchorIndex to anchorUs }
+        if (aUs == Long.MIN_VALUE) return null
+        return aIndex + Math.round((us - aUs) * sampleRate / 1e6)
+    }
 
     /**
      * Copies [n] samples captured from [fromUs] on into [out]; anything not (or no longer) in the

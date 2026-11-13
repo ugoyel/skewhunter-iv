@@ -259,6 +259,8 @@ struct ReceiverStatus: Equatable {
     var songTitle = ""
     var songArtist = ""
     var songPlaying = false
+    /// The DJ is talking or singing into the mic right now.
+    var djOnMic = false
     /// True once the DJ's sound check has lined this phone up.
     var soundChecked = false
     /// The YouTube video the DJ is playing on every phone, or nil.
@@ -386,6 +388,7 @@ private final class ListenSession {
     private var songTitle = ""
     private var songArtist = ""
     private var songPlaying = false
+    private var djOnMic = false
     private var calibrationUs: Int64 = 0
     private var lastCheckId: Int = -1
     private var soundChecked = false
@@ -665,6 +668,7 @@ private final class ListenSession {
             songTitle = m.title
             songArtist = m.artist
             songPlaying = m.playing
+            djOnMic = m.micOn
 
         case Proto.typeVideo:
             // YouTube mode: every phone plays the video itself; this says what, and where on the DJ's clock.
@@ -777,7 +781,7 @@ private final class ListenSession {
             syncErrorMs: snap.syncErrorMs, rttMs: Float(clock.rttUs) / 1000, bufferMs: snap.cushionMs,
             lateBiasMs: snap.lateBiasMs, playoutDelayMs: playoutDelayMs, offsetMs: offset,
             outputName: output, outputIsBluetooth: bluetooth, lossPercent: lossPercent, level: snap.level,
-            songTitle: songTitle, songArtist: songArtist, songPlaying: songPlaying, soundChecked: soundChecked,
+            songTitle: songTitle, songArtist: songArtist, songPlaying: songPlaying, djOnMic: djOnMic, soundChecked: soundChecked,
             video: video, videoDuck: videoDuck, clockOffsetUs: clock.offsetUs, correctionUs: Int64(offset) * 1000 + calibrationUs))
     }
 }

@@ -132,6 +132,7 @@
 
   <!-- At the party -->
   <section id="live" hidden>
+    <div class="notice pinkish" id="micBanner" hidden><p>🎤 The DJ is on the mic.</p></div>
     <div class="card" id="hero">
       <div class="row">
         <div class="orb idle" id="orb">🎧</div>
@@ -590,6 +591,7 @@
     $('songTitle').textContent = party.title || '';
     $('songSub').textContent = party.playing ? (party.artist || '') : 'Paused by the DJ';
     $('checked').hidden = !soundChecked;
+    $('micBanner').hidden = !party.duck;
     $('statSync').textContent = synced ? '±' + (sched.lastErrorS * 1000).toFixed(1) + ' ms' : '–';
     $('statPing').textContent = clock.synced ? (clock.rttUs / 1000).toFixed(1) + ' ms' : '–';
     $('statBuf').textContent = ctx ? Math.round(sched.bufferedS(ctx.currentTime) * 1000) + ' ms' : '–';

@@ -74,6 +74,13 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(Wire.decodeChirp(b), ChirpMsg(streamId: 0x0A0B_0C0D, clientId: 0xDEAD_BEEF, mediaTimeUs: 0x0000_0001_0203_0405, checkId: 7))
     }
 
+    func testNowPlayingMicFlag() {
+        var b = Wire.encodeNowPlaying(streamId: 1, playing: true, title: "Song", artist: "Band")
+        b[8] |= 2 // the Android DJ sets bit 1 while its mic is open
+        XCTAssertEqual(Wire.decodeNowPlaying(b)?.micOn, true)
+        XCTAssertEqual(Wire.decodeNowPlaying(Wire.encodeNowPlaying(streamId: 1, playing: true, title: "Song", artist: "Band"))?.micOn, false)
+    }
+
     func testSyncRequestFlags() {
         let flags = Wire.syncFlags(bluetooth: true, lossPercent: 3.4)
         XCTAssertEqual(flags, 0x07)

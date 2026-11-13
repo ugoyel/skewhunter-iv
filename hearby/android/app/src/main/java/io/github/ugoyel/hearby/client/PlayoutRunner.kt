@@ -83,8 +83,21 @@ class PlayoutRunner(
         set(value) {
             val was = field
             field = value
+            if (value && !was) mainHandler.post { if (running) stepAsideForOwnVideo() }
             if (was && !value) mainHandler.post { if (running) reclaimAfterVideo() }
         }
+
+    /**
+     * Give the speaker up before our own YouTube player asks for it: then that request costs this
+     * stream nothing (Android fades out whoever loses the speaker), and the voice keeps playing.
+     */
+    private fun stepAsideForOwnVideo() {
+        focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+        if (mutedForOtherApp) {
+            mutedForOtherApp = false
+            muted = false
+        }
+    }
 
     private fun reclaimAfterVideo() {
         if (requestFocus() && mutedForOtherApp) {

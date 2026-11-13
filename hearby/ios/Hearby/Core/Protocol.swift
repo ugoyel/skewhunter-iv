@@ -94,6 +94,8 @@ struct NowPlayingMsg: Equatable {
     var playing: Bool
     var title: String
     var artist: String
+    /// The DJ is talking or singing into the mic right now.
+    var micOn = false
 }
 
 struct ChirpMsg: Equatable {
@@ -348,7 +350,7 @@ enum Wire {
     static func decodeNowPlaying(_ b: [UInt8]) -> NowPlayingMsg? {
         guard b.count >= 11, let title = readName(b, 9) else { return nil }
         guard let artist = readName(b, 10 + Int(b[9])) else { return nil }
-        return NowPlayingMsg(streamId: getU32(b, 4), playing: b[8] & 1 != 0, title: title, artist: artist)
+        return NowPlayingMsg(streamId: getU32(b, 4), playing: b[8] & 1 != 0, title: title, artist: artist, micOn: b[8] & 2 != 0)
     }
 
     // MARK: CHIRP (0x0B) host -> client

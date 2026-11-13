@@ -13,7 +13,7 @@ class KaraokeTest {
 
     @Test
     fun theGuestStreamWaitsJustLongEnoughForTheVoice() {
-        for (adjustMs in listOf(0L, 15L, 80L, 220L)) {
+        for (adjustMs in listOf(0L, 15L, 80L)) {
             val adjustUs = adjustMs * 1000
             val k = Karaoke.lookaheadFrames(adjustUs)
             // The frame sent now is k frames old. Its voice is sung from sungAt(ts) for 20 ms, and the
@@ -26,6 +26,15 @@ class KaraokeTest {
             assertTrue(voiceEnds > now - Karaoke.MIC_LATENCY_MS * 1000L - Proto.FRAME_US)
         }
         assertEquals(8, Karaoke.lookaheadFrames(0))
+    }
+
+    @Test
+    fun aLateDjPhoneNeverStallsTheParty() {
+        // The DJ phone on Bluetooth, or after a hiccup, can be seconds behind: the guests' stream
+        // still waits at most 300 ms (the newest voice goes out instead, a little off the beat).
+        assertEquals(Karaoke.MAX_LOOKAHEAD_FRAMES, Karaoke.lookaheadFrames(250_000))
+        assertEquals(Karaoke.MAX_LOOKAHEAD_FRAMES, Karaoke.lookaheadFrames(10_000_000))
+        assertTrue(Karaoke.MAX_LOOKAHEAD_FRAMES * Proto.FRAME_MS <= 300)
     }
 
     @Test
@@ -64,6 +73,51 @@ class KaraokeTest {
         // Long gone: overwritten by newer audio, so silence rather than the wrong voice.
         repeat(20) { tape.write(src, src.size) }
         assertEquals(0, tape.read(1_010_000, 480, out))
+    }
+
+    @Test
+    fun theVoiceFlowsSeamlesslyFrameAfterFrame() {
+        val tape = VoiceTape()
+        tape.anchor(0, 1_000_000)
+        val src = FloatArray(48_000) { it.toFloat() } // each sample holds its own index
+        tape.write(src, src.size)
+        val out = FloatArray(Proto.FRAME_SAMPLES)
+        var expected = 4_800f // 100 ms in
+        for (k in 0 until 10) {
+            assertEquals(Proto.FRAME_SAMPLES, tape.next(1_100_000L + k * Proto.FRAME_US, Proto.FRAME_SAMPLES, out))
+            for (v in out) {
+                assertEquals(expected, v)
+                expected++
+            }
+        }
+    }
+
+    @Test
+    fun theVoiceGetsThroughEvenIfTheTimestampsAreWrong() {
+        // A phone whose capture timestamps are nonsense: asking for "10 s from now" must still
+        // deliver the newest voice, continuously, rather than silence.
+        val tape = VoiceTape()
+        tape.anchor(0, 0)
+        val src = FloatArray(Proto.FRAME_SAMPLES) { 0.5f }
+        val out = FloatArray(Proto.FRAME_SAMPLES)
+        repeat(20) { k ->
+            tape.write(src, src.size)
+            assertEquals(Proto.FRAME_SAMPLES, tape.next(10_000_000L + k * Proto.FRAME_US, Proto.FRAME_SAMPLES, out))
+            assertTrue(out.all { it == 0.5f })
+        }
+        // ... and the same when nothing ties the samples to the clock at all.
+        val unanchored = VoiceTape()
+        unanchored.write(src, src.size)
+        assertEquals(Proto.FRAME_SAMPLES, unanchored.next(123, Proto.FRAME_SAMPLES, out))
+    }
+
+    @Test
+    fun guestsLearnTheDjIsOnTheMic() {
+        val b = WireParty.encodeNowPlaying(1, true, "Song", "Band", micOn = true)
+        assertEquals(0x03, b[8].toInt())
+        assertTrue(WireParty.decodeNowPlaying(b, b.size)!!.micOn)
+        val off = WireParty.encodeNowPlaying(1, true, "Song", "Band")
+        assertFalse(WireParty.decodeNowPlaying(off, off.size)!!.micOn)
     }
 
     @Test

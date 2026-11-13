@@ -55,6 +55,8 @@ data class ReceiverUiState(
     val video: VideoTimeline? = null,
     /** The DJ is singing or talking (karaoke): the video plays a little quieter. */
     val videoDuck: Boolean = false,
+    /** The DJ is talking or singing into the mic right now. */
+    val djOnMic: Boolean = false,
     /** DJ clock minus this phone's clock, µs. */
     val clockOffsetUs: Long = 0,
     /** This phone's own correction (slider + sound check), µs; positive plays later. */
@@ -106,6 +108,7 @@ class AndroidSyncReceiver(
     @Volatile private var songTitle = ""
     @Volatile private var songArtist = ""
     @Volatile private var songPlaying = false
+    @Volatile private var djOnMic = false
     @Volatile private var lastCheckId = -1
     @Volatile private var soundChecked = false
     @Volatile private var video: VideoTimeline? = null
@@ -247,6 +250,7 @@ class AndroidSyncReceiver(
                 songTitle = m.title
                 songArtist = m.artist
                 songPlaying = m.playing
+                djOnMic = m.micOn
             }
             Proto.TYPE_VIDEO -> {
                 val m = WireVideo.decode(buf, len) ?: return
@@ -399,6 +403,7 @@ class AndroidSyncReceiver(
                 soundCheckMs = playout.calibrationUs / 1000f,
                 video = video,
                 videoDuck = videoDuck,
+                djOnMic = djOnMic,
                 clockOffsetUs = clock.offsetUs,
                 correctionUs = playout.userOffsetMs * 1000L + playout.calibrationUs,
             ),
