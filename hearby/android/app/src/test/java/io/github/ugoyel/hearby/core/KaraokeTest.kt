@@ -121,6 +121,20 @@ class KaraokeTest {
     }
 
     @Test
+    fun theCompressorKeepsLoudAndSoftVoicesClose() {
+        fun level(amplitude: Double): Float {
+            val p = VoiceProcessor()
+            val block = FloatArray(24_000) { (amplitude * sin(2 * PI * 300 * it / 48_000)).toFloat() }
+            p.process(block, block.size)
+            return block.copyOfRange(12_000, 24_000).maxOf { abs(it) }
+        }
+        val soft = level(0.06) // talking
+        val loud = level(0.3) // shouting into the phone
+        assertTrue("soft $soft, loud $loud", loud / soft < 3.0f) // 5x in, much less than 5x out
+        assertTrue("loud $loud", loud < 1f)
+    }
+
+    @Test
     fun rumbleAndHandlingNoiseAreTakenOut() {
         val p = VoiceProcessor()
         val block = FloatArray(48_000) { 0.3f + (0.1 * sin(2 * PI * 440 * it / 48_000)).toFloat() } // DC offset + voice

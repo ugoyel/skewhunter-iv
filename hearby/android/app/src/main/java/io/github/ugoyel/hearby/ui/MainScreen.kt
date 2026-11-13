@@ -12,6 +12,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import android.os.SystemClock
 import androidx.compose.material.icons.rounded.MicNone
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.AutoAwesome
@@ -224,7 +231,7 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
         }
     }
     val karaokeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        micNotice = if (granted && PartyHostService.setMic(true)) {
+        micNotice = if (granted && PartyHostService.setMicOpen(true)) {
             null
         } else if (granted) {
             "Couldn't open the microphone. Is another app using it?"
@@ -264,16 +271,15 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
         else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 
-    fun micOn() {
-        micNotice = if (PartyHostService.setMic(true)) null else "Couldn't open the microphone. Is another app using it?"
-    }
-
-    fun toggleMic() {
-        when {
-            state.micOn -> PartyHostService.setMic(false)
-            context.hasPermission(Manifest.permission.RECORD_AUDIO) -> micOn()
-            else -> karaokeLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    /** The mic button went down: open the mic (asking for the microphone the first time). */
+    fun micDown(): Boolean {
+        if (!context.hasPermission(Manifest.permission.RECORD_AUDIO)) {
+            karaokeLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            return false
         }
+        val ok = PartyHostService.setMicOpen(true)
+        micNotice = if (ok) null else "Couldn't open the microphone. Is another app using it?"
+        return ok
     }
 
     if (state.running) {
@@ -292,7 +298,8 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
                 onToggleVideo = { PartyHostService.toggleVideo() },
                 onStopVideo = { PartyHostService.stopVideo() },
                 onUnmute = { PartyHostService.unmute() },
-                onMic = ::toggleMic,
+                onMicDown = ::micDown,
+                onMicUp = { PartyHostService.setMicOpen(false) },
                 onVideoTitle = { id, title -> PartyHostService.videoTitle(id, title) },
                 onVideoEnded = { PartyHostService.videoEnded(it) },
             ),
@@ -330,7 +337,8 @@ internal class DjActions(
     val onToggleVideo: () -> Unit = {},
     val onStopVideo: () -> Unit = {},
     val onUnmute: () -> Unit = {},
-    val onMic: () -> Unit = {},
+    val onMicDown: () -> Boolean = { false },
+    val onMicUp: () -> Unit = {},
     val onVideoTitle: (String, String) -> Unit = { _, _ -> },
     val onVideoEnded: (String) -> Unit = {},
 )
@@ -371,7 +379,7 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 PlayButton(video.playing, actions.onToggleVideo)
-                MicButton(state.micOn, state.micLevel, actions.onMic)
+                MicButton(state.micOn, state.micLevel, actions.onMicDown, actions.onMicUp)
                 GhostButton("Back to music", actions.onStopVideo, Modifier.weight(1f), icon = Icons.Rounded.LibraryMusic, height = 52.dp)
             }
         }
@@ -412,7 +420,7 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
                 Spacer(Modifier.width(22.dp))
                 RoundButton(Icons.Rounded.SkipNext, "Next", actions.onNext)
                 Spacer(Modifier.width(22.dp))
-                MicButton(state.micOn, state.micLevel, actions.onMic)
+                MicButton(state.micOn, state.micLevel, actions.onMicDown, actions.onMicUp)
             }
         } else {
             Spacer(Modifier.height(16.dp))
@@ -819,29 +827,56 @@ private fun PlayButton(playing: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** Karaoke: the DJ's mic. Lit and breathing with the voice while it's on. */
+/**
+ * The DJ's mic. Hold it to talk (push-to-talk: it closes when you let go), or tap it to keep it on
+ * (tap again to stop). Lit and breathing with the voice while it's open.
+ */
 @Composable
-private fun MicButton(on: Boolean, level: Float, onClick: () -> Unit) {
+private fun MicButton(on: Boolean, level: Float, onDown: () -> Boolean, onUp: () -> Unit) {
+    val isOpen by rememberUpdatedState(on)
+    val down by rememberUpdatedState(onDown)
+    val up by rememberUpdatedState(onUp)
     val ring = 1.dp + (6.dp * level.coerceIn(0f, 1f))
+    val label = if (on) "Mic on. Tap to turn it off" else "Mic: hold to talk to every phone, or tap to keep it on"
     Box(
         Modifier
             .size(52.dp)
             .then(if (on) Modifier.border(ring, Party.Coral.copy(alpha = 0.6f), CircleShape) else Modifier)
             .clip(CircleShape)
             .then(if (on) Modifier.background(Party.Stop) else Modifier.background(Party.Glass).border(1.dp, Party.GlassStroke, CircleShape))
-            .clickable(role = Role.Button, onClick = onClick),
+            .pointerInput(Unit) {
+                detectTapGestures(onPress = {
+                    val wasOpen = isOpen
+                    if (!wasOpen && !down()) return@detectTapGestures
+                    val pressedAt = SystemClock.uptimeMillis()
+                    tryAwaitRelease()
+                    // Held: push-to-talk, so it closes now. A quick tap keeps it on (tap again to stop).
+                    if (wasOpen || SystemClock.uptimeMillis() - pressedAt >= HOLD_TO_TALK_MS) up()
+                })
+            }
+            .semantics {
+                role = Role.Button
+                contentDescription = label
+                onClick(label) {
+                    if (isOpen) up() else down()
+                    true
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(if (on) Icons.Rounded.Mic else Icons.Rounded.MicNone, if (on) "Turn the mic off" else "Mic: sing or talk to every phone", tint = Color.White, modifier = Modifier.size(28.dp))
+        Icon(if (on) Icons.Rounded.Mic else Icons.Rounded.MicNone, null, tint = Color.White, modifier = Modifier.size(28.dp))
     }
 }
+
+/** Pressed longer than this, the mic button is push-to-talk; shorter, it's a tap that keeps it on. */
+private const val HOLD_TO_TALK_MS = 350L
 
 /** While the karaoke mic is on: what is happening, and how to hold the phone. */
 @Composable
 private fun MicNotice() {
     Notice(
-        "Mic on: your voice plays on every phone, on the beat, and the music dips. Hold this phone like a mic and " +
-            "sing along to it: it plays a moment ahead of the room, so the voice lands in time. Earphones on this phone work best.",
+        "Mic on: your voice is on every phone and the music dips. Holding the mic? Let go to stop. Tapped it? Tap " +
+            "again. Sing along to this phone: it plays a moment ahead of the room so your voice lands on the beat.",
         icon = Icons.Rounded.Mic,
     )
 }

@@ -178,8 +178,9 @@ numbers it needs come straight from the phones.
 
 ## Karaoke
 
-The DJ taps the mic button and sings or talks: every phone plays the voice, on the beat, over the
-music or the YouTube video, which dips smoothly (to about −7 dB) while the mic is on.
+The DJ holds the mic button and talks (push-to-talk: it closes on release), or taps it to keep it
+on for a song (tap again to stop). Every phone plays the voice, on the beat, over the music or the
+YouTube video, which dips smoothly (to about −7 dB) while the mic is open.
 
 Every guest plays the party a cushion (about a third of a second) after the DJ phone sends it,
 which is what keeps them together. A singer following the room would therefore always land that
@@ -193,8 +194,14 @@ much late. So while the mic is on:
 
 The DJ phone never plays its own voice back (no echo of yourself): it gets its own copy of the
 music, without the voice. The voice is cleaned up on the way (rumble filter, a noise gate so the
-room isn't sent back out between phrases, a soft limiter), and captured with Android's live
-performance microphone setting. Songs dip in the stream itself; for YouTube, every phone's player
+room isn't sent back out between phrases, a compressor that keeps it steady and up front like a DJ
+on a PA, a soft limiter), and captured with Android's live performance microphone setting. After
+the mic closes, the DJ phone stays ready (and a little ahead) for 30 seconds, so the next press
+doesn't make its playback jump; then it steps back in line with the room.
+
+Each phone's own YouTube player asks Android for the speaker like any media player; Hearby's stream
+(which carries the voice) ignores that and takes the speaker back after the video. Before 1.6.1 it
+went quiet instead, so in YouTube mode the voice didn't reach the other phones. Songs dip in the stream itself; for YouTube, every phone's player
 lowers its own volume, gliding over half a second. Browser guests get both.
 
 Limits: the mic works only while Hearby is on screen (it switches off when the DJ leaves the app).
@@ -326,8 +333,9 @@ are no package dependencies.
 
 The DJ phone plays along in sync, so there is no echo between it and the others.
 
-**Karaoke:** tap the mic next to the play button, hold the phone like a mic and sing along to it.
-Tap again to stop.
+**Karaoke and announcements:** hold the mic next to the play button and talk; let go to stop. For a
+whole song, tap it once to keep it on, hold the phone like a mic and sing along to it, and tap
+again at the end.
 
 **iPhones:** they join the DJ's Wi-Fi or hotspot, then scan the QR code in the DJ screen's *iPhone?*
 card and tap *Join the party* in Safari. Keep the page open with the screen on.

@@ -42,7 +42,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         // The karaoke mic is only ever on while Hearby is on screen.
-        PartyHostService.setMic(false)
+        PartyHostService.micOff()
     }
 
     override fun onNewIntent(intent: Intent) {

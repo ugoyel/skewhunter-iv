@@ -31,6 +31,10 @@ class KaraokeMic(private val context: Context) {
     @Volatile var level = 0f
         private set
 
+    /** The voice goes out only while open (push-to-talk); in between, the tape holds silence. */
+    @Volatile var open = false
+    private var openGain = 0f
+
     /** False if the microphone could not be opened (no permission, or busy). */
     fun start(): Boolean {
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return false
@@ -102,6 +106,12 @@ class KaraokeMic(private val context: Context) {
             val n = r.read(chunk, 0, CHUNK, AudioRecord.READ_BLOCKING)
             if (n <= 0) break
             processor.process(chunk, n)
+            // Opening and closing glide over 10 ms, so pressing the button never clicks.
+            val target = if (open) 1f else 0f
+            for (i in 0 until n) {
+                openGain += (target - openGain).coerceIn(-OPEN_STEP, OPEN_STEP)
+                chunk[i] *= openGain
+            }
             tape.write(chunk, n)
             // Tie samples to the clock the timeline uses: the recorder's own capture timestamps,
             // or (on phones without them) "the newest sample was captured just now".
@@ -120,5 +130,6 @@ class KaraokeMic(private val context: Context) {
     private companion object {
         const val TAG = "HearbyKaraoke"
         const val CHUNK = 480 // 10 ms
+        const val OPEN_STEP = 1f / 480
     }
 }

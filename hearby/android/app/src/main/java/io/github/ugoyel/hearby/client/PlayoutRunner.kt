@@ -73,6 +73,25 @@ class PlayoutRunner(
 
     /** Muted because another app took the sound (not because headphones were unplugged). */
     @Volatile private var mutedForOtherApp = false
+
+    /**
+     * Hearby's own YouTube player is on (YouTube mode). Its WebView asks Android for the speaker
+     * like any media player does; that is no reason for this stream to go quiet, since it carries
+     * the DJ's karaoke voice meanwhile. When the video goes away, the stream takes the speaker back.
+     */
+    @Volatile var ownVideoOn = false
+        set(value) {
+            val was = field
+            field = value
+            if (was && !value) mainHandler.post { if (running) reclaimAfterVideo() }
+        }
+
+    private fun reclaimAfterVideo() {
+        if (requestFocus() && mutedForOtherApp) {
+            mutedForOtherApp = false
+            muted = false
+        }
+    }
     @Volatile var routeName = ""
         private set
     @Volatile var routeIsBluetooth = false
@@ -384,8 +403,10 @@ class PlayoutRunner(
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
         when (change) {
             AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                mutedForOtherApp = true
-                muted = true
+                if (!ownVideoOn) { // our own YouTube player taking the speaker doesn't count
+                    mutedForOtherApp = true
+                    muted = true
+                }
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
                 mutedForOtherApp = false

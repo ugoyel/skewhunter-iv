@@ -90,8 +90,9 @@ class Ducker(private val sampleRate: Int = Proto.SAMPLE_RATE) {
 
 /**
  * Cleans up the microphone for the party: takes out rumble and handling noise (high-pass at 100 Hz),
- * keeps it quiet between phrases (a noise gate, so the room's own sound isn't sent back out), and
- * brings the voice up to a strong level.
+ * keeps it quiet between phrases (a noise gate, so the room's own sound isn't sent back out), brings
+ * the voice up, and evens it out with a compressor, so it sits steady and up front over the music
+ * like a DJ on a PA.
  */
 class VoiceProcessor(private val sampleRate: Int = Proto.SAMPLE_RATE) {
     private val hpA = exp(-2.0 * PI * HIGH_PASS_HZ / sampleRate).toFloat()
@@ -100,6 +101,7 @@ class VoiceProcessor(private val sampleRate: Int = Proto.SAMPLE_RATE) {
     private var envelope = 0f
     private var gate = 0f
     private var holdLeft = 0
+    private var compEnvelope = 0f
 
     /** True while the gate is open (someone is singing or talking). */
     val open: Boolean get() = gate > 0.5f
@@ -109,6 +111,8 @@ class VoiceProcessor(private val sampleRate: Int = Proto.SAMPLE_RATE) {
         val release = 1f - exp(-1.0 / (RELEASE_S * sampleRate)).toFloat()
         val envCoef = 1f - exp(-1.0 / (ENVELOPE_S * sampleRate)).toFloat()
         val holdFrames = (HOLD_S * sampleRate).toInt()
+        val compAttack = 1f - exp(-1.0 / (COMP_ATTACK_S * sampleRate)).toFloat()
+        val compRelease = 1f - exp(-1.0 / (COMP_RELEASE_S * sampleRate)).toFloat()
         for (i in 0 until frames) {
             // High-pass: y[n] = a * (y[n-1] + x[n] - x[n-1])
             val x = mono[i]
@@ -121,20 +125,30 @@ class VoiceProcessor(private val sampleRate: Int = Proto.SAMPLE_RATE) {
             if (loud) holdLeft = holdFrames else if (holdLeft > 0) holdLeft--
             val target = if (loud || holdLeft > 0) 1f else 0f
             gate += (target - gate) * if (target > gate) attack else release
-            mono[i] = hp * gate * GAIN
+            val y = hp * gate * GAIN
+            // Compressor: above the threshold, every 3 dB louder comes out only 1 dB louder.
+            val a = abs(y)
+            compEnvelope += (a - compEnvelope) * if (a > compEnvelope) compAttack else compRelease
+            val reduce = if (compEnvelope > COMP_THRESHOLD) (COMP_THRESHOLD + (compEnvelope - COMP_THRESHOLD) / COMP_RATIO) / compEnvelope else 1f
+            mono[i] = y * reduce * COMP_MAKEUP
         }
     }
 
     companion object {
         const val HIGH_PASS_HZ = 100.0
-        /** RMS above which the gate opens: about −42 dBFS, well above a quiet room's hiss. */
-        const val OPEN_LEVEL = 0.008f
+        /** RMS above which the gate opens: about −46 dBFS, above a quiet room's hiss, below talking at arm's length. */
+        const val OPEN_LEVEL = 0.005f
         const val ATTACK_S = 0.005f
         const val RELEASE_S = 0.15f
         const val HOLD_S = 0.2f
         const val ENVELOPE_S = 0.01f
         /** Phones' microphones are quiet at arm's length: +12 dB. */
         const val GAIN = 4f
+        const val COMP_THRESHOLD = 0.2f
+        const val COMP_RATIO = 3f
+        const val COMP_ATTACK_S = 0.003f
+        const val COMP_RELEASE_S = 0.12f
+        const val COMP_MAKEUP = 1.3f
     }
 }
 

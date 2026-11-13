@@ -232,6 +232,7 @@ class AndroidSyncReceiver(
                     lastCheckId = -1
                     soundChecked = false
                     video = null
+                    playout.ownVideoOn = false
                     playout.resetStream()
                 }
                 hostName = m.hostName.ifBlank { hostName }
@@ -252,6 +253,7 @@ class AndroidSyncReceiver(
                 if (m.streamId == streamId) {
                     video = m.timeline
                     videoDuck = m.duck
+                    playout.ownVideoOn = m.timeline != null
                 }
             }
             Proto.TYPE_CHIRP -> {
