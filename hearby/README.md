@@ -416,5 +416,7 @@ Play accepts new apps as an **App Bundle** (`.aab`), not an APK. Besides uploadi
   embedded player itself (its start and seek delays, how accurately it reports its position, which
   speeds it offers) has only been simulated. Try it on two or three real phones first.
 
-`.github/workflows/hearby.yml` runs the Android and iOS builds and tests on every change under
-`hearby/`.
+`.github/workflows/hearby.yml` runs the Android build and tests (and the guest page's Node tests) on
+every change under `hearby/`. `.github/workflows/hearby-ios.yml` runs the iOS build and tests when
+something under `hearby/ios/` changes, or when started by hand: macOS minutes count ten times on a
+private repository.

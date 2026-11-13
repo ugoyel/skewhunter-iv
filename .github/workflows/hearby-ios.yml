@@ -1,0 +1,66 @@
+name: Hearby iOS
+
+# Builds and tests the Hearby iPhone app. macOS runner minutes count ten times on private
+# repositories, so this runs only when the iPhone code (or this file) changes, or when started by
+# hand (Actions › Hearby iOS › Run workflow).
+on:
+  push:
+    paths:
+      - "hearby/ios/**"
+      - ".github/workflows/hearby-ios.yml"
+  pull_request:
+    paths:
+      - "hearby/ios/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hearby-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    name: iOS (core tests, simulator build, screenshots)
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: hearby/ios
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sync core unit tests (same vectors and simulations as Android)
+        run: swift test
+      - name: Build the app for the iOS Simulator
+        run: |
+          # Keep the log quiet on success, but always surface compiler errors on failure.
+          xcodebuild -project Hearby.xcodeproj -scheme Hearby -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build > xcodebuild.log 2>&1 \
+            || { grep -E "error:" xcodebuild.log | sort -u | head -40; tail -15 xcodebuild.log; exit 1; }
+          tail -3 xcodebuild.log
+      - name: Screenshots of every screen (demo data, in the simulator)
+        run: |
+          set -euo pipefail
+          APP=build/Build/Products/Debug-iphonesimulator/Hearby.app
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          devices = json.load(sys.stdin)['devices']
+          runtimes = sorted((k for k in devices if 'iOS' in k), reverse=True)
+          print(next(d['udid'] for k in runtimes for d in devices[k] if d['name'].startswith('iPhone')))")
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" "$APP"
+          mkdir -p screens
+          for screen in join playing syncing ended youtube; do
+            xcrun simctl launch "$UDID" io.github.ugoyel.hearby -demo "$screen"
+            sleep 8
+            xcrun simctl io "$UDID" screenshot "screens/ios_$screen.png"
+            xcrun simctl terminate "$UDID" io.github.ugoyel.hearby || true
+          done
+          sips -Z 1100 screens/*.png > /dev/null
+          ls -la screens
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hearby-ios-screens
+          path: hearby/ios/screens
+          if-no-files-found: error
