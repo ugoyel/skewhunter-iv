@@ -272,6 +272,7 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
                 onPlayVideo = { PartyHostService.playVideo(it) },
                 onToggleVideo = { PartyHostService.toggleVideo() },
                 onStopVideo = { PartyHostService.stopVideo() },
+                onUnmute = { PartyHostService.unmute() },
                 onVideoTitle = { id, title -> PartyHostService.videoTitle(id, title) },
                 onVideoEnded = { PartyHostService.videoEnded(it) },
             ),
@@ -310,6 +311,7 @@ internal class DjActions(
     val onPlayVideo: (String) -> Unit = {},
     val onToggleVideo: () -> Unit = {},
     val onStopVideo: () -> Unit = {},
+    val onUnmute: () -> Unit = {},
     val onVideoTitle: (String, String) -> Unit = { _, _ -> },
     val onVideoEnded: (String) -> Unit = {},
 )
@@ -428,6 +430,17 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
     state.songError?.let { Notice(it) }
     notice?.let { Notice(it) }
 
+    if (state.muted) {
+        Notice(
+            "Muted on this phone: another app took over the sound, or your headphones disconnected. " +
+                "Everyone else is still playing.",
+            icon = Icons.AutoMirrored.Rounded.VolumeOff,
+        ) {
+            Spacer(Modifier.height(10.dp))
+            GhostButton("Unmute", actions.onUnmute, height = 44.dp)
+        }
+    }
+
     if (state.queue.isNotEmpty()) Queue(state, actions)
 
     YouTubeCard(actions.onPlayVideo)
@@ -543,9 +556,16 @@ internal fun VideoCard(
             Spacer(Modifier.height(8.dp))
             Text(it, style = MaterialTheme.typography.bodyMedium, color = Party.Sun)
         }
+        Spacer(Modifier.height(8.dp))
+        Text(VIDEO_ON_SCREEN_HINT, style = MaterialTheme.typography.bodySmall, color = Party.InkSoft)
         controls()
     }
 }
+
+/** YouTube's rule, said once so nobody is surprised when a phone that leaves the app goes quiet. */
+private const val VIDEO_ON_SCREEN_HINT =
+    "YouTube plays only while Hearby is open, so this screen stays on. If you leave the app, only this " +
+        "phone pauses, and it catches up when you come back."
 
 /** What screenshots show instead of the live YouTube player. */
 @Composable

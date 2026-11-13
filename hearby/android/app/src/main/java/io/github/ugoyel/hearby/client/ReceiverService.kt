@@ -227,5 +227,10 @@ class ReceiverService : Service() {
         fun setMuted(muted: Boolean) {
             instance?.receiver?.setMuted(muted)
         }
+
+        /** Hearby is on screen again: take the sound back if another app had taken it. */
+        fun reclaimSound() {
+            instance?.receiver?.reclaimSound()
+        }
     }
 }

@@ -88,6 +88,9 @@ final class YouTubeWebPlayer: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func start() {
         guard timer == nil else { return }
+        // YouTube may only play while the player is on screen, and an iPhone lying on a table would
+        // lock itself and pause the video. So the screen stays on while the player shows.
+        UIApplication.shared.isIdleTimerDisabled = true
         startedAt = Date()
         let t = Timer(timeInterval: YouTubeWebPlayer.tickInterval, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
         RunLoop.main.add(t, forMode: .common) // keep steering while the page scrolls
@@ -95,6 +98,7 @@ final class YouTubeWebPlayer: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func release() {
+        UIApplication.shared.isIdleTimerDisabled = false
         timer?.invalidate()
         timer = nil
         scheduled.forEach { $0.invalidate() }

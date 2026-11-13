@@ -309,6 +309,8 @@ private struct VideoCard: View {
             if let error = notice.error {
                 Text(error).font(Party.font(15)).foregroundColor(Party.sun)
             }
+            Text("YouTube plays only while Hearby is open, so this screen stays on. If you leave the app, only this iPhone pauses, and it catches up when you come back.")
+                .font(Party.font(13)).foregroundColor(Party.inkSoft)
         }
     }
 

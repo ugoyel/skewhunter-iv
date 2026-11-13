@@ -248,7 +248,8 @@ The DJ phone plays along in sync, so there is no echo between it and the others.
 
 **YouTube:** on the DJ screen, paste a link into *Play from YouTube* and tap *Play*, or in the
 YouTube app tap *Share › Hearby*. Every phone with internet loads the video and they start together.
-The DJ can pause, resume, or go *Back to music*. Keep Hearby open on screen while the video plays.
+The DJ can pause, resume, or go *Back to music*. Keep Hearby open on screen while the video plays:
+the screen stays on by itself until the video ends.
 
 ## Limitations and edge cases
 
@@ -259,14 +260,21 @@ The DJ can pause, resume, or go *Back to music*. Keep Hearby open on screen whil
 - Streaming apps (Spotify, YouTube Music, Apple Music) are not sources: their songs are protected
   and only their own apps can play them. That is also why Hearby does not need screen capture.
 - Picking songs is per party; the queue is not saved yet.
+- Songs keep playing with the screen off or while you use other apps. If another app starts playing
+  sound, that phone goes quiet (the phone's own rule for sharing the speaker) while everyone else
+  keeps playing; coming back to Hearby brings the sound back, or tap *Unmute*. After headphones are
+  unplugged it stays muted until you tap *Unmute*, so it never blasts from the speaker by surprise.
 
 **YouTube mode**
 
 - Every phone needs internet. A phone that cannot reach YouTube says so; the others carry on.
 - Some videos cannot play in other apps (their owner turned off embedding, or they are age-
   restricted or private); every phone then shows why, and the DJ picks another one.
-- Playback runs only while Hearby is on screen with the player visible. Switching apps or locking
-  the phone pauses that phone; it rejoins the timeline when it comes back.
+- Playback runs only while Hearby is on screen with the player visible: YouTube's terms forbid
+  background play of its videos, and Google Play removes apps that allow it. So the screen stays on
+  while a video plays, and a phone that leaves the app (or is locked by hand) pauses on its own
+  while everyone else keeps going; it catches up when it comes back. Songs from the phone's own
+  files are not affected: they keep playing with the screen off or in another app.
 - Ads are YouTube's: a phone that gets one is late until the ad ends, then catches up.
 - Sync is looser than with music files (see [YouTube mode](#youtube-mode)), and it depends on each
   player reporting its position accurately, which has not been measured on real phones yet.

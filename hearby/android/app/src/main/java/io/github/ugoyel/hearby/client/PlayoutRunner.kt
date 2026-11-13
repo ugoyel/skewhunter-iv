@@ -70,6 +70,9 @@ class PlayoutRunner(
         private set
     @Volatile var muted = false
         private set
+
+    /** Muted because another app took the sound (not because headphones were unplugged). */
+    @Volatile private var mutedForOtherApp = false
     @Volatile var routeName = ""
         private set
     @Volatile var routeIsBluetooth = false
@@ -122,8 +125,17 @@ class PlayoutRunner(
     }
 
     fun setMuted(mute: Boolean) {
-        if (!mute) requestFocus()
+        if (!mute && !requestFocus()) return // e.g. during a phone call: stay quiet
+        mutedForOtherApp = false
         muted = mute
+    }
+
+    /**
+     * The user came back to Hearby: if another app had taken the sound, take it back. Not after
+     * headphones were unplugged, so the phone never suddenly blasts the party from its speaker.
+     */
+    fun reclaimSound() {
+        if (running && muted && mutedForOtherApp) setMuted(false)
     }
 
     /** Play the sound-check chirp at this point of the shared timeline. */
@@ -371,12 +383,18 @@ class PlayoutRunner(
 
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
         when (change) {
-            AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> muted = true
-            AudioManager.AUDIOFOCUS_GAIN -> muted = false
+            AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                mutedForOtherApp = true
+                muted = true
+            }
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                mutedForOtherApp = false
+                muted = false
+            }
         }
     }
 
-    private fun requestFocus() {
+    private fun requestFocus(): Boolean {
         val request = focusRequest ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -387,12 +405,13 @@ class PlayoutRunner(
             .setOnAudioFocusChangeListener(focusListener, mainHandler)
             .build()
             .also { focusRequest = it }
-        audioManager.requestAudioFocus(request)
+        return audioManager.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
     }
 
     /** Headphones unplugged / Bluetooth dropped: do not suddenly blast from the speaker. */
     private val noisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            mutedForOtherApp = false
             muted = true
         }
     }

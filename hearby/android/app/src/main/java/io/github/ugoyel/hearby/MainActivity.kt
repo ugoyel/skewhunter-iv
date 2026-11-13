@@ -10,6 +10,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.content.IntentCompat
+import io.github.ugoyel.hearby.client.ReceiverService
 import io.github.ugoyel.hearby.core.YouTubeLinks
 import io.github.ugoyel.hearby.host.PartyHostService
 import io.github.ugoyel.hearby.ui.HearbyTheme
@@ -29,6 +30,13 @@ class MainActivity : ComponentActivity() {
                 MainScreen()
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Back in Hearby after another app took over the sound: the party's sound comes back.
+        PartyHostService.reclaimSound()
+        ReceiverService.reclaimSound()
     }
 
     override fun onNewIntent(intent: Intent) {

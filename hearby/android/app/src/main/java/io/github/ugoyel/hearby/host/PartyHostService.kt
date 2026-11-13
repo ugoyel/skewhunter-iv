@@ -95,6 +95,8 @@ data class HostUiState(
     val video: VideoTimeline? = null,
     /** This phone's own correction (slider + sound check), µs, applied to its video player too. */
     val correctionUs: Long = 0,
+    /** This phone went quiet: another app took the sound, or its headphones were unplugged. */
+    val muted: Boolean = false,
 )
 
 /**
@@ -543,6 +545,7 @@ class PartyHostService : Service() {
                     soundCheck = soundCheck,
                     video = v,
                     correctionUs = local.userOffsetMs * 1000L + local.calibrationUs,
+                    muted = local.muted,
                 )
             }
             val note = snapshot.size to (if (music.playing) song?.title.orEmpty() else "")
@@ -584,6 +587,10 @@ class PartyHostService : Service() {
         }
 
         @Synchronized
+        fun unmute() = local.setMuted(false)
+
+        fun reclaimSound() = local.reclaimSound()
+
         fun stopVideo() {
             if (video == null) return
             videoVersion++
@@ -807,6 +814,12 @@ class PartyHostService : Service() {
         fun toggleVideo() = instance?.session?.toggleVideo()
 
         fun stopVideo() = instance?.session?.stopVideo()
+
+        /** Unmute the DJ phone's own speaker (the party never stopped for everyone else). */
+        fun unmute() = instance?.session?.unmute()
+
+        /** Hearby is on screen again: take the sound back if another app had taken it. */
+        fun reclaimSound() = instance?.session?.reclaimSound()
 
         fun videoTitle(videoId: String, title: String) = instance?.session?.videoTitle(videoId, title)
 

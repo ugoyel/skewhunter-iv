@@ -49,7 +49,12 @@ class YouTubeWebPlayer(context: Context) {
     private val appContext = context.applicationContext
 
     /** What goes on screen. The WebView inside is replaced if its renderer process dies. */
-    val container = FrameLayout(appContext).apply { setBackgroundColor(Color.BLACK) }
+    val container = FrameLayout(appContext).apply {
+        setBackgroundColor(Color.BLACK)
+        // YouTube may only play while the player is on screen, and a phone lying on a table would
+        // lock itself after a minute and pause the video. So the screen stays on while it shows.
+        keepScreenOn = true
+    }
     private var webView: WebView? = null
     private val handler = Handler(Looper.getMainLooper())
     private var controller = VideoSyncController()

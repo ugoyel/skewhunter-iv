@@ -507,6 +507,12 @@ private final class ListenSession {
             try? AVAudioSession.sharedInstance().setActive(true)
             self?.restartAudioEngine()
         })
+        observers.append(center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            // Back in Hearby after another app took the sound (and may never hand it back): take it back.
+            guard let self, self.pumpRunning.isSet, !self.audioEngine.isRunning else { return }
+            try? AVAudioSession.sharedInstance().setActive(true)
+            self.restartAudioEngine()
+        })
         observers.append(center.addObserver(forName: .AVAudioEngineConfigurationChange, object: audioEngine, queue: .main) { [weak self] _ in
             // The output hardware changed (e.g. AirPods connected); the engine stops itself.
             self?.restartAudioEngine()

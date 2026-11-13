@@ -143,6 +143,8 @@ class AndroidSyncReceiver(
 
     fun setMuted(mute: Boolean) = playout.setMuted(mute)
 
+    fun reclaimSound() = playout.reclaimSound()
+
     // ---- network: receive -------------------------------------------------------------------------
 
     private fun receiveLoop() {
