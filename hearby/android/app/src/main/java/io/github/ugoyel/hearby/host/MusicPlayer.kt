@@ -66,6 +66,10 @@ class MusicPlayer(context: Context) {
     /** Silences the music without changing what is queued or playing (used by the sound check). */
     @Volatile var hold = false
 
+    /** Asked when a song ends: how many silent 20 ms frames to leave before the next one (usually 0). */
+    @Volatile var gapBetweenSongs: () -> Int = { 0 }
+    private var gapFrames = 0 // sending thread only
+
     /** Resolve titles in the background, then append. Starts playing if nothing was queued. */
     fun addUris(uris: List<Uri>) {
         loader.execute {
@@ -181,6 +185,10 @@ class MusicPlayer(context: Context) {
         val (isPlaying, gen) = synchronized(lock) { playing to wanted }
         val d = decoder
         java.util.Arrays.fill(out, 0f)
+        if (gapFrames > 0) {
+            gapFrames--
+            return false
+        }
         if (!isPlaying || hold || d == null || decoderGeneration != gen) return false
         val n = try {
             d.read(out, Proto.FRAME_SAMPLES)
@@ -195,6 +203,7 @@ class MusicPlayer(context: Context) {
                 if (n < 0) error = "Couldn't play \"${queue.getOrNull(index)?.title}\". Skipping it."
                 if (wanted == gen) advanceLocked(afterFailure = n < 0)
             }
+            gapFrames = gapBetweenSongs()
         }
         return n > 0
     }

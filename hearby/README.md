@@ -10,8 +10,10 @@ app to Hearby, and every phone plays that video itself, over the internet, in Yo
 embedded player. Hearby keeps the players on one shared timeline: they start together, pause and
 resume together, and stay in time while they play. See [YouTube mode](#youtube-mode).
 
-A **sound check** then lines every phone up to within about a millisecond: each phone beeps in turn
-and the DJ phone's microphone times the beeps.
+There is nothing to set up: sound quality and timing tune themselves while the party runs (see
+[Automatic tuning](#automatic-tuning)). When someone listens on Bluetooth or in a browser, the DJ
+screen offers a **sound check** that lines every phone up to within about a millisecond: each
+phone beeps in turn and the DJ phone's microphone times the beeps.
 
 | | DJ (plays the music) | Guest (plays along) |
 |---|---|---|
@@ -133,7 +135,8 @@ every run. The images above come from those renders.
    good frame, so loss sounds like a tiny dip, not a click.
 7. **Honest fallback.** If a phone cannot meet the delay (for example a Bluetooth speaker with more
    latency than the cushion allows), it plays later by exactly what is missing, shows that number,
-   and reclaims it automatically when headroom returns. The sound check says so too.
+   and reclaims it automatically when headroom returns. The DJ phone sees it and raises the cushion
+   for everyone (see below), so the phone catches up.
 8. **The manual slider.** Still there (−500 … +500 ms, remembered per output device) for anyone
    who wants to fine-tune by ear or cannot run a sound check.
 
@@ -147,6 +150,31 @@ up to 6 ms apart depending on where they stand. No system can make that 0. What 
 is when each phone *emits* the sound, and that is what the sound check aligns: in the simulation
 below, a phone whose speaker is secretly 8 ms late and a Bluetooth speaker that is 148 ms late both
 end up within 0.3 ms of the DJ. For the check itself, hold the phones together, near the DJ phone.
+
+## Automatic tuning
+
+Two settings decide how a party sounds, and Hearby sets both itself (`core/AutoTuner.kt`):
+
+- **Sync cushion** (how far ahead every phone plans playback). Every guest reports, once a second,
+  how much audio it has in hand beyond what it is playing, and whether it had to fall behind. If
+  anyone is behind or nearly out, the cushion grows a step; after a calm minute with plenty to
+  spare everywhere it shrinks, so pause, skip and YouTube stay responsive. In simulation, a
+  Bluetooth speaker on shaky Wi-Fi took it from 350 to 450 ms and nobody fell behind again; an
+  easy crowd took it from 700 down to 200 ms; over 30 minutes it changed once, not back and forth.
+- **Sound quality** (the Opus bitrate). The best the network carries: 128 kbps, stepping down to 96
+  or 64 when a guest loses audio and back up after two clean minutes. Over 12 app guests it stays at
+  96, over 20 at 64, so a phone hotspot isn't swamped. (Browsers get their own stream.)
+
+Every phone switches a moment apart, so changes are made only when nothing is playing: while
+paused, during YouTube, or in a 1.5 s gap Hearby leaves between songs when a change is waiting.
+What worked is remembered, and the next party starts from it.
+
+Guests running an older version of the app send neither their Bluetooth state nor their losses;
+the cushion still adapts to them, the quality just can't see their losses.
+
+This is ordinary measurement and control, not a language model: it has to decide many times a
+minute, offline (a party on a hotspot has no internet), with nothing to pay per decision, and the
+numbers it needs come straight from the phones.
 
 ## YouTube mode
 
@@ -260,13 +288,14 @@ are no package dependencies.
 ## Using it
 
 1. **DJ:** open Hearby › *Be the DJ* › *Start the party*, then *Add songs* and pick songs saved on
-   the phone. Play, pause and skip from the DJ screen.
+   the phone. Play, pause and skip from the DJ screen. There is nothing else to set.
 2. **Guests:** join the same Wi-Fi as the DJ, or the DJ's hotspot. Open Hearby › *Join a party* and
    tap the DJ. If it does not appear, type the address shown on the DJ's screen.
-3. **Sound check** (DJ screen, once everyone shows *In sync*): gather the phones near the DJ phone,
-   turn their media volume up, and tap *Run sound check*. Allow the microphone when asked. Music
-   pauses for a few seconds while each phone beeps; then every phone shows how far off it was.
-   Run it again whenever someone switches to Bluetooth.
+3. **Sound check** (offered on the DJ screen when someone listens on Bluetooth or in a browser):
+   gather the phones near the DJ phone, turn their media volume up, and tap it. Allow the
+   microphone when asked. Music (or the video) pauses for a few seconds while each phone beeps;
+   then every phone shows how far off it was. Phone speakers are within a few ms of each other
+   anyway, so without Bluetooth or browsers there is nothing to check.
 
 The DJ phone plays along in sync, so there is no echo between it and the others.
 
@@ -329,9 +358,9 @@ the screen stays on by itself until the video ends.
   DJ phone, and audible volume. A phone it cannot hear is reported, and keeps its old setting.
 - The microphone is used only during the sound check, only on the DJ phone, and only while the app
   is on screen. Nothing is recorded to storage or sent anywhere.
-- A phone whose total latency exceeds the playout delay plays late by the shown amount. Pick the
-  *Bluetooth* (700 ms) cushion when guests use Bluetooth speakers. AirPlay adds about two seconds
-  and will not fit any cushion.
+- A phone whose total latency exceeds the cushion plays late by the shown amount until the DJ phone
+  raises the cushion at the next quiet moment (up to 1.5 s). AirPlay adds about two seconds and
+  will not fit.
 
 **Network**
 
@@ -397,6 +426,7 @@ Play accepts new apps as an **App Bundle** (`.aab`), not an APK. Besides uploadi
 | Safari guest page: end to end | The real DJ-side server (`WebGuestsLiveTest`) and the real page in headless Chromium: join, clock sync, 45 s of streamed audio, a sound-check chirp and correction, then a YouTube timeline on a stand-in player with variable start and seek delays and standard speed steps | Synced in 1 s; audio within 0.11 ms of target with no gaps or late frames; video within 0.13 ms; no page errors |
 | DJ-side web server | JVM tests over real sockets: page, 404s, WebSocket handshake (RFC 6455 vector), masked and fragmented frames, clock-sync replies, audio frames, stats, sound-check messages, a full party, goodbye | Pass |
 | QR code | The DJ screen's QR code decoded from the rendered screenshot | `http://192.168.43.1:47801` |
+| Automatic tuning | Simulated parties (phone speakers, a Bluetooth speaker, Wi-Fi hiccups, changes only at song gaps), loss-driven quality steps, crowd caps, sound-check suggestions, SYNC_REQ flags on Kotlin and Swift | Nobody behind after settling; settles in one change; easy crowds come down to 200 ms |
 | YouTube links | Watch, share (`youtu.be`), Shorts, live, embed, YouTube Music and mobile links, with or without surrounding text, on both platforms | Pass |
 | DJ on an Android 14 emulator | Release APK 1.2.0: party starts as a plain `mediaPlayback` service (no screen-capture prompt); a 44.1 kHz MP3 opened with Hearby was decoded, resampled and played, with its title and artist; a Python guest received the Opus stream with no loss plus "now playing", pause and resume; the sound check sent the guest its chirp request and reported that it could not hear itself (the emulator has no speaker-to-microphone path) | Pass |
 

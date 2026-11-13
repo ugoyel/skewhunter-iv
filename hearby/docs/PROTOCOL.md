@@ -117,13 +117,19 @@ that hears nothing for 4 s goes back to sending JOIN).
                      1 buffering            34  u16  reserved (0)
                      2 in sync
                      3 playing late
- 23  u8   reserved (0)
+ 23  u8   flags      bit 0: plays through Bluetooth
+                     bits 1-7: audio lost recently, % (0-100)
  24  i32  adjustUs   everything the listener adds to playoutDelayMs:
                      slider + sound-check correction + fallback (signed)
 ```
 
 Hosts also accept the original 24-byte SYNC_REQ without `adjustUs` (treated as 0). The host uses
-`adjustUs` only to know where to listen for a phone's chirp during a sound check.
+`adjustUs` only to know where to listen for a phone's chirp during a sound check, and `bufferMs`,
+`status` and `flags` to tune the cushion and bitrate (older listeners send 0 flags).
+
+`playoutDelayMs` in SYNC_RESP can change during a session: the host tunes it, but only while it is
+sending silence (paused, YouTube, or a 1.5 s gap between songs), so every listener has its next
+SYNC_RESP before the music resumes. The Opus bitrate can change at the same moments.
 
 With `t3` = the listener's receive time:
 
@@ -234,8 +240,8 @@ host's clock (`r`, `s`, `anchor`, `media`) or the browser's (`c`, `performance.n
 | guest → host | `{"t":"hello","name":"<name>"}` when the guest joins (it is not counted before) |
 | guest → host | `{"t":"sync","c":<t0>}`: clock sync, a burst of 12 then once a second |
 | host → guest | `{"t":"sync","c":<t0 echoed>,"r":<t1>,"s":<t2>}`, sent ahead of any queued audio |
-| host → guest | `{"t":"state","title":..,"artist":..,"playing":<bool>,"video":null \| {"id","title","playing","anchor","pos","v"}}` on join and on every change; `video` is the VIDEO timeline |
-| guest → host | `{"t":"stat","buf":<ms scheduled>,"st":<status as in SYNC_REQ>,"adj":<adjustments µs>,"rtt":<µs>}` once a second |
+| host → guest | `{"t":"state","title":..,"artist":..,"playing":<bool>,"delay":<playout delay ms>,"video":null \| {"id","title","playing","anchor","pos","v"}}` on join and on every change; `video` is the VIDEO timeline, `delay` follows the host's tuning |
+| guest → host | `{"t":"stat","buf":<ms scheduled, -1 while no audio is coming>,"st":<status as in SYNC_REQ>,"adj":<adjustments µs>,"rtt":<µs>}` once a second |
 | host → guest | `{"t":"chirp","media":<mediaTimeUs>,"check":<id>}` and `{"t":"offset","adjust":<µs>,"check":<id>,"err":<µs>}`: the sound check, as CHIRP and OFFSET |
 | host → guest | `{"t":"bye","msg":".."}` when the party ends, `{"t":"full"}` when 16 browsers are already in |
 | guest → host | `{"t":"leave"}` |

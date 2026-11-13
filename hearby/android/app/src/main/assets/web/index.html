@@ -237,6 +237,7 @@
   let chirpBuffer = null;
   let level = 0, lastAudioMs = 0;
 
+  const WARMUP_S = 1.5;
   const delayUs = () => (hello ? hello.delay : 350) * 1000;
   const correctionUs = () => userOffsetMs * 1000 + calibrationUs;
 
@@ -285,6 +286,12 @@
       }
       case 'state':
         party = m;
+        // The DJ's phone tunes the cushion by itself; follow it (it changes only in a quiet moment).
+        if (hello && typeof m.delay === 'number' && m.delay !== hello.delay) {
+          hello.delay = m.delay;
+          lateBiasUs = 0;
+          sched.reset();
+        }
         render();
         break;
       case 'sync': {
@@ -340,7 +347,9 @@
     statTimer = setInterval(() => {
       if (!joined) return;
       const st = !clock.synced ? 1 : lateBiasUs > 0 ? 3 : 2;
-      const buf = ctx ? Math.round(sched.bufferedS(ctx.currentTime) * 1000) : 0;
+      // How much audio is lined up ahead; -1 while none is coming (paused, YouTube), so the DJ's
+      // phone doesn't mistake silence for a phone that can't keep up.
+      const buf = ctx && performance.now() - lastAudioMs < 2000 ? Math.round(sched.bufferedS(ctx.currentTime) * 1000) : -1;
       send({ t: 'stat', buf, st, adj: correctionUs() + lateBiasUs, rtt: clock.rttUs });
       render();
     }, 1000);
@@ -407,6 +416,9 @@
     const m = H.parseAudio(data);
     if (!m) return;
     readOutputClock();
+    // A new audio device's timestamps wander for a moment: let them settle before the first note,
+    // rather than start and then hop.
+    if (ctx.currentTime < WARMUP_S) return;
     const want = contextTimeForHost(m.ts + delayUs() + correctionUs() + lateBiasUs);
     const placed = sched.place(m.seq, want, ctx.currentTime, outClock.drift);
     if (placed.late !== undefined) {
@@ -575,8 +587,8 @@
     }
     $('resumeNotice').hidden = !ctx || ctx.state === 'running';
     $('lateNotice').hidden = lateBiasUs === 0;
-    $('lateText').textContent = 'This phone needs more runway than the DJ\'s ' + ((hello && hello.delay) || 350) +
-      ' ms sync cushion, so it plays ' + Math.round(lateBiasUs / 1000) + ' ms behind the crowd. Ask the DJ for a bigger cushion.';
+    $('lateText').textContent = 'This phone needs more time than the party\'s ' + ((hello && hello.delay) || 350) +
+      ' ms cushion, so it plays ' + Math.round(lateBiasUs / 1000) + ' ms behind the crowd. The DJ\'s phone is making room; it catches up at the next break.';
     $('msgNotice').hidden = !message;
     $('msgText').textContent = message || '';
     $('offsetLabel').textContent = (userOffsetMs > 0 ? '+' : '') + userOffsetMs + ' ms';
@@ -665,7 +677,7 @@
 
   // For tests and debugging (Hearby's own page; nothing is sent anywhere).
   window.__hearby = { clock, sched, outClock, get ctx() { return ctx; }, get party() { return party; }, get lateBiasUs() { return lateBiasUs; },
-    get calibrationUs() { return calibrationUs; }, get joined() { return joined; }, yt };
+    get calibrationUs() { return calibrationUs; }, get joined() { return joined; }, get delayMs() { return hello && hello.delay; }, yt };
 })();
 </script>
 </body>

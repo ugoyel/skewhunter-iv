@@ -74,6 +74,15 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(Wire.decodeChirp(b), ChirpMsg(streamId: 0x0A0B_0C0D, clientId: 0xDEAD_BEEF, mediaTimeUs: 0x0000_0001_0203_0405, checkId: 7))
     }
 
+    func testSyncRequestFlags() {
+        let flags = Wire.syncFlags(bluetooth: true, lossPercent: 3.4)
+        XCTAssertEqual(flags, 0x07)
+        let m = Wire.decodeSyncReq(Wire.encodeSyncReq(clientId: 1, t0Us: 2, rttUs: 3, bufferMs: 4, status: Proto.statusSynced, flags: flags))
+        XCTAssertEqual(m?.bluetooth, true)
+        XCTAssertEqual(m?.lossPercent, 3)
+        XCTAssertEqual(Wire.syncFlags(bluetooth: false, lossPercent: 250), 200)
+    }
+
     func testVideo() {
         let t = VideoTimeline(videoId: "dQw4w9WgXcQ", title: "Hit", playing: true, anchorHostUs: 0x0000_0001_0203_0405, positionUs: -2_000_000, version: 3)
         let b = Wire.encodeVideo(streamId: 0x0A0B_0C0D, timeline: t)

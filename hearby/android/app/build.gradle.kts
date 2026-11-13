@@ -26,8 +26,8 @@ android {
         applicationId = "io.github.ugoyel.hearby"
         minSdk = 29          // AudioPlaybackCapture + MediaCodec Opus encoder both arrived in Android 10
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.4.0"
+        versionCode = 7
+        versionName = "1.5.0"
     }
 
     signingConfigs {

@@ -725,10 +725,14 @@ private final class ListenSession {
                 let snap = engine.snapshot()
                 let state: UInt8 = snap.state != .playing ? Proto.statusBuffering
                     : (snap.lateBiasMs > 0 ? Proto.statusLate : Proto.statusSynced)
+                stateLock.lock()
+                let bluetooth = routeIsBluetooth
+                stateLock.unlock()
                 send(Wire.encodeSyncReq(
                     clientId: clientId, t0Us: UInt64(HostClock.nowNs() / 1000),
                     rttUs: UInt32(clamping: clock.rttUs), bufferMs: UInt16(clamping: snap.cushionMs), status: state,
-                    adjustUs: Int32(clamping: snap.adjustUs)))
+                    adjustUs: Int32(clamping: snap.adjustUs),
+                    flags: Wire.syncFlags(bluetooth: bluetooth, lossPercent: lossPercent))) // for the DJ phone's auto-tuning
             }
             if now - lastPacketNs > ListenSession.hostTimeoutNs {
                 joined = false // host went quiet: fall back to knocking until it answers again

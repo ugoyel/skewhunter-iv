@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material.icons.rounded.AutoAwesome
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.WriterException
@@ -125,19 +126,6 @@ import kotlin.math.roundToInt
 
 // ---- options ----------------------------------------------------------------------------------------
 
-private class Quality(val bitrate: Int, val name: String)
-
-private class Cushion(val delayMs: Int, val name: String, val blurb: String)
-
-private val QUALITIES = listOf(Quality(64_000, "Lite"), Quality(96_000, "Crisp"), Quality(128_000, "Studio"))
-
-private val CUSHIONS = listOf(
-    Cushion(200, "Snappy", "Closest to the video on this screen. Best when everyone is on phone speakers or wired."),
-    Cushion(350, "Balanced", "The sweet spot for most parties."),
-    Cushion(700, "Bluetooth", "Extra room for Bluetooth earbuds and speakers."),
-    Cushion(1200, "Bulletproof", "For shaky Wi-Fi or a room full of Bluetooth."),
-)
-
 private val MODES = listOf("Be the DJ" to Icons.Rounded.GraphicEq, "Join a party" to Icons.Rounded.Celebration)
 
 // ---- screen (wires the UI to the two services) ----------------------------------------------------------
@@ -210,8 +198,6 @@ internal fun PartyScaffold(
 @Composable
 private fun HostPane(state: HostUiState, listening: Boolean) {
     val context = LocalContext.current
-    var bitrate by rememberSaveable { mutableIntStateOf(96_000) }
-    var delayMs by rememberSaveable { mutableIntStateOf(350) }
     var micNotice by rememberSaveable { mutableStateOf<String?>(null) }
     var pickerMissing by rememberSaveable { mutableStateOf(false) }
     val waitingSongs by PartyHostService.pendingSongs.collectAsStateWithLifecycle()
@@ -219,7 +205,7 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
 
     // Only for the "you're the DJ" notification; the party starts either way.
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        PartyHostService.start(context, bitrate, delayMs)
+        PartyHostService.start(context)
     }
     // Songs come from the system file picker, which grants access to exactly the files chosen:
     // no storage permission needed.
@@ -250,7 +236,7 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !context.hasPermission(Manifest.permission.POST_NOTIFICATIONS)) {
             notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
-            PartyHostService.start(context, bitrate, delayMs)
+            PartyHostService.start(context)
         }
     }
 
@@ -295,8 +281,6 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
         )
     } else {
         HostIdle(
-            bitrate = bitrate, onBitrate = { bitrate = it },
-            delayMs = delayMs, onDelay = { delayMs = it },
             notice = state.message ?: when {
                 waitingVideo != null -> "A YouTube video is ready. Start the party to play it on every phone."
                 waitingSongs == 1 -> "1 song is ready. Start the party to play it."
@@ -328,10 +312,6 @@ internal class DjActions(
 
 @Composable
 internal fun HostIdle(
-    bitrate: Int,
-    onBitrate: (Int) -> Unit,
-    delayMs: Int,
-    onDelay: (Int) -> Unit,
     notice: String?,
     busyListening: Boolean,
     onStart: () -> Unit,
@@ -339,30 +319,11 @@ internal fun HostIdle(
     Hero(
         icon = Icons.Rounded.Speaker, active = false,
         title = "Be the DJ",
-        body = "Play songs from this phone. Every phone at the party plays them at the same moment, this one included. No internet needed.",
+        body = "Play songs from this phone or a YouTube video. Every phone at the party plays them at the same moment, " +
+            "this one included. Sound quality and timing tune themselves.",
     )
 
     notice?.let { Notice(it) }
-
-    GlassCard {
-        SectionTitle("Sound quality", "Lite goes easy on a busy hotspot. Studio sounds best.")
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            for (q in QUALITIES) {
-                ChoiceTile(q.name, "${q.bitrate / 1000} kbps", bitrate == q.bitrate, { onBitrate(q.bitrate) }, Modifier.weight(1f))
-            }
-        }
-    }
-
-    GlassCard {
-        SectionTitle("Sync cushion", CUSHIONS.firstOrNull { it.delayMs == delayMs }?.blurb ?: "How far ahead Hearby plans the music.")
-        for (row in CUSHIONS.chunked(2)) {
-            Row(Modifier.padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                for (c in row) {
-                    ChoiceTile(c.name, "${c.delayMs} ms", delayMs == c.delayMs, { onDelay(c.delayMs) }, Modifier.weight(1f))
-                }
-            }
-        }
-    }
 
     GradientButton("Start the party", onStart, Modifier.fillMaxWidth(), icon = Icons.Rounded.Celebration, enabled = !busyListening)
     if (busyListening) {
@@ -432,8 +393,7 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
             for (address in state.addresses) {
                 InfoPill(if (state.port == Proto.PORT) address else "$address:${state.port}", Icons.Rounded.Wifi)
             }
-            InfoPill("${state.bitrate / 1000} kbps")
-            InfoPill("${state.playoutDelayMs} ms cushion")
+            InfoPill("Auto · ${state.bitrate / 1000} kbps · ${state.playoutDelayMs} ms", Icons.Rounded.AutoAwesome)
             if (state.outputIsBluetooth) InfoPill(state.outputName.removePrefix("Bluetooth: "), Icons.Rounded.Bluetooth)
         }
     }
@@ -456,7 +416,9 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
 
     YouTubeCard(actions.onPlayVideo)
 
-    SoundCheckCard(state, actions.onSoundCheck, micNotice)
+    if (state.suggestSoundCheck || state.soundCheck.running || state.soundCheck.message != null) {
+        SoundCheckCard(state, actions.onSoundCheck, micNotice)
+    }
 
     if (state.webUrls.isNotEmpty()) IPhoneCard(state.webUrls)
     Crowd(state.listeners)
@@ -653,8 +615,9 @@ private fun SoundCheckCard(state: HostUiState, onRun: () -> Unit, micNotice: Str
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            "Lines every phone up to the millisecond, Bluetooth speakers included. Gather the phones near this one, " +
-                "turn their volume up, and Hearby beeps each one in turn while this phone listens.",
+            "Someone is on Bluetooth or in a browser, which adds a delay only a sound check can measure. Gather the " +
+                "phones near this one with their volume up: each beeps in turn, about 10 seconds, and they line up to " +
+                "the millisecond.",
             style = MaterialTheme.typography.bodyMedium, color = Party.InkSoft,
         )
         Spacer(Modifier.height(12.dp))
@@ -726,7 +689,7 @@ private fun Crowd(listeners: List<ListenerInfo>) {
                         )
                         Spacer(Modifier.width(4.dp))
                         val detail = l.check?.takeIf { it.heard }?.let { "was ${signed1(it.beforeMs)} ms off, fixed" }
-                            ?: "${fmt1(l.rttMs)} ms ping · ${l.bufferMs} ms buffered"
+                            ?: if (l.bufferMs >= 0) "${fmt1(l.rttMs)} ms ping · ${l.bufferMs} ms buffered" else "${fmt1(l.rttMs)} ms ping"
                         Text(detail, style = MaterialTheme.typography.bodySmall, color = Party.InkSoft, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
@@ -1034,8 +997,8 @@ internal fun Listening(
     }
     if (state.lateBiasMs > 0 && playing) {
         Notice(
-            "This phone needs more runway than the DJ's ${state.playoutDelayMs} ms sync cushion, so it's " +
-                "${state.lateBiasMs} ms behind the crowd. Ask the DJ for a bigger cushion" +
+            "This phone needs more time than the party's ${state.playoutDelayMs} ms cushion, so it's " +
+                "${state.lateBiasMs} ms behind the crowd. The DJ's phone is making room; it catches up at the next break" +
                 if (state.offsetMs < 0) ", or slide the offset back toward 0." else ".",
         )
     }

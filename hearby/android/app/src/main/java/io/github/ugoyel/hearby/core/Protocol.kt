@@ -77,7 +77,12 @@ class SyncReqMsg(
     val status: Int,
     /** Everything the listener adds to the playout delay (slider + calibration + fallback), µs. */
     val adjustUs: Long = 0,
-)
+    /** Byte 23: bit 0 plays through Bluetooth, bits 1-7 audio lost recently in % (0 from older apps). */
+    val flags: Int = 0,
+) {
+    val bluetooth: Boolean get() = flags and 1 != 0
+    val lossPercent: Int get() = (flags ushr 1).coerceAtMost(100)
+}
 
 class SyncRespMsg(val streamId: Long, val t0Us: Long, val t1Us: Long, val t2Us: Long, val playoutDelayMs: Int)
 
@@ -240,16 +245,21 @@ object Wire {
 
     // ---- SYNC_REQ (0x04)  client -> host   (also the keep-alive) --------------------------------
     //  4  u32 clientId   8  u64 t0 (client clock, us)   16  u32 rttUs
-    // 20  u16 bufferMs   22  u8 status   23  u8 reserved   24  i32 adjustUs
+    // 20  u16 bufferMs   22  u8 status   23  u8 flags (bit 0 Bluetooth, bits 1-7 loss %)   24  i32 adjustUs
     // (the 24-byte form without adjustUs is still accepted)
 
-    fun encodeSyncReq(clientId: Long, t0Us: Long, rttUs: Long, bufferMs: Int, status: Int, adjustUs: Long = 0): ByteArray {
+    /** SYNC_REQ byte 23: what the host's auto-tuning needs to know about this listener. */
+    fun syncFlags(bluetooth: Boolean, lossPercent: Float): Int =
+        (if (bluetooth) 1 else 0) or (Math.round(lossPercent).coerceIn(0, 100) shl 1)
+
+    fun encodeSyncReq(clientId: Long, t0Us: Long, rttUs: Long, bufferMs: Int, status: Int, adjustUs: Long = 0, flags: Int = 0): ByteArray {
         val b = header(SYNC_REQ_SIZE, Proto.TYPE_SYNC_REQ)
         putU32(b, 4, clientId)
         putU64(b, 8, t0Us)
         putU32(b, 16, rttUs.coerceIn(0, 0xFFFFFFFFL))
         putU16(b, 20, bufferMs.coerceIn(0, 0xFFFF))
         b[22] = status.toByte()
+        b[23] = flags.toByte()
         putU32(b, 24, adjustUs.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()) and 0xFFFFFFFFL)
         return b
     }
@@ -257,7 +267,7 @@ object Wire {
     fun decodeSyncReq(b: ByteArray, len: Int): SyncReqMsg? {
         if (len < SYNC_REQ_MIN_SIZE) return null
         val adjust = if (len >= SYNC_REQ_SIZE) getU32(b, 24).toInt().toLong() else 0L
-        return SyncReqMsg(getU32(b, 4), getU64(b, 8), getU32(b, 16), getU16(b, 20), getU8(b, 22), adjust)
+        return SyncReqMsg(getU32(b, 4), getU64(b, 8), getU32(b, 16), getU16(b, 20), getU8(b, 22), adjust, getU8(b, 23))
     }
 
     // ---- SYNC_RESP (0x05)  host -> client ---------------------------------------------------------

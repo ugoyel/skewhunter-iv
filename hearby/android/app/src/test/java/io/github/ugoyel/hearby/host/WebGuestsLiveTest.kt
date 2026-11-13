@@ -13,7 +13,7 @@ import kotlin.math.sin
  *
  * then open http://127.0.0.1:47811/ (a script can drive it, e.g. with Playwright). Skipped otherwise.
  * It plays a 440 Hz tone on the shared timeline, asks every guest for a sound-check chirp after 12 s
- * and sends a correction, switches to a YouTube video after 25 s, and writes what it saw of its
+ * and sends a correction, raises the cushion to 500 ms after 18 s, switches to a YouTube video after 25 s, and writes what it saw of its
  * guests to build/web-live.txt once a second.
  */
 class WebGuestsLiveTest {
@@ -37,6 +37,7 @@ class WebGuestsLiveTest {
         var phase = 0.0
         var chirped = false
         var videoOn = false
+        var raised = false
         var lastReportNs = 0L
         web.setState("""{"t":"state","title":"Test tone","artist":"Hearby","playing":true,"video":null}""")
         while (System.nanoTime() - startNs < seconds!! * 1_000_000_000L) {
@@ -64,12 +65,16 @@ class WebGuestsLiveTest {
                     web.send(g.id, """{"t":"offset","adjust":-7000,"check":1,"err":7000}""")
                 }
             }
+            if (!raised && elapsedS > 18) {
+                raised = true // the DJ phone's tuner raised the cushion
+                web.setState("""{"t":"state","title":"Test tone","artist":"Hearby","playing":true,"delay":500,"video":null}""")
+            }
             if (!videoOn && elapsedS > 25) {
                 videoOn = true
                 val anchor = now / 1000 + 2_500_000
                 web.setState(
                     """{"t":"state","title":"Video","artist":"YouTube","playing":true,""" +
-                        """"video":{"id":"dQw4w9WgXcQ","title":"Test video","playing":true,"anchor":$anchor,"pos":0,"v":1}}""",
+                        """"delay":500,"video":{"id":"dQw4w9WgXcQ","title":"Test video","playing":true,"anchor":$anchor,"pos":0,"v":1}}""",
                 )
             }
             if (now - lastReportNs > 1_000_000_000L) {

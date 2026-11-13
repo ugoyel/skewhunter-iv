@@ -307,7 +307,10 @@ class AndroidSyncReceiver(
                     }
                     send(
                         sock,
-                        Wire.encodeSyncReq(clientId, System.nanoTime() / 1000, clock.rttUs, e?.cushionMs ?: 0, status, playout.adjustUs()),
+                        Wire.encodeSyncReq(
+                            clientId, System.nanoTime() / 1000, clock.rttUs, e?.cushionMs ?: 0, status, playout.adjustUs(),
+                            Wire.syncFlags(playout.routeIsBluetooth, lossPercent), // for the DJ phone's auto-tuning
+                        ),
                     )
                 }
                 if (now - lastPacketNs > HOST_TIMEOUT_NS) {

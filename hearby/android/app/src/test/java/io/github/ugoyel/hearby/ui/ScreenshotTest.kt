@@ -56,7 +56,7 @@ class ScreenshotTest {
 
     @Test
     fun djIdle() = shot("1_dj_idle", tab = 0, energy = 0f) {
-        HostIdle(96_000, {}, 350, {}, notice = null, busyListening = false, onStart = {})
+        HostIdle(notice = null, busyListening = false, onStart = {})
     }
 
     @Test
@@ -78,7 +78,7 @@ class ScreenshotTest {
         HostLive(
             HostUiState(
                 running = true, addresses = listOf("192.168.43.1"), listeners = crowd + safari, level = 0.55f, bitrate = 96_000, playoutDelayMs = 350,
-                webUrls = listOf("http://192.168.43.1:47801"),
+                webUrls = listOf("http://192.168.43.1:47801"), suggestSoundCheck = true,
                 queue = songs, current = 0, playing = true, positionMs = 83_000,
                 soundCheck = SoundCheckUi(done = true, message = "Every phone lined up to within 0.3 ms."),
             ),

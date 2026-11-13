@@ -237,7 +237,7 @@ class WebGuests(
                 g.sendText(stateJson)
             }
             "stat" -> {
-                m["buf"]?.toDoubleOrNull()?.let { g.bufferMs = it.toInt().coerceIn(0, 60_000) }
+                m["buf"]?.toDoubleOrNull()?.let { g.bufferMs = it.toInt().coerceIn(-1, 60_000) } // -1: no audio coming
                 m["st"]?.toIntOrNull()?.let { g.status = it.coerceIn(Proto.STATUS_CONNECTING, Proto.STATUS_LATE) }
                 m["adj"]?.toDoubleOrNull()?.let { g.adjustUs = it.toLong() }
                 m["rtt"]?.toDoubleOrNull()?.let { g.rttUs = it.toLong().coerceAtLeast(0) }

@@ -74,6 +74,11 @@ struct SyncReqMsg: Equatable {
     var status: UInt8
     /// Everything the listener adds to the playout delay (slider + sound-check correction + fallback), µs.
     var adjustUs: Int32 = 0
+    /// Byte 23: bit 0 plays through Bluetooth, bits 1-7 audio lost recently in % (0 from older apps).
+    var flags: UInt8 = 0
+
+    var bluetooth: Bool { flags & 1 != 0 }
+    var lossPercent: Int { min(Int(flags >> 1), 100) }
 }
 
 struct SyncRespMsg: Equatable {
@@ -256,13 +261,20 @@ enum Wire {
     // 20  u16 bufferMs   22  u8 status   23  u8 reserved   24  i32 adjustUs
     // (the 24-byte form without adjustUs is still accepted)
 
-    static func encodeSyncReq(clientId: UInt32, t0Us: UInt64, rttUs: UInt32, bufferMs: UInt16, status: UInt8, adjustUs: Int32 = 0) -> [UInt8] {
+    /// SYNC_REQ byte 23: what the host's auto-tuning needs to know about this listener.
+    static func syncFlags(bluetooth: Bool, lossPercent: Float) -> UInt8 {
+        let loss = UInt8(min(max(lossPercent.rounded(), 0), 100))
+        return (bluetooth ? 1 : 0) | (loss << 1)
+    }
+
+    static func encodeSyncReq(clientId: UInt32, t0Us: UInt64, rttUs: UInt32, bufferMs: UInt16, status: UInt8, adjustUs: Int32 = 0, flags: UInt8 = 0) -> [UInt8] {
         var b = header(syncReqSize, Proto.typeSyncReq)
         putU32(&b, 4, clientId)
         putU64(&b, 8, t0Us)
         putU32(&b, 16, rttUs)
         putU16(&b, 20, bufferMs)
         b[22] = status
+        b[23] = flags
         putU32(&b, 24, UInt32(bitPattern: adjustUs))
         return b
     }
@@ -271,7 +283,8 @@ enum Wire {
         guard b.count >= syncReqMinSize else { return nil }
         let adjust = b.count >= syncReqSize ? Int32(bitPattern: getU32(b, 24)) : 0
         return SyncReqMsg(
-            clientId: getU32(b, 4), t0Us: getU64(b, 8), rttUs: getU32(b, 16), bufferMs: getU16(b, 20), status: b[22], adjustUs: adjust)
+            clientId: getU32(b, 4), t0Us: getU64(b, 8), rttUs: getU32(b, 16), bufferMs: getU16(b, 20), status: b[22], adjustUs: adjust,
+            flags: b[23])
     }
 
     // MARK: SYNC_RESP (0x05) host -> client

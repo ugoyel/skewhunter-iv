@@ -22,11 +22,13 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import io.github.ugoyel.hearby.LocalNet
 import io.github.ugoyel.hearby.MainActivity
 import io.github.ugoyel.hearby.R
 import io.github.ugoyel.hearby.client.PlayoutRunner
 import io.github.ugoyel.hearby.codec.MediaCodecOpusEncoder
+import io.github.ugoyel.hearby.core.AutoTuner
 import io.github.ugoyel.hearby.core.ClockSync
 import io.github.ugoyel.hearby.core.VideoTimeline
 import io.github.ugoyel.hearby.core.WireVideo
@@ -95,6 +97,8 @@ data class HostUiState(
     val video: VideoTimeline? = null,
     /** This phone's own correction (slider + sound check), µs, applied to its video player too. */
     val correctionUs: Long = 0,
+    /** Someone is on Bluetooth or in a browser and not sound-checked yet: offer the sound check. */
+    val suggestSoundCheck: Boolean = false,
     /** This phone went quiet: another app took the sound, or its headphones were unplugged. */
     val muted: Boolean = false,
     /** The guest page for phones without the app (iPhones), e.g. http://192.168.43.1:47801, or null. */
@@ -128,14 +132,14 @@ class PartyHostService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START -> startSession(intent.getIntExtra(EXTRA_BITRATE, 96_000), intent.getIntExtra(EXTRA_DELAY_MS, 350))
+            ACTION_START -> startSession()
             ACTION_STOP -> finish(null)
             else -> if (session == null) stopSelf()
         }
         return START_NOT_STICKY
     }
 
-    private fun startSession(bitrate: Int, delayMs: Int) {
+    private fun startSession() {
         if (session != null) return
         try {
             ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(0, null), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
@@ -144,7 +148,13 @@ class PartyHostService : Service() {
             finish("Android did not allow the party to start (${e.javaClass.simpleName}).")
             return
         }
-        val s = Session(bitrate, delayMs)
+        // Start from what worked at the last party; the tuner takes it from there.
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val tuner = AutoTuner(
+            prefs.getInt(PREF_DELAY_MS, AutoTuner.DEFAULT_DELAY_MS),
+            prefs.getInt(PREF_BITRATE, AutoTuner.MAX_BITRATE),
+        )
+        val s = Session(tuner)
         try {
             s.start()
         } catch (e: Exception) {
@@ -155,7 +165,7 @@ class PartyHostService : Service() {
         }
         session = s
         _state.value = HostUiState(
-            running = true, port = s.port, addresses = LocalNet.localIpv4Addresses(), bitrate = bitrate, playoutDelayMs = delayMs,
+            running = true, port = s.port, addresses = LocalNet.localIpv4Addresses(), bitrate = tuner.bitrate, playoutDelayMs = tuner.delayMs,
         )
         // Songs or a video shared to Hearby before the party started.
         val waiting = synchronized(pending) { pending.toList().also { pending.clear() } }
@@ -216,6 +226,8 @@ class PartyHostService : Service() {
 
     private class Client(val address: InetSocketAddress, val id: Long, val name: String, val platform: Int) {
         @Volatile var lastSeenNs = System.nanoTime()
+        @Volatile var lossPercent = 0
+        @Volatile var bluetooth = false
         @Volatile var rttUs = 0L
         @Volatile var bufferMs = 0
         @Volatile var status = Proto.STATUS_CONNECTING
@@ -225,7 +237,9 @@ class PartyHostService : Service() {
         val audioPacket = DatagramPacket(ByteArray(0), 0, address)
     }
 
-    private inner class Session(private val bitrate: Int, private val playoutDelayMs: Int) {
+    private inner class Session(private val tuner: AutoTuner) {
+        /** The sync cushion in effect; the tuner changes it at quiet moments. */
+        @Volatile private var playoutDelayMs = tuner.delayMs
         private val streamId = SecureRandom().nextInt().toLong() and 0xFFFFFFFFL
         private val hostName = LocalNet.deviceName(this@PartyHostService)
         val player = MusicPlayer(this@PartyHostService)
@@ -271,6 +285,7 @@ class PartyHostService : Service() {
         private var notified = -1 to ""
         private var lastNowPlaying = ""
         private var lastNowPlayingNs = 0L
+        private var lastTuneNs = 0L
 
         var port = Proto.PORT
             private set
@@ -293,7 +308,7 @@ class PartyHostService : Service() {
             port = s.localPort
 
             encoder = try {
-                MediaCodecOpusEncoder(bitrate)
+                MediaCodecOpusEncoder(tuner.bitrate)
             } catch (e: Exception) {
                 throw IllegalStateException("This device has no Opus encoder.", e)
             }
@@ -331,6 +346,9 @@ class PartyHostService : Service() {
                 0
             }
 
+            // When a cushion or quality change is waiting, leave a short gap between songs to make it in.
+            player.gapBetweenSongs = { if (tuner.pending && checkRunner == null) SONG_GAP_FRAMES else 0 }
+
             running = true
             senderThread = Thread(::sendLoop, "hearby-sender").also { it.start() }
             controlThread = Thread(::controlLoop, "hearby-control").also { it.start() }
@@ -362,6 +380,12 @@ class PartyHostService : Service() {
             senderThread?.join(1500)
             controlThread?.join(1500)
             local.stop()
+            if (wasRunning) {
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+                    putInt(PREF_DELAY_MS, tuner.delayMs)
+                    putInt(PREF_BITRATE, tuner.bitrate)
+                }
+            }
             encoder?.release()
             encoder = null
             socket = null
@@ -375,7 +399,7 @@ class PartyHostService : Service() {
 
         private fun sendLoop() {
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
-            val enc = encoder ?: return
+            var enc = encoder ?: return
             val sock = socket ?: return
             val frame = FloatArray(Proto.FRAME_SAMPLES * Proto.CHANNELS)
             val pcm = ByteArray(MediaCodecOpusEncoder.PCM_BLOCK_BYTES)
@@ -402,6 +426,7 @@ class PartyHostService : Service() {
             }
 
             var webSeq = 0L
+            var quietFrames = 0
             var nextNs = System.nanoTime()
             try {
                 while (running) {
@@ -412,7 +437,10 @@ class PartyHostService : Service() {
                     }
                     if (now - nextNs > MAX_LAG_NS) nextNs = now // starved for a while: jump (phones re-align once)
                     // While a YouTube video is on, every phone plays it from YouTube: the stream carries silence.
-                    if (video == null) player.pull(frame) else java.util.Arrays.fill(frame, 0f)
+                    val audible = if (video == null) player.pull(frame) else false.also { java.util.Arrays.fill(frame, 0f) }
+                    quietFrames = if (audible) 0 else quietFrames + 1
+                    // Cushion and quality change only while nothing is playing: phones switch a moment apart.
+                    if (quietFrames >= QUIET_FRAMES && tuner.pending && checkRunner == null) enc = applyTuning(enc)
                     toPcm16(frame, pcm)
                     // Browsers get the same frame as PCM (silence is skipped: they keep time by clock sync).
                     if (frame.any { it != 0f }) web.pushAudio(webSeq, nextNs / 1000, pcm, Proto.FRAME_SAMPLES * Proto.CHANNELS * 2)
@@ -428,6 +456,28 @@ class PartyHostService : Service() {
                 Log.e(TAG, "send loop died", e)
                 if (running) fail("The party stopped unexpectedly: ${e.javaClass.simpleName}")
             }
+        }
+
+        /** Switch to the tuner's cushion and quality (sending thread, at a quiet moment). */
+        private fun applyTuning(current: MediaCodecOpusEncoder): MediaCodecOpusEncoder = synchronized(tuner) {
+            var enc = current
+            if (tuner.wantBitrate != tuner.bitrate) {
+                try {
+                    val fresh = MediaCodecOpusEncoder(tuner.wantBitrate)
+                    current.release()
+                    enc = fresh
+                    encoder = fresh
+                } catch (e: Exception) {
+                    Log.w(TAG, "could not switch to ${tuner.wantBitrate} bps", e)
+                }
+            }
+            if (tuner.wantDelayMs != playoutDelayMs) {
+                playoutDelayMs = tuner.wantDelayMs // guests pick it up from their next SYNC_RESP
+                local.playoutDelayMs = playoutDelayMs
+            }
+            tuner.applied(System.nanoTime() / 1_000_000)
+            Log.i(TAG, "auto-tuned: cushion ${tuner.delayMs} ms, ${tuner.bitrate / 1000} kbps")
+            enc
         }
 
         private fun toPcm16(src: FloatArray, dst: ByteArray) {
@@ -493,6 +543,8 @@ class PartyHostService : Service() {
                     c.bufferMs = m.bufferMs
                     c.status = m.status
                     c.adjustUs = m.adjustUs
+                    c.lossPercent = m.lossPercent
+                    c.bluetooth = m.bluetooth
                     val resp = Wire.encodeSyncResp(streamId, m.t0Us, rxUs, 0, playoutDelayMs)
                     Wire.patchSyncRespT2(resp, System.nanoTime() / 1000) // t2: immediately before sending
                     reply(sock, resp, from)
@@ -513,7 +565,8 @@ class PartyHostService : Service() {
                 """{"id":${FlatJson.quote(it.videoId)},"title":${FlatJson.quote(it.title)},"playing":${it.playing},""" +
                     """"anchor":${it.anchorHostUs},"pos":${it.positionUs},"v":${it.version}}"""
             } ?: "null"
-            return """{"t":"state","title":${FlatJson.quote(title)},"artist":${FlatJson.quote(artist)},"playing":$playing,"video":$video}"""
+            return """{"t":"state","title":${FlatJson.quote(title)},"artist":${FlatJson.quote(artist)},"playing":$playing,""" +
+                """"delay":$playoutDelayMs,"video":$video}"""
         }
 
         private fun readAsset(path: String): ByteArray? = try {
@@ -568,6 +621,17 @@ class PartyHostService : Service() {
             }
             web.setState(webState(title, artist, on, v))
 
+            // Once a second, let the tuner look at how everyone is doing.
+            if (nowNs - lastTuneNs >= 1_000_000_000L) {
+                lastTuneNs = nowNs
+                val reports = snapshot.map { c ->
+                    AutoTuner.Guest(c.id, c.bufferMs, c.status, c.lossPercent, c.bluetooth, soundChecked = c.check?.heard == true)
+                } + browsers.map { g ->
+                    AutoTuner.Guest(g.id, g.bufferMs, g.status, browser = true, soundChecked = g.check?.heard == true, opus = false)
+                }
+                synchronized(tuner) { tuner.observe(nowNs / 1_000_000, reports) }
+            }
+
             _state.update {
                 if (!it.running) it
                 else it.copy(
@@ -589,6 +653,9 @@ class PartyHostService : Service() {
                     soundCheck = soundCheck,
                     video = v,
                     correctionUs = local.userOffsetMs * 1000L + local.calibrationUs,
+                    bitrate = tuner.bitrate,
+                    playoutDelayMs = playoutDelayMs,
+                    suggestSoundCheck = tuner.suggestSoundCheck,
                     muted = local.muted,
                     webUrls = if (webPort == 0) emptyList() else (if (it.addresses.isEmpty()) LocalNet.localIpv4Addresses() else it.addresses)
                         .map { a -> "http://$a:$webPort" },
@@ -697,6 +764,8 @@ class PartyHostService : Service() {
             soundCheck = SoundCheckUi(running = true, message = "Getting ready…")
             Thread({
                 player.hold = true // the beeps need a quiet moment
+                val pausedVideo = video?.playing == true
+                if (pausedVideo) toggleVideo() // the video too: the microphone listens for the beeps
                 val outcome = try {
                     runner.run(
                         guests.map { c -> CheckParticipant(c.id, c.name) { c.adjustUs } } +
@@ -707,6 +776,7 @@ class PartyHostService : Service() {
                 } finally {
                     player.hold = false
                     checkRunner = null
+                    if (pausedVideo && video?.playing == false) toggleVideo()
                 }
                 for (c in guests) outcome.results[c.id]?.let { c.check = it }
                 for (g in browsers) outcome.results[g.id]?.let { g.check = it }
@@ -774,8 +844,13 @@ class PartyHostService : Service() {
         private const val TAG = "HearbyHost"
         private const val ACTION_START = "io.github.ugoyel.hearby.host.START"
         private const val ACTION_STOP = "io.github.ugoyel.hearby.host.STOP"
-        private const val EXTRA_BITRATE = "bitrate"
-        private const val EXTRA_DELAY_MS = "delayMs"
+        private const val PREFS = "hearby"
+        private const val PREF_DELAY_MS = "auto.delayMs"
+        private const val PREF_BITRATE = "auto.bitrate"
+        /** 200 ms of silence: quiet enough to switch the cushion or quality. */
+        private const val QUIET_FRAMES = 10
+        /** The gap left between songs when a change is waiting: covers every phone's next SYNC_RESP. */
+        private const val SONG_GAP_FRAMES = 75
         private const val CHANNEL_ID = "host"
         private const val NOTIFICATION_ID = 41
 
@@ -795,13 +870,10 @@ class PartyHostService : Service() {
 
         private val player get() = instance?.session?.player
 
-        fun start(context: Context, bitrate: Int, playoutDelayMs: Int) {
+        /** Start the party. Sound quality and sync cushion tune themselves (see AutoTuner). */
+        fun start(context: Context) {
             _state.update { it.copy(message = null) }
-            val intent = Intent(context, PartyHostService::class.java)
-                .setAction(ACTION_START)
-                .putExtra(EXTRA_BITRATE, bitrate)
-                .putExtra(EXTRA_DELAY_MS, playoutDelayMs)
-            ContextCompat.startForegroundService(context, intent)
+            ContextCompat.startForegroundService(context, Intent(context, PartyHostService::class.java).setAction(ACTION_START))
         }
 
         fun stop(context: Context) {
