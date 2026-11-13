@@ -53,6 +53,8 @@ data class ReceiverUiState(
     val soundCheckMs: Float = 0f,
     /** YouTube mode: the video the DJ is playing on every phone, or null. */
     val video: VideoTimeline? = null,
+    /** The DJ is singing or talking (karaoke): the video plays a little quieter. */
+    val videoDuck: Boolean = false,
     /** DJ clock minus this phone's clock, µs. */
     val clockOffsetUs: Long = 0,
     /** This phone's own correction (slider + sound check), µs; positive plays later. */
@@ -107,6 +109,7 @@ class AndroidSyncReceiver(
     @Volatile private var lastCheckId = -1
     @Volatile private var soundChecked = false
     @Volatile private var video: VideoTimeline? = null
+    @Volatile private var videoDuck = false
 
     fun start() {
         if (running) return
@@ -246,7 +249,10 @@ class AndroidSyncReceiver(
             }
             Proto.TYPE_VIDEO -> {
                 val m = WireVideo.decode(buf, len) ?: return
-                if (m.streamId == streamId) video = m.timeline
+                if (m.streamId == streamId) {
+                    video = m.timeline
+                    videoDuck = m.duck
+                }
             }
             Proto.TYPE_CHIRP -> {
                 val m = WireParty.decodeChirp(buf, len) ?: return
@@ -390,6 +396,7 @@ class AndroidSyncReceiver(
                 soundChecked = soundChecked,
                 soundCheckMs = playout.calibrationUs / 1000f,
                 video = video,
+                videoDuck = videoDuck,
                 clockOffsetUs = clock.offsetUs,
                 correctionUs = playout.userOffsetMs * 1000L + playout.calibrationUs,
             ),

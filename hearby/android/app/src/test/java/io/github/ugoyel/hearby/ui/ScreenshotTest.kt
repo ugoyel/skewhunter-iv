@@ -87,6 +87,17 @@ class ScreenshotTest {
     }
 
     @Test
+    fun djKaraoke() = shot("2b_dj_karaoke", tab = 0, energy = 1f) {
+        HostLive(
+            HostUiState(
+                running = true, addresses = listOf("192.168.43.1"), listeners = crowd, level = 0.4f, bitrate = 96_000, playoutDelayMs = 350,
+                queue = songs, current = 1, playing = true, positionMs = 61_000, micOn = true, micLevel = 0.6f,
+            ),
+            DjActions(),
+        )
+    }
+
+    @Test
     fun djWaiting() = shot("3_dj_no_songs", tab = 0, energy = 1f) {
         HostLive(HostUiState(running = true, addresses = listOf("192.168.43.1")), DjActions())
     }

@@ -40,6 +40,9 @@ final class YouTubeWebPlayer: NSObject, WKNavigationDelegate, WKUIDelegate {
     /// This phone's own correction (slider + sound check), µs; positive plays later.
     var correctionUs: () -> Int64 = { 0 }
     var onNotice: (PlayerNotice) -> Void = { _ in }
+    /// Karaoke: the DJ's mic is on, so play a little quieter (smoothly).
+    var duck: () -> Bool = { false }
+    private var appliedDuck: Bool?
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -74,6 +77,7 @@ final class YouTubeWebPlayer: NSObject, WKNavigationDelegate, WKUIDelegate {
     /// The page's process crashed or iOS reclaimed it: the view is blank now, so start over.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         controller = VideoSyncController()
+        appliedDuck = nil
         everReady = false
         startedAt = Date()
         loadPage()
@@ -172,6 +176,11 @@ final class YouTubeWebPlayer: NSObject, WKNavigationDelegate, WKUIDelegate {
                                       report: report, mayStart: active && visibleEnough()) {
             execute(action)
         }
+        let d = duck()
+        if ready, d != appliedDuck {
+            appliedDuck = d
+            js("hearbyVolume(\(d ? 45 : 100))")
+        }
         if report.error != 0 {
             notify(PlayerNotice(error: YouTubeWebPlayer.describe(report.error)))
         } else {
@@ -269,6 +278,7 @@ struct SyncedYouTubePlayer: UIViewRepresentable {
     let timeline: VideoTimeline?
     let hostOffsetUs: () -> Int64
     let correctionUs: () -> Int64
+    var duck: () -> Bool = { false }
     var onNotice: (PlayerNotice) -> Void = { _ in }
 
     func makeCoordinator() -> YouTubeWebPlayer { YouTubeWebPlayer() }
@@ -288,6 +298,7 @@ struct SyncedYouTubePlayer: UIViewRepresentable {
         player.timeline = timeline
         player.hostOffsetUs = hostOffsetUs
         player.correctionUs = correctionUs
+        player.duck = duck
         player.onNotice = onNotice
     }
 }

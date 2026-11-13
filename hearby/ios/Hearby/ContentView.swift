@@ -332,6 +332,7 @@ private struct VideoCard: View {
                 timeline: video,
                 hostOffsetUs: { status.clockOffsetUs },
                 correctionUs: { status.correctionUs },
+                duck: { status.videoDuck },
                 onNotice: { notice = $0 })
         }
     }

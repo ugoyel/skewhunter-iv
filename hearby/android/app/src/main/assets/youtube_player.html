@@ -59,6 +59,21 @@
   function hearbySeek(seconds) { if (ready) player.seekTo(Number(seconds), true); }
   function hearbyRate(rate) { if (ready) player.setPlaybackRate(Number(rate)); }
 
+  /** Karaoke: glide the volume to `target` (0..100) over about half a second. */
+  var volumeTimer = null;
+  function hearbyVolume(target) {
+    if (!ready) return;
+    clearInterval(volumeTimer);
+    var from = 100, step = 0, steps = 12;
+    try { from = player.getVolume(); } catch (e) {}
+    if (typeof from !== 'number' || isNaN(from)) from = 100;
+    volumeTimer = setInterval(function () {
+      step++;
+      try { player.setVolume(Math.round(from + (target - from) * step / steps)); } catch (e) {}
+      if (step >= steps) clearInterval(volumeTimer);
+    }, 40);
+  }
+
   /** Everything the sync controller needs, stamped with the moment it was read (epoch ms). */
   function hearbyStatus() {
     var o = { ready: ready, err: lastError, at: performance.timeOrigin + performance.now() };

@@ -76,6 +76,10 @@ class YouTubeWebPlayer(context: Context) {
 
     var onNotice: (PlayerNotice) -> Unit = {}
 
+    /** Karaoke: the DJ's mic is on, so play a little quieter (smoothly). */
+    var duck: () -> Boolean = { false }
+    private var appliedDuck: Boolean? = null
+
     /** The player ended the video (used on the DJ phone). */
     var onEnded: () -> Unit = {}
 
@@ -138,6 +142,7 @@ class YouTubeWebPlayer(context: Context) {
             return
         }
         controller = VideoSyncController() // a new player starts from nothing
+        appliedDuck = null
         everReady = false
         startedAtMs = System.currentTimeMillis()
         webView = newWebView()
@@ -223,6 +228,11 @@ class YouTubeWebPlayer(context: Context) {
         val target = t?.positionAt(hostNow) ?: 0L
         val startsIn = t?.startsInUs(hostNow) ?: 0L
         for (a in controller.step(nowUs, t, target, startsIn, report, mayStart = resumed && visibleEnough())) execute(a)
+        val d = duck()
+        if (ready && d != appliedDuck) {
+            appliedDuck = d
+            js("hearbyVolume(${if (d) DUCK_VOLUME else 100})")
+        }
         val notice = if (report.error != 0) {
             PlayerNotice(error = describe(report.error))
         } else {
@@ -275,6 +285,8 @@ class YouTubeWebPlayer(context: Context) {
         const val BASE_URL = "https://io.github.ugoyel.hearby/"
         private const val TICK_MS = 200L
         private const val OFFLINE_AFTER_MS = 12_000L
+        /** Player volume while the karaoke mic is on (YouTube's 0..100 scale). */
+        const val DUCK_VOLUME = 45
         private const val NO_ANSWER_MS = 2_000L
         private const val NOT_STARTED = "The video player didn't start on this phone. Update Android System WebView and try again."
         private const val RENDERER_WINDOW_MS = 60_000L
@@ -302,6 +314,7 @@ fun SyncedYouTubePlayer(
     hostOffsetUs: () -> Long,
     correctionUs: () -> Long,
     modifier: Modifier = Modifier,
+    duck: () -> Boolean = { false },
     onNotice: (PlayerNotice) -> Unit = {},
     onEnded: () -> Unit = {},
 ) {
@@ -313,6 +326,7 @@ fun SyncedYouTubePlayer(
         player.correctionUs = correctionUs
         player.onNotice = onNotice
         player.onEnded = onEnded
+        player.duck = duck
     }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(player, lifecycle) {

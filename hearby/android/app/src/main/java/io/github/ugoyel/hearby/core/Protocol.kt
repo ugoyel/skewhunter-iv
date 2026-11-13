@@ -95,7 +95,8 @@ class ChirpMsg(val streamId: Long, val clientId: Long, val mediaTimeUs: Long, va
 class OffsetMsg(val streamId: Long, val clientId: Long, val adjustUs: Long, val checkId: Int, val errorUs: Int)
 
 /** The party's YouTube video, or [timeline] null when no video is on. */
-class VideoMsg(val streamId: Long, val timeline: VideoTimeline?)
+/** [duck]: the DJ's karaoke mic is on, so YouTube players play a little quieter. */
+class VideoMsg(val streamId: Long, val timeline: VideoTimeline?, val duck: Boolean = false)
 
 /** Stateless encode/decode helpers. Decoders return null on anything malformed. */
 object Wire {
@@ -394,17 +395,18 @@ object WireParty {
 /** YouTube mode: the shared video timeline. */
 object WireVideo {
     // ---- VIDEO (0x0D)  host -> client ---------------------------------------------------------------
-    //  4  u32 streamId   8  u32 version   12  u8 flags (bit 0: playing, bit 1: a video is on)
-    // 13  u64 anchorHostUs   21  i64 positionUs   29  u8 idLen, videoId   then u8 titleLen, title
+    //  4  u32 streamId   8  u32 version   12  u8 flags (bit 0: playing, bit 1: a video is on, bit 2: duck,
+    //  the karaoke mic is on)   13  u64 anchorHostUs   21  i64 positionUs   29  u8 idLen, videoId
+    //  then u8 titleLen, title
 
-    fun encode(streamId: Long, t: VideoTimeline?): ByteArray {
+    fun encode(streamId: Long, t: VideoTimeline?, duck: Boolean = false): ByteArray {
         val id = Wire.nameField(t?.videoId.orEmpty())
         val title = Wire.nameField(t?.title.orEmpty())
         val b = ByteArray(29 + id.size + title.size)
         Wire.writeHeader(b, Proto.TYPE_VIDEO)
         Wire.putU32(b, 4, streamId)
         Wire.putU32(b, 8, (t?.version ?: 0) and 0xFFFFFFFFL)
-        b[12] = ((if (t?.playing == true) 1 else 0) or (if (t != null) 2 else 0)).toByte()
+        b[12] = ((if (t?.playing == true) 1 else 0) or (if (t != null) 2 else 0) or (if (duck) 4 else 0)).toByte()
         Wire.putU64(b, 13, t?.anchorHostUs ?: 0)
         Wire.putU64(b, 21, t?.positionUs ?: 0)
         id.copyInto(b, 29)
@@ -421,7 +423,7 @@ object WireVideo {
             videoId = id, title = title, playing = flags and 1 != 0,
             anchorHostUs = Wire.getU64(b, 13), positionUs = Wire.getU64(b, 21), version = Wire.getU32(b, 8),
         )
-        return VideoMsg(Wire.getU32(b, 4), timeline)
+        return VideoMsg(Wire.getU32(b, 4), timeline, duck = flags and 4 != 0)
     }
 }
 

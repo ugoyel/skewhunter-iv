@@ -465,7 +465,7 @@
   }
 
   // ---- YouTube mode ----
-  const yt = { player: null, ready: false, loading: false, failed: false, error: 0, controller: new H.VideoSyncController(), title: '' };
+  const yt = { player: null, ready: false, loading: false, failed: false, error: 0, controller: new H.VideoSyncController(), title: '', duck: false, volumeTimer: null };
 
   function ensureYouTube() {
     if (yt.loading || yt.player) return;
@@ -521,6 +521,12 @@
           break;
       }
     }
+    // Karaoke: while the DJ's mic is on, the video plays a little quieter (gliding, not jumping).
+    const duck = !!(v && party.duck);
+    if (duck !== yt.duck) {
+      yt.duck = duck;
+      glideVolume(p, duck ? 45 : 100);
+    }
     let muted = false;
     try { muted = p.isMuted(); } catch (e) { /* not ready */ }
     $('videoUnmute').hidden = !(IOS && muted && v);
@@ -532,6 +538,18 @@
       tag.textContent = Math.abs(ms) < 1 ? 'in sync' : (ms > 0 ? '+' : '') + ms + ' ms';
       tag.className = 'pill ' + (Math.abs(ms) < 15 ? 'lime' : 'sun');
     }
+  }
+
+  function glideVolume(p, target) {
+    clearInterval(yt.volumeTimer);
+    let from = 100, step = 0;
+    try { from = p.getVolume(); } catch (e) { /* not ready */ }
+    if (typeof from !== 'number' || isNaN(from)) from = 100;
+    yt.volumeTimer = setInterval(() => {
+      step++;
+      try { p.setVolume(Math.round(from + (target - from) * step / 12)); } catch (e) { /* gone */ }
+      if (step >= 12) clearInterval(yt.volumeTimer);
+    }, 40);
   }
 
   function visibleEnough(el) {

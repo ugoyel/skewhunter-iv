@@ -99,6 +99,11 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNotNil(Wire.decodeVideo(off))
         XCTAssertNil(Wire.decodeVideo(off)?.timeline)
         XCTAssertNil(Wire.decodeVideo(Array(b.prefix(30))))
+        // Karaoke: bit 2 asks the players to duck.
+        let ducked = Wire.encodeVideo(streamId: 0x0A0B_0C0D, timeline: t, duck: true)
+        XCTAssertEqual(ducked[12], 0x07)
+        XCTAssertEqual(Wire.decodeVideo(ducked)?.duck, true)
+        XCTAssertEqual(Wire.decodeVideo(b)?.duck, false)
     }
 
     func testOffset() {

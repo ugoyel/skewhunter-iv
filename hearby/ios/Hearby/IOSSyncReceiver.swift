@@ -263,6 +263,8 @@ struct ReceiverStatus: Equatable {
     var soundChecked = false
     /// The YouTube video the DJ is playing on every phone, or nil.
     var video: VideoTimeline?
+    /// The DJ is singing or talking (karaoke): the video plays a little quieter.
+    var videoDuck = false
     /// DJ clock minus this phone's clock (`HostClock`), µs.
     var clockOffsetUs: Int64 = 0
     /// This phone's own correction (slider + sound check), µs; positive plays later.
@@ -388,6 +390,7 @@ private final class ListenSession {
     private var lastCheckId: Int = -1
     private var soundChecked = false
     private var video: VideoTimeline?
+    private var videoDuck = false
     private var syncsSent = 0
     private var startNs: Int64 = 0
     private var lastPacketNs: Int64 = 0
@@ -667,6 +670,7 @@ private final class ListenSession {
             // YouTube mode: every phone plays the video itself; this says what, and where on the DJ's clock.
             guard let m = Wire.decodeVideo(b), m.streamId == streamId else { return }
             video = m.timeline
+            videoDuck = m.duck
 
         case Proto.typeChirp:
             // The DJ's sound check: play the chirp at exactly this point of the shared timeline.
@@ -774,7 +778,7 @@ private final class ListenSession {
             lateBiasMs: snap.lateBiasMs, playoutDelayMs: playoutDelayMs, offsetMs: offset,
             outputName: output, outputIsBluetooth: bluetooth, lossPercent: lossPercent, level: snap.level,
             songTitle: songTitle, songArtist: songArtist, songPlaying: songPlaying, soundChecked: soundChecked,
-            video: video, clockOffsetUs: clock.offsetUs, correctionUs: Int64(offset) * 1000 + calibrationUs))
+            video: video, videoDuck: videoDuck, clockOffsetUs: clock.offsetUs, correctionUs: Int64(offset) * 1000 + calibrationUs))
     }
 }
 

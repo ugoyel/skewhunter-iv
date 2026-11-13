@@ -176,6 +176,33 @@ This is ordinary measurement and control, not a language model: it has to decide
 minute, offline (a party on a hotspot has no internet), with nothing to pay per decision, and the
 numbers it needs come straight from the phones.
 
+## Karaoke
+
+The DJ taps the mic button and sings or talks: every phone plays the voice, on the beat, over the
+music or the YouTube video, which dips smoothly (to about −7 dB) while the mic is on.
+
+Every guest plays the party a cushion (about a third of a second) after the DJ phone sends it,
+which is what keeps them together. A singer following the room would therefore always land that
+much late. So while the mic is on:
+
+1. The DJ phone plays the music (or its YouTube video) a little ahead of the room, and the singer
+   sings along to it, holding the phone like a mic.
+2. Each slice of voice is stamped with the moment of music the singer was hearing and mixed into
+   the stream at exactly that moment. The stream to guests waits about 160 ms for it.
+3. Every phone plays music and voice together, on the beat, a cushion later.
+
+The DJ phone never plays its own voice back (no echo of yourself): it gets its own copy of the
+music, without the voice. The voice is cleaned up on the way (rumble filter, a noise gate so the
+room isn't sent back out between phrases, a soft limiter), and captured with Android's live
+performance microphone setting. Songs dip in the stream itself; for YouTube, every phone's player
+lowers its own volume, gliding over half a second. Browser guests get both.
+
+Limits: the mic works only while Hearby is on screen (it switches off when the DJ leaves the app).
+The DJ phone running ahead is audible close to it; earphones on the DJ phone avoid that and also
+keep the singer's own phone out of the microphone. A phone right next to the DJ can feed the voice
+back into the mic as an echo, so keep a couple of steps from the loudest speaker. While the mic is
+on, the cushion stays at least 350 ms to leave room for the voice.
+
 ## YouTube mode
 
 Every phone plays the video itself, so YouTube mode needs internet on every phone, but almost no
@@ -299,6 +326,9 @@ are no package dependencies.
 
 The DJ phone plays along in sync, so there is no echo between it and the others.
 
+**Karaoke:** tap the mic next to the play button, hold the phone like a mic and sing along to it.
+Tap again to stop.
+
 **iPhones:** they join the DJ's Wi-Fi or hotspot, then scan the QR code in the DJ screen's *iPhone?*
 card and tap *Join the party* in Safari. Keep the page open with the screen on.
 
@@ -396,9 +426,13 @@ Play accepts new apps as an **App Bundle** (`.aab`), not an APK. Besides uploadi
 - Hearby uses no screen capture. Its only foreground service type is `mediaPlayback` (playing the
   party's music in the background), which you declare in Play Console (App content › Foreground
   service permissions).
-- `RECORD_AUDIO` (for the optional sound check) requires a privacy policy URL and a Data safety
-  form. Hearby collects nothing; the microphone is used on the DJ phone for a few seconds to time
-  beeps, in memory only.
+- `RECORD_AUDIO` (for the sound check and karaoke) requires a privacy policy URL and a Data safety
+  form. The microphone is used only on the DJ phone, only while Hearby is on screen: for a few
+  seconds to time the sound check's beeps, and while the DJ has the karaoke mic switched on, when
+  the voice is sent live to the other phones at the party over the local network. Nothing is
+  recorded, stored or sent to any server. Say so in the privacy policy; in the Data safety form,
+  declaring "Voice or sound recordings" as shared with other users (not stored, not collected by
+  you) is the careful choice.
 - YouTube mode uses YouTube's embedded player, so YouTube's API Services Terms apply. The store
   listing and privacy policy must say the app uses YouTube API Services, link to the YouTube Terms
   of Service (https://www.youtube.com/t/terms) and the Google Privacy Policy
@@ -426,6 +460,7 @@ Play accepts new apps as an **App Bundle** (`.aab`), not an APK. Besides uploadi
 | Safari guest page: end to end | The real DJ-side server (`WebGuestsLiveTest`) and the real page in headless Chromium: join, clock sync, 45 s of streamed audio, a sound-check chirp and correction, then a YouTube timeline on a stand-in player with variable start and seek delays and standard speed steps | Synced in 1 s; audio within 0.11 ms of target with no gaps or late frames; video within 0.13 ms; no page errors |
 | DJ-side web server | JVM tests over real sockets: page, 404s, WebSocket handshake (RFC 6455 vector), masked and fragmented frames, clock-sync replies, audio frames, stats, sound-check messages, a full party, goodbye | Pass |
 | QR code | The DJ screen's QR code decoded from the rendered screenshot | `http://192.168.43.1:47801` |
+| Karaoke | Unit tests: the guest stream waits exactly long enough for each frame's voice, a clap lands in the frame the singer heard, the timestamped voice buffer, the smooth dip (0.3 s down, 0.8 s up), the gate (room hiss stays out, a voice gets in, it fades after a phrase), rumble removal, the limiter, the duck flag on Kotlin and Swift, the cushion floor. In a real browser: the YouTube player's volume glides from 100 to 45 in half a second. | Pass; the microphone itself not tried on a phone yet |
 | Automatic tuning | Simulated parties (phone speakers, a Bluetooth speaker, Wi-Fi hiccups, changes only at song gaps), loss-driven quality steps, crowd caps, sound-check suggestions, SYNC_REQ flags on Kotlin and Swift | Nobody behind after settling; settles in one change; easy crowds come down to 200 ms |
 | YouTube links | Watch, share (`youtu.be`), Shorts, live, embed, YouTube Music and mobile links, with or without surrounding text, on both platforms | Pass |
 | DJ on an Android 14 emulator | Release APK 1.2.0: party starts as a plain `mediaPlayback` service (no screen-capture prompt); a 44.1 kHz MP3 opened with Hearby was decoded, resampled and played, with its title and artist; a Python guest received the Opus stream with no loss plus "now playing", pause and resume; the sound check sent the guest its chirp request and reported that it could not hear itself (the emulator has no speaker-to-microphone path) | Pass |
@@ -440,6 +475,8 @@ Play accepts new apps as an **App Bundle** (`.aab`), not an APK. Besides uploadi
 - Real Wi-Fi and hotspot behaviour, including discovery across devices.
 - The iOS app at runtime. It compiles and its sync core passes the same tests as Android, but the
   AudioToolbox Opus decoder and AVAudioEngine timing have not been exercised on a device.
+- **Karaoke on real phones**: how each phone's microphone, Android's live-performance setting and
+  echo behave in a room, and how far ahead the DJ phone should run.
 - **The Safari page on a real iPhone**: Safari's autoplay and silent-switch rules, its Web Audio
   output timestamps, keeping the screen awake, and Bluetooth on iOS.
 - **YouTube mode with real YouTube.** YouTube was not reachable from the build machine, so the

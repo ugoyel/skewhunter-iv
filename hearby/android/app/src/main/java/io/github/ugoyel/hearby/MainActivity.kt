@@ -39,6 +39,12 @@ class MainActivity : ComponentActivity() {
         ReceiverService.reclaimSound()
     }
 
+    override fun onStop() {
+        super.onStop()
+        // The karaoke mic is only ever on while Hearby is on screen.
+        PartyHostService.setMic(false)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         takeSharedSongs(intent)

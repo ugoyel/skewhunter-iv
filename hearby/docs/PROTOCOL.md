@@ -208,6 +208,7 @@ missed it. AUDIO keeps flowing (silence) so the clock sync and the playout keep 
  4   u32  streamId
  8   u32  version      bumped on every change
  12  u8   flags        bit 0: playing   bit 1: a video is on (clear: back to music, ignore the rest)
+                       bit 2: duck (the DJ's karaoke mic is on: play the video at about 45 % volume)
  13  u64  anchorHostUs host clock, µs
  21  i64  positionUs   video position at anchorHostUs, µs
  29  u8   idLen        then the 11-character YouTube video id (ASCII)
@@ -240,7 +241,7 @@ host's clock (`r`, `s`, `anchor`, `media`) or the browser's (`c`, `performance.n
 | guest → host | `{"t":"hello","name":"<name>"}` when the guest joins (it is not counted before) |
 | guest → host | `{"t":"sync","c":<t0>}`: clock sync, a burst of 12 then once a second |
 | host → guest | `{"t":"sync","c":<t0 echoed>,"r":<t1>,"s":<t2>}`, sent ahead of any queued audio |
-| host → guest | `{"t":"state","title":..,"artist":..,"playing":<bool>,"delay":<playout delay ms>,"video":null \| {"id","title","playing","anchor","pos","v"}}` on join and on every change; `video` is the VIDEO timeline, `delay` follows the host's tuning |
+| host → guest | `{"t":"state","title":..,"artist":..,"playing":<bool>,"delay":<playout delay ms>,"duck":<bool>,"video":null \| {"id","title","playing","anchor","pos","v"}}` on join and on every change; `video` is the VIDEO timeline, `delay` follows the host's tuning, `duck` as in VIDEO |
 | guest → host | `{"t":"stat","buf":<ms scheduled, -1 while no audio is coming>,"st":<status as in SYNC_REQ>,"adj":<adjustments µs>,"rtt":<µs>}` once a second |
 | host → guest | `{"t":"chirp","media":<mediaTimeUs>,"check":<id>}` and `{"t":"offset","adjust":<µs>,"check":<id>,"err":<µs>}`: the sound check, as CHIRP and OFFSET |
 | host → guest | `{"t":"bye","msg":".."}` when the party ends, `{"t":"full"}` when 16 browsers are already in |

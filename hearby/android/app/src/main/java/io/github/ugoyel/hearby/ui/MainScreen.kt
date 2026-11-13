@@ -12,6 +12,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material.icons.rounded.MicNone
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.AutoAwesome
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import com.google.zxing.qrcode.QRCodeWriter
@@ -221,6 +223,15 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
             PartyHostService.addSongs(uris)
         }
     }
+    val karaokeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        micNotice = if (granted && PartyHostService.setMic(true)) {
+            null
+        } else if (granted) {
+            "Couldn't open the microphone. Is another app using it?"
+        } else {
+            "Karaoke needs the microphone to send your voice to every phone. It's only on while you have it switched on."
+        }
+    }
     val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) {
             micNotice = null
@@ -253,6 +264,18 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
         else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 
+    fun micOn() {
+        micNotice = if (PartyHostService.setMic(true)) null else "Couldn't open the microphone. Is another app using it?"
+    }
+
+    fun toggleMic() {
+        when {
+            state.micOn -> PartyHostService.setMic(false)
+            context.hasPermission(Manifest.permission.RECORD_AUDIO) -> micOn()
+            else -> karaokeLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
     if (state.running) {
         HostLive(
             state,
@@ -269,6 +292,7 @@ private fun HostPane(state: HostUiState, listening: Boolean) {
                 onToggleVideo = { PartyHostService.toggleVideo() },
                 onStopVideo = { PartyHostService.stopVideo() },
                 onUnmute = { PartyHostService.unmute() },
+                onMic = ::toggleMic,
                 onVideoTitle = { id, title -> PartyHostService.videoTitle(id, title) },
                 onVideoEnded = { PartyHostService.videoEnded(it) },
             ),
@@ -306,6 +330,7 @@ internal class DjActions(
     val onToggleVideo: () -> Unit = {},
     val onStopVideo: () -> Unit = {},
     val onUnmute: () -> Unit = {},
+    val onMic: () -> Unit = {},
     val onVideoTitle: (String, String) -> Unit = { _, _ -> },
     val onVideoEnded: (String) -> Unit = {},
 )
@@ -337,18 +362,21 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
     val video = state.video
     if (video != null) {
         val correction by rememberUpdatedState(state.correctionUs)
+        val micOn by rememberUpdatedState(state.micOn)
         VideoCard(
-            video = video, hostOffsetUs = { 0L }, correctionUs = { correction },
+            video = video, hostOffsetUs = { 0L }, correctionUs = { correction }, duck = { micOn },
             onTitle = { actions.onVideoTitle(video.videoId, it) },
             onEnded = { actions.onVideoEnded(video.videoId) },
         ) {
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 PlayButton(video.playing, actions.onToggleVideo)
-                Spacer(Modifier.width(4.dp))
+                MicButton(state.micOn, state.micLevel, actions.onMic)
                 GhostButton("Back to music", actions.onStopVideo, Modifier.weight(1f), icon = Icons.Rounded.LibraryMusic, height = 52.dp)
             }
         }
+        if (state.micOn) MicNotice()
+        micNotice?.let { Notice(it) }
         if (state.webUrls.isNotEmpty()) IPhoneCard(state.webUrls)
         Crowd(state.listeners)
         GradientButton("End the party", actions.onStop, Modifier.fillMaxWidth(), icon = Icons.Rounded.Stop, brush = Party.Stop, glow = Party.Coral)
@@ -383,6 +411,8 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
                 PlayButton(state.playing, actions.onToggle)
                 Spacer(Modifier.width(22.dp))
                 RoundButton(Icons.Rounded.SkipNext, "Next", actions.onNext)
+                Spacer(Modifier.width(22.dp))
+                MicButton(state.micOn, state.micLevel, actions.onMic)
             }
         } else {
             Spacer(Modifier.height(16.dp))
@@ -400,6 +430,9 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
 
     state.songError?.let { Notice(it) }
     notice?.let { Notice(it) }
+    if (state.micOn) MicNotice()
+    val checkCardShown = state.suggestSoundCheck || state.soundCheck.running || state.soundCheck.message != null
+    if (!checkCardShown) micNotice?.let { Notice(it) } // otherwise the sound check card shows it
 
     if (state.muted) {
         Notice(
@@ -416,9 +449,7 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
 
     YouTubeCard(actions.onPlayVideo)
 
-    if (state.suggestSoundCheck || state.soundCheck.running || state.soundCheck.message != null) {
-        SoundCheckCard(state, actions.onSoundCheck, micNotice)
-    }
+    if (checkCardShown) SoundCheckCard(state, actions.onSoundCheck, micNotice)
 
     if (state.webUrls.isNotEmpty()) IPhoneCard(state.webUrls)
     Crowd(state.listeners)
@@ -488,6 +519,7 @@ internal fun VideoCard(
     correctionUs: () -> Long,
     onTitle: (String) -> Unit = {},
     onEnded: () -> Unit = {},
+    duck: () -> Boolean = { false },
     controls: @Composable () -> Unit = {},
 ) {
     var notice by remember { mutableStateOf(PlayerNotice()) }
@@ -511,6 +543,7 @@ internal fun VideoCard(
             if (LocalMotion.current) {
                 SyncedYouTubePlayer(
                     video, hostOffsetUs, correctionUs,
+                    duck = duck,
                     onNotice = { n ->
                         notice = n
                         n.title?.let(onTitle)
@@ -786,6 +819,33 @@ private fun PlayButton(playing: Boolean, onClick: () -> Unit) {
     }
 }
 
+/** Karaoke: the DJ's mic. Lit and breathing with the voice while it's on. */
+@Composable
+private fun MicButton(on: Boolean, level: Float, onClick: () -> Unit) {
+    val ring = 1.dp + (6.dp * level.coerceIn(0f, 1f))
+    Box(
+        Modifier
+            .size(52.dp)
+            .then(if (on) Modifier.border(ring, Party.Coral.copy(alpha = 0.6f), CircleShape) else Modifier)
+            .clip(CircleShape)
+            .then(if (on) Modifier.background(Party.Stop) else Modifier.background(Party.Glass).border(1.dp, Party.GlassStroke, CircleShape))
+            .clickable(role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(if (on) Icons.Rounded.Mic else Icons.Rounded.MicNone, if (on) "Turn the mic off" else "Mic: sing or talk to every phone", tint = Color.White, modifier = Modifier.size(28.dp))
+    }
+}
+
+/** While the karaoke mic is on: what is happening, and how to hold the phone. */
+@Composable
+private fun MicNotice() {
+    Notice(
+        "Mic on: your voice plays on every phone, on the beat, and the music dips. Hold this phone like a mic and " +
+            "sing along to it: it plays a moment ahead of the room, so the voice lands in time. Earphones on this phone work best.",
+        icon = Icons.Rounded.Mic,
+    )
+}
+
 @Composable
 private fun RoundButton(icon: ImageVector, label: String, onClick: () -> Unit) {
     Box(
@@ -950,7 +1010,7 @@ internal fun Listening(
     val video = state.video
     if (video != null && state.phase != Phase.CONNECTING) {
         val latest by rememberUpdatedState(state)
-        VideoCard(video, hostOffsetUs = { latest.clockOffsetUs }, correctionUs = { latest.correctionUs })
+        VideoCard(video, hostOffsetUs = { latest.clockOffsetUs }, correctionUs = { latest.correctionUs }, duck = { latest.videoDuck })
     } else GlassCard(lit = playing) {
         HeroRow(
             icon = if (state.outputIsBluetooth) Icons.Rounded.Bluetooth else Icons.Rounded.Headphones,

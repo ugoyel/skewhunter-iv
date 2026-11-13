@@ -115,6 +115,8 @@ struct VideoMsg: Equatable {
     var streamId: UInt32
     /// The party's video, or nil when the DJ went back to music.
     var timeline: VideoTimeline?
+    /// The DJ's karaoke mic is on: YouTube players play a little quieter.
+    var duck = false
 }
 
 struct DiscoverRespMsg: Equatable {
@@ -388,16 +390,16 @@ enum Wire {
     }
 
     // MARK: VIDEO (0x0D) host -> client
-    //  4  u32 streamId   8  u32 version   12  u8 flags (bit 0: playing, bit 1: a video is on)
+    //  4  u32 streamId   8  u32 version   12  u8 flags (bit 0: playing, bit 1: a video is on, bit 2: duck)
     // 13  u64 anchorHostUs   21  i64 positionUs   29  u8 idLen, videoId   then u8 titleLen, title
 
-    static func encodeVideo(streamId: UInt32, timeline t: VideoTimeline?) -> [UInt8] {
+    static func encodeVideo(streamId: UInt32, timeline t: VideoTimeline?, duck: Bool = false) -> [UInt8] {
         let id = nameBytes(t?.videoId ?? "")
         let title = nameBytes(t?.title ?? "")
         var b = header(29, Proto.typeVideo)
         putU32(&b, 4, streamId)
         putU32(&b, 8, t?.version ?? 0)
-        b[12] = (t?.playing == true ? 1 : 0) | (t != nil ? 2 : 0)
+        b[12] = (t?.playing == true ? 1 : 0) | (t != nil ? 2 : 0) | (duck ? 4 : 0)
         putU64(&b, 13, UInt64(bitPattern: t?.anchorHostUs ?? 0))
         putU64(&b, 21, UInt64(bitPattern: t?.positionUs ?? 0))
         b.append(UInt8(id.count))
@@ -415,7 +417,7 @@ enum Wire {
             videoId: id, title: title, playing: flags & 1 != 0,
             anchorHostUs: Int64(bitPattern: getU64(b, 13)), positionUs: Int64(bitPattern: getU64(b, 21)),
             version: getU32(b, 8))
-        return VideoMsg(streamId: getU32(b, 4), timeline: timeline)
+        return VideoMsg(streamId: getU32(b, 4), timeline: timeline, duck: flags & 4 != 0)
     }
 
     // MARK: DISCOVER_RESP (0x09) host -> client

@@ -50,6 +50,9 @@ class AutoTuner(startDelayMs: Int = DEFAULT_DELAY_MS, startBitrate: Int = MAX_BI
 
     val pending: Boolean get() = wantDelayMs != delayMs || wantBitrate != bitrate
 
+    /** The cushion never goes below this (karaoke needs room for the voice to catch up). */
+    var floorMs = MIN_DELAY_MS
+
     /** True while someone on Bluetooth or in a browser would sound better after a sound check. */
     var suggestSoundCheck = false
         private set
@@ -79,6 +82,10 @@ class AutoTuner(startDelayMs: Int = DEFAULT_DELAY_MS, startBitrate: Int = MAX_BI
 
     private fun tuneCushion(nowMs: Long, guests: List<Guest>) {
         if (wantDelayMs != delayMs || nowMs < settleUntilMs) return // a change is on its way or settling
+        if (delayMs < floorMs) {
+            wantDelayMs = roundUp(floorMs)
+            return
+        }
         val late = guests.any { it.status == Proto.STATUS_LATE }
         if (late) lastLateMs = nowMs
         val known = guests.filter { it.marginMs >= 0 }
@@ -102,7 +109,7 @@ class AutoTuner(startDelayMs: Int = DEFAULT_DELAY_MS, startBitrate: Int = MAX_BI
             nowMs - firstReportMs >= CALM_MS
         val worstCalm = worstMargins.minOfOrNull { it.second } ?: return
         if (calm && worstMargins.first().first <= nowMs - CALM_MS + 2_000 && worstCalm > TARGET_MARGIN_MS + SPARE_MS) {
-            val target = roundDown(delayMs - (worstCalm - TARGET_MARGIN_MS)).coerceAtLeast(MIN_DELAY_MS)
+            val target = roundDown(delayMs - (worstCalm - TARGET_MARGIN_MS)).coerceAtLeast(maxOf(MIN_DELAY_MS, floorMs))
             if (target < delayMs) {
                 wantDelayMs = target
                 lastLowerMs = nowMs

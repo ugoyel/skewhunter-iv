@@ -38,6 +38,8 @@ class WebGuestsLiveTest {
         var chirped = false
         var videoOn = false
         var raised = false
+        var ducked = false
+        var videoAnchor = 0L
         var lastReportNs = 0L
         web.setState("""{"t":"state","title":"Test tone","artist":"Hearby","playing":true,"video":null}""")
         while (System.nanoTime() - startNs < seconds!! * 1_000_000_000L) {
@@ -72,9 +74,17 @@ class WebGuestsLiveTest {
             if (!videoOn && elapsedS > 25) {
                 videoOn = true
                 val anchor = now / 1000 + 2_500_000
+                videoAnchor = anchor
                 web.setState(
                     """{"t":"state","title":"Video","artist":"YouTube","playing":true,""" +
                         """"delay":500,"video":{"id":"dQw4w9WgXcQ","title":"Test video","playing":true,"anchor":$anchor,"pos":0,"v":1}}""",
+                )
+            }
+            if (videoOn && !ducked && elapsedS > 35) {
+                ducked = true // the DJ turned the karaoke mic on: every player glides quieter
+                web.setState(
+                    """{"t":"state","title":"Video","artist":"YouTube","playing":true,"delay":500,"duck":true,""" +
+                        """"video":{"id":"dQw4w9WgXcQ","title":"Test video","playing":true,"anchor":$videoAnchor,"pos":0,"v":1}}""",
                 )
             }
             if (now - lastReportNs > 1_000_000_000L) {
