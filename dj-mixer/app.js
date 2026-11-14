@@ -24,7 +24,7 @@ const store = {
 
 // Put your own YouTube Data API key here before publishing so users can search without any setup.
 // Restrict the key to your site's address in Google Cloud Console.
-const BUILT_IN_API_KEY = '';
+const BUILT_IN_API_KEY = 'AIzaSyBCO3y2qvWEi6FBo87C_Fx-cpVtMRy9C1A';
 const apiKey = () => state.apiKey || BUILT_IN_API_KEY;
 
 const state = {
