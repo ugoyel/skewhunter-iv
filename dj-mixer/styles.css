@@ -88,3 +88,4 @@ kbd{background:#0f1218;border:1px solid var(--line);border-radius:4px;padding:0 
   .xf{position:fixed;left:0;right:0;bottom:0;z-index:10;border-radius:14px 14px 0 0;padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:var(--panel)}
   .foot{padding-bottom:110px}
 }
+ol.hint{padding-left:18px}ol.hint li{margin:4px 0}

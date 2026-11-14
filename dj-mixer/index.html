@@ -85,7 +85,12 @@
     <label>YouTube Data API key (lets you browse and search YouTube in the app)
       <input id="api-key" type="text" placeholder="AIza…" autocomplete="off">
     </label>
-    <p class="hint">Get a free key at console.cloud.google.com: create a project, enable “YouTube Data API v3”, then Credentials → Create API key. Without a key you can still add any track by pasting its link. The key is stored only on this device.</p>
+    <ol class="hint">
+      <li>Open <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener">Google Cloud Console → YouTube Data API v3</a> and press Enable (create a project if asked).</li>
+      <li>Go to Credentials → Create credentials → API key, and copy it.</li>
+      <li>Paste it above and press Save. Search then works inside the app.</li>
+    </ol>
+    <p class="hint">This is a one-time step that YouTube requires for search. The key is stored only on this device. Pasting a link works without it.</p>
     <p class="hint">Shortcuts: <kbd>Q</kbd> play A · <kbd>P</kbd> play B · <kbd>←</kbd><kbd>→</kbd> crossfader · <kbd>F</kbd> fade</p>
     <div class="row end"><button value="save" class="big">Save</button></div>
   </form>

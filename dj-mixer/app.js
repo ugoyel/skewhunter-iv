@@ -638,7 +638,7 @@ async function fetchTitle(t) { // best effort; the deck fills the title in on lo
 async function search(q) {
   const id = parseVideoId(q);
   if (id) { addToLibrary({ id }); setTab('library'); return toast('Added to library'); }
-  if (!apiKey()) { setTab('results'); return toast('Searching needs a YouTube Data API key. Add one in Settings.'); }
+  if (!apiKey()) { setTab('results'); state.pendingSearch = q; return openSettings(); } // no key yet: show the one-time setup
   try {
     state.results = await ytList('search?part=snippet&type=video&videoEmbeddable=true&maxResults=25&q=' + encodeURIComponent(q));
     state.resultsTitle = 'Results for “' + q + '”'; setTab('results');
@@ -796,11 +796,14 @@ function setFour(on) {
   renderList();
 }
 $('#btn-4deck').addEventListener('click', () => setFour(!state.four));
-$('#btn-settings').addEventListener('click', () => { $('#api-key').value = state.apiKey; $('#settings').showModal(); });
+function openSettings() { $('#api-key').value = state.apiKey; $('#settings').showModal(); }
+$('#btn-settings').addEventListener('click', openSettings);
 $('#settings').addEventListener('close', () => {
   const k = $('#api-key').value.trim(), changed = k !== state.apiKey;
   state.apiKey = k; store.set('apiKey', k);
-  if (changed && k) { state.results = []; setTab('results'); }
+  const q = state.pendingSearch; state.pendingSearch = null;
+  if (k && q) search(q); // run the search that was waiting for the key
+  else if (changed && k) { state.results = []; setTab('results'); }
 });
 
 document.addEventListener('keydown', e => {
