@@ -25,6 +25,21 @@ It must be served over http(s); the YouTube player does not work from a `file://
 - FX pads (horn, siren, laser, riser) synthesised in the browser
 - Installable PWA (manifest + service worker), privacy page included
 
+## The main screen
+
+Two small players and one mix control; everything else is under "More controls".
+
+1. Play Player 1. It is "On speaker".
+2. Load and play Player 2. It is silent on the speaker.
+3. Press "Play Player 2 on speaker too": Player 2 comes in at 10%, Player 1 drops to 90%.
+4. Slide the mix slider right: Player 2 rises as Player 1 falls. At the far end only
+   Player 2 is heard, Player 1 stops, and the roles swap for the next track.
+
+**Headphone preview** (Settings → Speaker and headphones): the next track plays in a
+second sound device, with its own volume, before and while it is brought in. This works
+only for your own music files and only where the browser can pick sound devices (Chrome
+or Edge on a computer). It cannot work for YouTube tracks, and not in phone browsers.
+
 ## Two kinds of tracks
 
 **Your own music files** ("Open music folder" or "Add music files"; a pen drive works).

@@ -29,7 +29,7 @@ const apiKey = () => state.apiKey || BUILT_IN_API_KEY;
 
 const state = {
   x: 0, master: 1,
-  curve: store.get('curve', 'blend'),
+  curve: store.get('curve2', 'linear'),
   fadeSec: store.get('fadeSec', 8),
   stopOut: store.get('stopOut', true),
   four: store.get('four', false),
@@ -38,8 +38,10 @@ const state = {
   queue: [],
   files: [],
   results: [], resultsTitle: '', tab: 'library',
-  autoDJ: false, transitioning: false, apiReady: false
+  autoDJ: false, transitioning: false, apiReady: false,
+  live: 'A' // the player currently on the speaker; the other one is the next track being prepared
 };
+const NUM = { A: '1', B: '2', C: '3', D: '4' }; // what the players are called on screen
 // queue entries point at the library's own track objects so saved mix points stay in one place
 state.queue = store.get('queue', []).map(q => state.library.find(l => l.id === q.id) || q);
 
@@ -84,7 +86,37 @@ function xfGain(side) {
   if (state.curve === 'cut') return p > 0.03 ? 1 : 0;
   return Math.sin(p * Math.PI / 2);
 }
-function setX(x) { state.x = clamp(x, 0, 1); $('#xfader').value = Math.round(state.x * 1000); applyVolumes(); }
+function setX(x) {
+  state.x = clamp(x, 0, 1); $('#xfader').value = Math.round(state.x * 1000);
+  $('#mix').value = Math.round(mixPos() * 1000); applyVolumes();
+}
+// 0 = only the current (live) player is heard on the speaker, 1 = only the next one
+const mixPos = () => state.live === 'A' ? state.x : 1 - state.x;
+const setMix = m => setX(state.live === 'A' ? m : 1 - m);
+// Once the crossfader rests fully on one side, that player is the live one and the other becomes "next".
+function syncLive() {
+  if (state.x <= 0.001) state.live = 'A'; else if (state.x >= 0.999) state.live = 'B';
+  const live = deck[state.live], next = otherDeck(live);
+  $('#mix').value = Math.round(mixPos() * 1000);
+  const lab = (id, d) => { const e = $(id); e.textContent = NUM[d.id]; e.style.setProperty('--c', COLORS[d.id]); };
+  lab('#mix-from', live); lab('#mix-to', next);
+  $('#btn-bring').textContent = `Play Player ${NUM[next.id]} on speaker too`;
+  $('#btn-bring').style.setProperty('--c', COLORS[next.id]);
+  $('#hp-row').hidden = !out.ready;
+  $('#mix-hint').textContent = out.ready && next.track && next.kind === 'yt'
+    ? 'YouTube tracks cannot be sent to headphones. Only your own music files can be previewed there.'
+    : `Slide right to bring Player ${NUM[next.id]} in and fade Player ${NUM[live.id]} out.`;
+  decks.forEach(d => d.renderRole()); applyVolumes();
+}
+// The button: start the next player on the speaker quietly (10%), ready to be mixed in with the slider.
+function bringIn() {
+  const live = deck[state.live], next = otherDeck(live);
+  if (!next.track) return toast(`Load a track on Player ${NUM[next.id]} first`);
+  cancelAnim('xf');
+  if (!live.isPlaying()) { setX(next.side === 'L' ? 0 : 1); next.play(); return syncLive(); } // nothing to mix with: just switch over
+  if (!next.isPlaying()) next.play();
+  if (mixPos() < 0.1) setMix(0.1);
+}
 function applyVolumes() { for (const d of decks) d.applyVolume(); }
 
 /* ---------- Web Audio (local files and FX pads only) ---------- */
@@ -95,6 +127,40 @@ function audio() {
   return actx;
 }
 
+// Headphone preview. The speaker gets the normal mix; a second "cue" mix is sent to a second sound device.
+// Browsers only allow this for audio the app itself plays, so it cannot include YouTube.
+const canSink = 'setSinkId' in HTMLMediaElement.prototype;
+const out = { main: store.get('outMain', ''), hp: store.get('outHp', ''), hpVol: store.get('hpVol', 0.8), ready: false };
+let cueBus, cueAudio;
+function cueNode() {
+  if (!cueBus) {
+    const c = audio(), dest = c.createMediaStreamDestination();
+    cueBus = c.createGain(); cueBus.connect(dest);
+    cueAudio = new Audio(); cueAudio.srcObject = dest.stream;
+  }
+  return cueBus;
+}
+async function applyOutputs() {
+  const c = audio(); cueNode(); out.ready = false;
+  try { if (c.setSinkId && (out.main || out.mainSet)) { await c.setSinkId(out.main && out.main !== 'default' ? out.main : ''); out.mainSet = true; } } catch { /* device gone: stay on the system default */ }
+  if (out.hp && canSink) {
+    try { await cueAudio.setSinkId(out.hp); await cueAudio.play(); out.ready = true; } catch { /* device gone or blocked */ }
+  } else cueAudio.pause();
+  syncLive();
+}
+async function findDevices() {
+  const note = $('#out-note');
+  if (!canSink || !navigator.mediaDevices) { note.textContent = 'This browser cannot send sound to two devices. Headphone preview needs Chrome or Edge on a computer.'; return; }
+  try { (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach(t => t.stop()); } // browsers only list speakers after this permission; nothing is recorded
+  catch { note.textContent = 'Permission was refused, so the browser will not list your sound devices.'; return; }
+  const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput');
+  const opts = devs.map((d, i) => `<option value="${esc(d.deviceId)}">${esc(d.label || 'Sound device ' + (i + 1))}</option>`).join('');
+  $('#out-main').innerHTML = '<option value="">System default</option>' + opts; $('#out-main').value = out.main;
+  $('#out-hp').innerHTML = '<option value="">None (no headphone preview)</option>' + opts; $('#out-hp').value = out.hp;
+  $('#out-pick').hidden = false;
+  note.textContent = devs.length ? 'Pick the big speaker and the headphones, then Save.' : 'No sound devices were found.';
+}
+
 // Plays one local file. Mirrors the small part of the YouTube player's interface the decks use.
 class LocalPlayer {
   constructor(onState) {
@@ -103,6 +169,7 @@ class LocalPlayer {
     const f = (type, freq) => { const n = c.createBiquadFilter(); n.type = type; n.frequency.value = freq; n.gain.value = 0; return n; };
     this.low = f('lowshelf', 220); this.mid = f('peaking', 1000); this.mid.Q.value = 0.8; this.high = f('highshelf', 4500);
     this.gain = c.createGain();
+    this.cue = c.createGain(); this.cue.gain.value = 0; this.high.connect(this.cue).connect(cueNode()); // headphone send, before the volume
     c.createMediaElementSource(a).connect(this.low).connect(this.mid).connect(this.high).connect(this.gain).connect(c.destination);
     a.addEventListener('playing', () => onState(1));
     a.addEventListener('waiting', () => onState(3));
@@ -122,6 +189,7 @@ class LocalPlayer {
   getCurrentTime() { return this.audio.currentTime || 0; }
   getDuration() { const d = this.audio.duration; return isFinite(d) ? d : 0; }
   setGain(g) { this.gain.gain.setTargetAtTime(g, actx.currentTime, 0.015); }
+  setCue(g) { this.cue.gain.setTargetAtTime(g, actx.currentTime, 0.015); }
   setEq(band, db) { this[band].gain.setTargetAtTime(db, actx.currentTime, 0.06); }
   setPlaybackRate(r) { this.audio.playbackRate = r; }
   getPlaybackRate() { return this.audio.playbackRate; }
@@ -234,7 +302,7 @@ class Deck {
     this.baseBpm = 0; this.taps = []; this.rate = 1;
     this.kind = 'yt'; this.yt = null; this.ytReady = false; this.local = null; this.pending = null; this.track = null;
     this.eq = { low: 0, mid: 0, high: 0 };
-    this.seeking = false; this.lastVol = -1; this.pstate = -1;
+    this.seeking = false; this.lastVol = -1; this.lastCue = -1; this.pstate = -1;
     this.build();
   }
   get player() { return this.kind === 'file' ? this.local : this.yt; }
@@ -244,18 +312,21 @@ class Deck {
     const el = this.el = document.createElement('section');
     el.className = 'deck'; el.style.setProperty('--c', COLORS[this.id]);
     el.innerHTML = `
-      <header><span class="badge">${this.id}</span><div class="title">Empty</div><span class="status"></span></header>
+      <header><span class="badge">${NUM[this.id]}</span><div class="title">Empty</div><span class="role"></span></header>
+      <div class="status"></div>
+      <div class="deckmain">
       <div class="screen"><div class="ytwrap"><div id="player-${this.id}"></div></div><canvas class="wave" hidden></canvas>
-        <div class="placeholder">Search below, or load a track from the library</div></div>
-      <div class="meter" title="Output level of this deck"><i></i></div>
-      <form class="row" data-form="load"><input type="text" placeholder="Search YouTube or paste a link" aria-label="Load deck ${this.id}"><button>Load</button></form>
+        <div class="placeholder">Pick a track from the list below</div></div>
+      <div class="ctl">
       <div class="row"><span class="time el">0:00</span><input type="range" class="seek" min="0" max="1000" value="0" aria-label="Seek"><span class="time r rem">-0:00</span></div>
-      <div class="grid">
-        <button class="play" data-act="play">▶ Play</button><button data-act="cue" title="Jump to the start point and pause">Cue</button>
-        <button data-act="back">−5s</button><button data-act="fwd">+5s</button>
-      </div>
-      <div class="row"><span class="lbl">Volume</span><input type="range" class="vol" min="0" max="100" value="100" aria-label="Deck volume"></div>
+      <button class="play big" data-act="play">▶ Play</button>
       <details class="more"><summary>More controls</summary><div class="morebody">
+      <form class="row" data-form="load"><input type="text" placeholder="Search YouTube or paste a link" aria-label="Load player ${NUM[this.id]}"><button>Load</button></form>
+      <div class="grid">
+        <button data-act="cue" title="Jump to the start point and pause">Cue</button><button data-act="back">−5s</button><button data-act="fwd">+5s</button>
+      </div>
+      <div class="row"><span class="lbl">Volume</span><input type="range" class="vol" min="0" max="100" value="100" aria-label="Player volume"></div>
+      <div class="meter" title="Output level of this player"><i></i></div>
       <div class="row"><span class="lbl">Auto mix</span><span class="points">No mix points saved</span></div>
       <div class="grid">
         <button data-act="setcue" title="Auto DJ starts this track here">Set start</button>
@@ -274,8 +345,9 @@ class Deck {
         ${['low', 'mid', 'high'].map(b => `<label class="eqband">${b}<input type="range" class="eq" data-band="${b}" min="-26" max="6" value="0" aria-label="${b} EQ"></label>`).join('')}</div>
       <div class="grid">
         <button data-act="mute">Mute</button><button data-act="fadeout">Fade out</button>
-        <button data-act="xf" class="on" title="Route this deck through the crossfader">X-fader</button>
-      </div></div></details>`;
+        <button data-act="xf" class="on" title="Route this player through the mix slider">X-fader</button>
+      </div></div></details>
+      </div></div>`;
     $('#slot-' + this.id).append(el);
 
     el.addEventListener('click', e => {
@@ -315,9 +387,10 @@ class Deck {
     if (this.ready) this.pause(); // stop whatever this deck was playing, including the other kind of player
     cancelAnim('rate' + this.id);
     this.track = track; this.cue = track.start || 0; this.hot = [null, null, null, null]; this.loop = null;
-    this.baseBpm = track.bpm || 0; this.taps = []; this.pstate = -1; this.lastVol = -1;
+    this.baseBpm = track.bpm || 0; this.taps = []; this.pstate = -1; this.lastVol = -1; this.lastCue = -1;
     this.kind = isFile ? 'file' : 'yt';
     this.setStatus(''); this.renderTitle(); this.renderPads(); this.renderPoints();
+    if (isFile && out.hp && !out.ready && !out.tried) { out.tried = true; applyOutputs(); } // reconnect the saved headphones
     $('.placeholder', this.el)?.remove();
     $('.ytwrap', this.el).hidden = isFile; $('.wave', this.el).hidden = !isFile; this.el.classList.toggle('isfile', isFile);
 
@@ -325,7 +398,7 @@ class Deck {
       if (!this.local) this.local = new LocalPlayer(s => { if (this.kind === 'file') this.onState(s); });
       for (const b of ['low', 'mid', 'high']) this.local.setEq(b, this.eq[b]);
       this.local.load(track.file, this.cue, autoplay);
-      this.setRate(1); this.applyVolume(); queueAnalysis(track, true);
+      this.setRate(1); this.applyVolume(); queueAnalysis(track, true); syncLive();
       return;
     }
     const arg = { videoId: track.id, startSeconds: this.cue };
@@ -346,6 +419,7 @@ class Deck {
       });
     } else if (!this.ytReady) this.pending = { arg, autoplay };
     else this.cueOrLoad(arg, autoplay);
+    syncLive();
   }
   cueOrLoad(arg, autoplay) {
     this.setRate(1);
@@ -392,17 +466,32 @@ class Deck {
     const g = this.level() * state.master;
     $('.meter i', this.el).style.width = (this.isPlaying() ? g * 100 : 0) + '%';
     if (!this.ready) return;
-    if (this.kind === 'file') { if (g !== this.lastVol) { this.lastVol = g; this.local.setGain(g); } return; }
+    if (this.kind === 'file') {
+      if (g !== this.lastVol) { this.lastVol = g; this.local.setGain(g); }
+      const cg = this.inHeadphones() ? out.hpVol : 0; // the next track is heard in the headphones whatever the mix slider says
+      if (cg !== this.lastCue) { this.lastCue = cg; this.local.setCue(cg); }
+      return;
+    }
     const v = Math.round(g * 100);
     if (v !== this.lastVol) { this.lastVol = v; this.yt.setVolume(v); }
   }
 
+  inHeadphones() { return out.ready && this.kind === 'file' && this.id !== state.live && (this === deck.A || this === deck.B); }
+  renderRole() {
+    const r = $('.role', this.el), main = this === deck.A || this === deck.B;
+    r.textContent = !this.track || !main ? '' : this.id === state.live ? 'On speaker' : this.inHeadphones() ? 'In headphones' : 'Next';
+    r.classList.toggle('live', this.id === state.live);
+  }
+
   /* --- controls --- */
   act(a) {
-    if (a !== 'tap' && a !== 'xf' && a !== 'mute' && !this.track) return toast('Load a track on deck ' + this.id + ' first');
+    if (a !== 'tap' && a !== 'xf' && a !== 'mute' && !this.track) return toast('Load a track on Player ' + NUM[this.id] + ' first');
     const t = this.track;
     switch (a) {
-      case 'play': this.isPlaying() ? this.pause() : this.play(); break;
+      case 'play':
+        if (this.isPlaying()) { this.pause(); break; }
+        if ((this === deck.A || this === deck.B) && !otherDeck(this).isPlaying()) { cancelAnim('xf'); setX(this.side === 'L' ? 0 : 1); syncLive(); } // nothing else is playing: straight to the speaker
+        this.play(); break;
       case 'cue': this.seek(this.cue); this.pause(); break;
       case 'setcue': this.cue = t.start = +this.time().toFixed(2); saveTrack(t); this.renderPoints(); toast(`Start point saved at ${fmt(this.cue)}`); break;
       case 'setout':
@@ -432,13 +521,13 @@ class Deck {
   hotCue(i) {
     const b = $(`[data-hot="${i}"]`, this.el);
     if (b.dataset.skip) { delete b.dataset.skip; return; }
-    if (!this.track) return toast('Load a track on deck ' + this.id + ' first');
+    if (!this.track) return toast('Load a track on Player ' + NUM[this.id] + ' first');
     if (this.hot[i] == null) this.hot[i] = this.time(); else { this.seek(this.hot[i]); this.play(); }
     this.renderPads();
   }
   clearHot(i) { this.hot[i] = null; this.renderPads(); }
   beatLoop(beats) {
-    if (!this.track) return toast('Load a track on deck ' + this.id + ' first');
+    if (!this.track) return toast('Load a track on Player ' + NUM[this.id] + ' first');
     if (!this.baseBpm) return toast('Tap the BPM first so the loop length is known');
     const t = this.time();
     this.loop = { in: t, out: t + beats * 60 / this.baseBpm, on: true, beats }; this.renderPads();
@@ -455,7 +544,7 @@ class Deck {
   }
   effBpm() { return this.baseBpm * this.rate; }
   sync() {
-    if (!this.baseBpm) return toast('Tap the BPM on deck ' + this.id + ' first');
+    if (!this.baseBpm) return toast('Tap the BPM on Player ' + NUM[this.id] + ' first');
     const src = activeDecks().filter(d => d !== this && d.baseBpm).sort((a, b) => (b.isPlaying() - a.isPlaying()) || (b.level() - a.level()))[0];
     if (!src) return toast('The other deck has no BPM yet');
     const r = tempoRatio(src.effBpm(), this.baseBpm);
@@ -528,6 +617,7 @@ async function autoFade() {
   incoming.filter(d => !d.isPlaying()).forEach(d => d.play());
   const done = await animate('xf', state.x, to, state.fadeSec * 1000, setX);
   if (done && state.stopOut) activeDecks().filter(d => d.side !== inSide && d.xf).forEach(d => d.pause());
+  syncLive();
 }
 
 /* ---------- Auto DJ: plays the queue on decks A/B ----------
@@ -545,7 +635,7 @@ function takeNext() { const n = state.queue.shift(); saveQueue(); renderList(); 
 function startNextOn(d) {
   const next = takeNext();
   if (!next) return setAutoDJ(false, 'Queue finished');
-  d.fade = 1; setX(d.side === 'L' ? 0 : 1); d.load(next, true);
+  d.fade = 1; setX(d.side === 'L' ? 0 : 1); syncLive(); d.load(next, true);
 }
 function toggleAutoDJ() {
   if (state.autoDJ) return setAutoDJ(false);
@@ -584,7 +674,7 @@ async function seqMix(live, other) {
   live.fade = 1;
   const next = takeNext();
   if (!next) { state.transitioning = false; return setAutoDJ(false, 'Queue finished'); }
-  other.fade = 0; setX(other.side === 'L' ? 0 : 1);
+  other.fade = 0; setX(other.side === 'L' ? 0 : 1); syncLive();
   if (other.track === next && other.ready && !other.isPlaying()) other.play(); else other.load(next, true);
   await animate('fade' + other.id, 0, 1, half, v => { other.fade = v; other.applyVolume(); });
   state.transitioning = false;
@@ -615,6 +705,7 @@ async function beatMix(live, other) {
   live.pause(); live.fade = 1; live.local.setEq('low', live.eq.low); other.local.setEq('low', other.eq.low);
   other.setRate(r);
   if (r !== 1) animate('rate' + other.id, r, 1, 10000, v => other.setRate(v)); // drift back to the track's own tempo
+  syncLive();
   state.transitioning = false;
 }
 
@@ -717,7 +808,7 @@ function renderList() {
     const done = state.files.filter(t => t.analysed || t.failed).length;
     head = `<li class="head"><span>${done < state.files.length ? `Analysing beats: ${done} of ${state.files.length} done` : `${state.files.length} tracks ready`}</span><button data-do="mixall" class="big on">Auto-mix this folder</button></li>`;
   }
-  const loadBtns = activeDecks().map(d => `<button data-do="load" data-deck="${d.id}" style="--c:${COLORS[d.id]}" title="Load on deck ${d.id}">${d.id}</button>`).join('');
+  const loadBtns = activeDecks().map(d => `<button data-do="load" data-deck="${d.id}" style="--c:${COLORS[d.id]}" title="Load on Player ${NUM[d.id]}">${NUM[d.id]}</button>`).join('');
   ul.innerHTML = head + items.map((t, i) => {
     const file = t.kind === 'file';
     const sub = file ? (t.analysed ? `${t.bpm ? t.bpm.toFixed(1) + ' BPM' : 'No steady beat found'} · ${fmt(t.dur)}` : t.failed ? 'Could not read this file' : 'Analysing…')
@@ -777,15 +868,32 @@ $$('[data-fx]').forEach(b => b.addEventListener('click', () => fx(b.dataset.fx))
 
 /* ---------- mixer wiring ---------- */
 $('#xfader').addEventListener('input', e => { cancelAnim('xf'); setX(e.target.value / 1000); });
+$('#xfader').addEventListener('change', syncLive);
+$('#btn-bring').addEventListener('click', bringIn);
+$('#mix').addEventListener('input', e => {
+  cancelAnim('xf');
+  const next = otherDeck(deck[state.live]), m = e.target.value / 1000;
+  if (m > 0 && next.track && !next.isPlaying()) next.play(); // moving the slider is enough to start the next player
+  setMix(m);
+});
+$('#mix').addEventListener('change', e => { // released at the far end: the next player takes over
+  if (e.target.value < 995) return;
+  const old = deck[state.live]; setMix(1);
+  if (state.stopOut) old.pause();
+  syncLive();
+});
+$('#hp-vol').value = Math.round(out.hpVol * 100);
+$('#hp-vol').addEventListener('input', e => { out.hpVol = e.target.value / 100; store.set('hpVol', out.hpVol); applyVolumes(); });
+$('#btn-outs').addEventListener('click', findDevices);
 $('#master').addEventListener('input', e => { state.master = e.target.value / 100; $('#master-out').textContent = e.target.value; applyVolumes(); });
 $('#btn-fade').addEventListener('click', autoFade);
-$('#btn-cutL').addEventListener('click', () => { cancelAnim('xf'); setX(0); });
-$('#btn-cutR').addEventListener('click', () => { cancelAnim('xf'); setX(1); });
+$('#btn-cutL').addEventListener('click', () => { cancelAnim('xf'); setX(0); syncLive(); });
+$('#btn-cutR').addEventListener('click', () => { cancelAnim('xf'); setX(1); syncLive(); });
 $('#btn-center').addEventListener('click', () => { cancelAnim('xf'); setX(0.5); });
 $('#fade-sec').value = state.fadeSec;
 $('#fade-sec').addEventListener('change', e => { state.fadeSec = +e.target.value; store.set('fadeSec', state.fadeSec); });
 $('#curve').value = state.curve;
-$('#curve').addEventListener('change', e => { state.curve = e.target.value; store.set('curve', state.curve); applyVolumes(); });
+$('#curve').addEventListener('change', e => { state.curve = e.target.value; store.set('curve2', state.curve); applyVolumes(); });
 $('#stop-out').checked = state.stopOut;
 $('#stop-out').addEventListener('change', e => { state.stopOut = e.target.checked; store.set('stopOut', state.stopOut); });
 $('#btn-autodj').addEventListener('click', toggleAutoDJ);
@@ -801,6 +909,10 @@ $('#btn-settings').addEventListener('click', openSettings);
 $('#settings').addEventListener('close', () => {
   const k = $('#api-key').value.trim(), changed = k !== state.apiKey;
   state.apiKey = k; store.set('apiKey', k);
+  if (!$('#out-pick').hidden) { // sound devices were listed: remember the choice and connect them
+    out.main = $('#out-main').value; out.hp = $('#out-hp').value; out.mainSet = out.mainSet || !!out.main;
+    store.set('outMain', out.main); store.set('outHp', out.hp); applyOutputs();
+  }
   const q = state.pendingSearch; state.pendingSearch = null;
   if (k && q) search(q); // run the search that was waiting for the key
   else if (changed && k) { state.results = []; setTab('results'); }
@@ -836,5 +948,5 @@ window.onYouTubeIframeAPIReady = () => { state.apiReady = true; };
   s.onerror = () => toast('YouTube is unreachable right now. Your own music files still work.');
   document.head.append(s);
 })();
-setFour(state.four); setX(0); setTab(apiKey() ? 'results' : 'library');
+setFour(state.four); setX(0); syncLive(); setTab(apiKey() ? 'results' : 'library');
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
