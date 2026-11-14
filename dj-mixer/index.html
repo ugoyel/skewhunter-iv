@@ -57,9 +57,17 @@
       <input id="search" type="search" placeholder="Search YouTube for a song or artist, or paste a link" autocomplete="off">
       <button>Search</button>
     </form>
+    <div class="row wrap">
+      <button id="btn-folder" type="button" class="big">Open music folder</button>
+      <button id="btn-files" type="button">Add music files</button>
+      <span class="hint">Your own music gets automatic beat-matched mixing.</span>
+      <input id="folder-input" type="file" webkitdirectory multiple hidden>
+      <input id="files-input" type="file" accept="audio/*,.mp3,.m4a,.wav,.flac,.ogg,.opus,.aac" multiple hidden>
+    </div>
     <div class="tabs" role="tablist">
       <button data-tab="library" class="on">Library <span id="n-library"></span></button>
       <button data-tab="queue">Queue <span id="n-queue"></span></button>
+      <button data-tab="files">My music <span id="n-files"></span></button>
       <button data-tab="results">YouTube</button>
     </div>
     <ul id="list" class="list"></ul>
@@ -67,7 +75,7 @@
 </main>
 
 <footer class="foot">
-  Videos are played by the embedded YouTube player. <a href="privacy.html">Privacy</a> ·
+  YouTube tracks are played by the embedded YouTube player. Your own music files never leave this device. <a href="privacy.html">Privacy</a> ·
   <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">YouTube Terms of Service</a>
 </footer>
 

@@ -25,12 +25,27 @@ It must be served over http(s); the YouTube player does not work from a `file://
 - FX pads (horn, siren, laser, riser) synthesised in the browser
 - Installable PWA (manifest + service worker), privacy page included
 
-## What it deliberately does not do
+## Two kinds of tracks
 
-YouTube does not give apps access to a video's audio, and its terms forbid extracting it.
-So there is no EQ, filters, effects on the music, waveform, automatic BPM detection,
-key lock, recording, or background/lock-screen playback. BPM is tapped by hand, and
-loops are timed by polling (accurate to roughly a tenth of a second, not sample-accurate).
+**Your own music files** ("Open music folder" or "Add music files"; a pen drive works).
+Every file is analysed on the device for tempo, beat positions, where the music really
+starts and where it winds down. "Auto-mix this folder" then plays them all: the next
+track starts on the beat, its speed is matched (key preserved), the bass is swapped half
+way and the blend runs for 16 beats. If two tempos are more than 8% apart it does a short
+blend at normal speed instead. These decks also get a waveform and a 3-band EQ.
+Analysis results are remembered per file; the files themselves must be re-opened after a
+reload because browsers do not keep access to them.
+
+**YouTube tracks.** YouTube does not give apps a video's audio, and its terms forbid
+extracting it, so nothing can be detected automatically. Instead you teach each track once
+under More controls: Set start, Set mix-out, and tap the BPM. The app remembers these per
+video, and Auto DJ then starts each track at its start point and leaves at its mix-out
+point with a fade-out followed by a fade-in (no overlap). YouTube decks have no EQ,
+waveform, recording, or background/lock-screen playback, and loops are timed by polling
+(accurate to roughly a tenth of a second).
+
+The beat analysis assumes a steady tempo (most electronic, pop and hip-hop). Live
+recordings with a drifting tempo will be detected less reliably.
 
 ## How it stays inside YouTube's API policies
 
