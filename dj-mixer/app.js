@@ -16,6 +16,11 @@ const store = {
   set(k, v) { try { localStorage.setItem('cd.' + k, JSON.stringify(v)); } catch { /* storage unavailable */ } }
 };
 
+// Put your own YouTube Data API key here before publishing so users can search without any setup.
+// Restrict the key to your site's address in Google Cloud Console.
+const BUILT_IN_API_KEY = '';
+const apiKey = () => state.apiKey || BUILT_IN_API_KEY;
+
 const state = {
   x: 0, master: 1,
   curve: store.get('curve', 'blend'),
@@ -25,7 +30,7 @@ const state = {
   apiKey: store.get('apiKey', ''),
   library: store.get('library', []),
   queue: store.get('queue', []),
-  results: [], tab: 'library',
+  results: [], resultsTitle: '', tab: 'library',
   autoDJ: false, transitioning: false, apiReady: false
 };
 
@@ -94,7 +99,7 @@ class Deck {
       <header><span class="badge">${this.id}</span><div class="title">Empty</div><span class="status"></span></header>
       <div class="screen"><div id="player-${this.id}"></div><div class="placeholder">Paste a link below, or load a track from the library</div></div>
       <div class="meter" title="Output level of this deck"><i></i></div>
-      <form class="row" data-form="load"><input type="text" placeholder="YouTube link or video ID" aria-label="Load deck ${this.id}"><button>Load</button></form>
+      <form class="row" data-form="load"><input type="text" placeholder="Search YouTube or paste a link" aria-label="Load deck ${this.id}"><button>Load</button></form>
       <div class="row"><span class="time el">0:00</span><input type="range" class="seek" min="0" max="1000" value="0" aria-label="Seek"><span class="time r rem">-0:00</span></div>
       <div class="grid">
         <button class="play" data-act="play">▶ Play</button><button data-act="cue" title="Jump to cue point and pause">Cue</button>
@@ -124,8 +129,10 @@ class Deck {
     el.addEventListener('submit', e => {
       e.preventDefault();
       const inp = $('input', e.target), id = parseVideoId(inp.value);
-      if (!id) return toast('That does not look like a YouTube link or video ID');
-      inp.value = ''; this.load(addToLibrary({ id }), false);
+      const q = inp.value.trim(); if (!q) return;
+      inp.value = '';
+      if (id) return this.load(addToLibrary({ id }), false);
+      search(q); $('.library').scrollIntoView({ behavior: 'smooth', block: 'start' }); // words, not a link: search instead
     });
     // long-press / right-click clears a hot cue
     for (const b of $$('[data-hot]', el)) {
@@ -381,28 +388,43 @@ async function fetchTitle(t) { // best effort; the deck fills the title in on lo
 async function search(q) {
   const id = parseVideoId(q);
   if (id) { addToLibrary({ id }); setTab('library'); return toast('Added to library'); }
-  if (!state.apiKey) return toast('Paste a YouTube link, or add a YouTube Data API key in Settings to search by name');
+  if (!apiKey()) { setTab('results'); return toast('Searching needs a YouTube Data API key. Add one in Settings.'); }
   try {
-    const u = 'https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&maxResults=20&q=' + encodeURIComponent(q) + '&key=' + encodeURIComponent(state.apiKey);
-    const r = await fetch(u), j = await r.json();
-    if (!r.ok) throw new Error(j.error?.message || 'Search failed');
-    const dec = s => { const e = document.createElement('textarea'); e.innerHTML = s; return e.value; };
-    state.results = (j.items || []).filter(i => i.id?.videoId).map(i => ({ id: i.id.videoId, title: dec(i.snippet.title), channel: dec(i.snippet.channelTitle) }));
-    setTab('results');
+    state.results = await ytList('search?part=snippet&type=video&videoEmbeddable=true&maxResults=25&q=' + encodeURIComponent(q));
+    state.resultsTitle = 'Results for “' + q + '”'; setTab('results');
   } catch (e) { toast('Search failed: ' + e.message); }
 }
-function setTab(tab) { state.tab = tab; $$('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab)); renderList(); }
+async function ytList(path) {
+  const r = await fetch('https://www.googleapis.com/youtube/v3/' + path + '&key=' + encodeURIComponent(apiKey())), j = await r.json();
+  if (!r.ok) throw new Error(j.error?.message || 'request failed');
+  const dec = s => { const e = document.createElement('textarea'); e.innerHTML = s; return e.value; };
+  return (j.items || []).map(i => ({ id: i.id?.videoId || i.id, title: dec(i.snippet.title), channel: dec(i.snippet.channelTitle) })).filter(t => typeof t.id === 'string');
+}
+// Popular music right now, shown on the YouTube tab so there is something to browse before searching.
+async function trending() {
+  if (!apiKey()) return;
+  try {
+    const region = (navigator.language || '').split('-')[1] || 'US';
+    state.results = await ytList('videos?part=snippet&chart=mostPopular&videoCategoryId=10&maxResults=25&regionCode=' + encodeURIComponent(region));
+    state.resultsTitle = 'Popular music right now'; if (state.tab === 'results') renderList();
+  } catch (e) { if (state.tab === 'results') toast('Could not load popular music: ' + e.message); }
+}
+function setTab(tab) {
+  state.tab = tab; $$('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab)); renderList();
+  if (tab === 'results' && !state.results.length) trending();
+}
 function renderList() {
   $('#n-library').textContent = state.library.length ? `(${state.library.length})` : '';
   $('#n-queue').textContent = state.queue.length ? `(${state.queue.length})` : '';
   const items = state[state.tab], ul = $('#list');
   if (!items.length) {
-    ul.innerHTML = `<li class="empty">${{ library: 'Your library is empty. Paste a YouTube link above to add a track.', queue: 'The queue is empty. Use “+ Queue” on a library track, then turn Auto DJ on.', results: 'No results yet.' }[state.tab]}</li>`;
+    ul.innerHTML = `<li class="empty">${{ library: 'Your library is empty. Paste a YouTube link above to add a track.', queue: 'The queue is empty. Use “+ Queue” on a library track, then turn Auto DJ on.', results: apiKey() ? 'Type a song or artist above to search YouTube.' : 'To browse and search YouTube here, add a free YouTube Data API key in Settings. Until then, paste a link to add a track.' }[state.tab]}</li>`;
     return;
   }
+  const head = state.tab === 'results' && state.resultsTitle ? `<li class="empty" style="text-align:left;padding:4px 8px">${esc(state.resultsTitle)}</li>` : '';
   const loadBtns = activeDecks().map(d => `<button data-do="load" data-deck="${d.id}" style="--c:${COLORS[d.id]}" title="Load on deck ${d.id}">${d.id}</button>`).join('');
-  ul.innerHTML = items.map((t, i) => `<li data-i="${i}">
-    <img loading="lazy" alt="" src="https://i.ytimg.com/vi/${esc(t.id)}/default.jpg">
+  ul.innerHTML = head + items.map((t, i) => `<li data-i="${i}">
+    <img loading="lazy" alt="" src="https://i.ytimg.com/vi/${esc(t.id)}/mqdefault.jpg">
     <div class="meta"><b>${esc(t.title || t.id)}</b><span>${esc(t.channel || '')}</span></div>
     <div class="acts">${loadBtns}
       ${state.tab === 'queue' ? '' : '<button data-do="queue">+ Queue</button>'}
@@ -413,7 +435,10 @@ $('#list').addEventListener('click', e => {
   const b = e.target.closest('button[data-do]'); if (!b) return;
   const i = +b.closest('li').dataset.i, t = state[state.tab][i]; if (!t) return;
   switch (b.dataset.do) {
-    case 'load': deck[b.dataset.deck].load(state.tab === 'queue' ? t : addToLibrary(t), false); break;
+    case 'load': {
+      const d = deck[b.dataset.deck]; d.load(state.tab === 'queue' ? t : addToLibrary(t), false);
+      d.el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); break;
+    }
     case 'queue': state.queue.push(addToLibrary(t)); saveQueue(); renderList(); toast('Added to queue'); break;
     case 'save': addToLibrary(t); toast('Saved to library'); break;
     case 'del':
@@ -469,7 +494,11 @@ function setFour(on) {
 }
 $('#btn-4deck').addEventListener('click', () => setFour(!state.four));
 $('#btn-settings').addEventListener('click', () => { $('#api-key').value = state.apiKey; $('#settings').showModal(); });
-$('#settings').addEventListener('close', () => { state.apiKey = $('#api-key').value.trim(); store.set('apiKey', state.apiKey); });
+$('#settings').addEventListener('close', () => {
+  const k = $('#api-key').value.trim(), changed = k !== state.apiKey;
+  state.apiKey = k; store.set('apiKey', k);
+  if (changed && k) { state.results = []; setTab('results'); }
+});
 
 document.addEventListener('keydown', e => {
   if (e.target.closest('input,select,textarea,dialog') || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -499,5 +528,5 @@ window.onYouTubeIframeAPIReady = () => { state.apiReady = true; };
   s.onerror = () => toast('Could not reach YouTube. Check your connection and reload.');
   document.head.append(s);
 })();
-setFour(state.four); setX(0); renderList();
+setFour(state.four); setX(0); setTab(apiKey() ? 'results' : 'library');
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});

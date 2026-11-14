@@ -52,13 +52,13 @@
 
   <section class="library">
     <form id="search-form" class="row">
-      <input id="search" type="search" placeholder="Search, or paste a YouTube link" autocomplete="off">
-      <button>Add / Search</button>
+      <input id="search" type="search" placeholder="Search YouTube for a song or artist, or paste a link" autocomplete="off">
+      <button>Search</button>
     </form>
     <div class="tabs" role="tablist">
       <button data-tab="library" class="on">Library <span id="n-library"></span></button>
       <button data-tab="queue">Queue <span id="n-queue"></span></button>
-      <button data-tab="results">Search results</button>
+      <button data-tab="results">YouTube</button>
     </div>
     <ul id="list" class="list"></ul>
   </section>
@@ -72,10 +72,10 @@
 <dialog id="settings">
   <form method="dialog">
     <h2>Settings</h2>
-    <label>YouTube Data API key (optional, enables search)
+    <label>YouTube Data API key (lets you browse and search YouTube in the app)
       <input id="api-key" type="text" placeholder="AIza…" autocomplete="off">
     </label>
-    <p class="hint">Without a key you can still add any track by pasting its link. The key is stored only on this device.</p>
+    <p class="hint">Get a free key at console.cloud.google.com: create a project, enable “YouTube Data API v3”, then Credentials → Create API key. Without a key you can still add any track by pasting its link. The key is stored only on this device.</p>
     <p class="hint">Shortcuts: <kbd>Q</kbd> play A · <kbd>P</kbd> play B · <kbd>←</kbd><kbd>→</kbd> crossfader · <kbd>F</kbd> fade</p>
     <div class="row end"><button value="save" class="big">Save</button></div>
   </form>
