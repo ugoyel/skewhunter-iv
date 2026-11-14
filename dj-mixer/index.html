@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0d0f14">
-<title>CrossDeck — DJ Mixer</title>
+<meta name="theme-color" content="#0b0d12">
+<title>CrossDeck — Party Mixer</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -12,91 +12,78 @@
 </head>
 <body>
 <header class="top">
-  <div class="brand"><img src="icon.svg" alt="" width="28" height="28"><b>CrossDeck</b></div>
-  <div class="topbtns"><button id="btn-settings" class="pill" aria-label="Settings">Settings</button></div>
+  <div class="brand"><img src="icon.svg" alt="" width="26" height="26"><b>CrossDeck</b></div>
+  <div class="topbtns">
+    <a class="pill" href="help.html">How to use</a>
+    <button id="btn-settings" class="pill" aria-label="Settings">Settings</button>
+  </div>
 </header>
 
 <main>
   <div class="stage" id="stage">
     <div id="slot-A"></div>
-    <section class="mixer" id="mixer">
-      <div class="mixrow">
-        <span id="mix-from" class="mixlbl">1</span>
-        <input type="range" id="mix" min="0" max="1000" value="0" aria-label="Mix from the current player to the next one">
-        <span id="mix-to" class="mixlbl">2</span>
-      </div>
-      <p class="hint" id="mix-hint"></p>
-      <label class="row" id="hp-row" hidden>Headphones <input type="range" id="hp-vol" min="0" max="100" value="80" aria-label="Headphone volume"></label>
-      <details class="more"><summary>More controls</summary><div class="morebody">
-      <div class="row wrap">
-        <button id="btn-autodj" class="pill" title="Play the queue automatically">Auto DJ: Off</button>
-        <button id="btn-4deck" class="pill" title="Show players 3 and 4">4 players</button>
-      </div>
-      <label class="row">Master <input type="range" id="master" min="0" max="100" value="100"><output id="master-out">100</output></label>
-      <div class="xf">
-        <div class="xf-labels"><span>1<span class="cd"> / 3</span></span><span>2<span class="cd"> / 4</span></span></div>
-        <input type="range" id="xfader" min="0" max="1000" value="0" aria-label="Crossfader">
-      </div>
-      <div class="row wrap">
-        <button id="btn-fade" class="big">Fade ⇄</button>
-        <label>over <select id="fade-sec"><option>2</option><option>4</option><option>8</option><option>12</option><option>16</option><option>24</option></select> s</label>
-      </div>
-      <div class="row wrap">
-        <label>Curve <select id="curve"><option value="linear">Linear</option><option value="blend">Blend</option><option value="cut">Cut</option></select></label>
-        <button id="btn-cutL" title="Snap to left">◀ Cut</button><button id="btn-center">Center</button><button id="btn-cutR" title="Snap to right">Cut ▶</button>
-      </div>
-      <label class="row chk"><input type="checkbox" id="stop-out" checked> Pause the old player once the new one has taken over</label>
-      <h2>FX pads</h2>
-      <div class="pads">
-        <button data-fx="horn">Horn</button><button data-fx="siren">Siren</button>
-        <button data-fx="laser">Laser</button><button data-fx="riser">Riser</button>
-      </div>
-      </div></details>
-    </section>
     <div id="slot-B"></div>
-    <div id="slot-C" class="extra"></div>
-    <div id="slot-D" class="extra"></div>
+    <div id="slot-C"></div>
   </div>
 
   <section class="library">
-    <form id="search-form" class="row">
-      <input id="search" type="search" placeholder="Search YouTube" autocomplete="off">
-      <button>Search</button>
+    <form id="search-form" autocomplete="off">
+      <div class="searchbox">
+        <input id="search" type="text" inputmode="search" enterkeyhint="search" placeholder="Search YouTube" aria-label="Search YouTube" autocomplete="off">
+        <button type="button" id="search-clear" title="Clear" aria-label="Clear search" hidden>✕</button>
+        <button class="go" aria-label="Search">Search</button>
+      </div>
+      <div id="history" class="history" hidden></div>
     </form>
-    <div class="row wrap">
-      <button id="btn-folder" type="button" class="big">Open music folder</button>
+    <div class="tabs" role="tablist">
+      <button data-tab="results">YouTube</button>
+      <button data-tab="library">Saved <span id="n-library"></span></button>
+      <button data-tab="queue">Queue <span id="n-queue"></span></button>
+      <button data-tab="files">My music <span id="n-files"></span></button>
+    </div>
+    <div id="files-bar" class="row wrap" hidden>
+      <button id="btn-folder" type="button">Open music folder</button>
       <button id="btn-files" type="button">Add music files</button>
-      <span class="hint">Your own music gets automatic beat-matched mixing.</span>
       <input id="folder-input" type="file" webkitdirectory multiple hidden>
       <input id="files-input" type="file" accept="audio/*,.mp3,.m4a,.wav,.flac,.ogg,.opus,.aac" multiple hidden>
     </div>
-    <div class="tabs" role="tablist">
-      <button data-tab="library" class="on">Library <span id="n-library"></span></button>
-      <button data-tab="queue">Queue <span id="n-queue"></span></button>
-      <button data-tab="files">My music <span id="n-files"></span></button>
-      <button data-tab="results">YouTube</button>
-    </div>
     <ul id="list" class="list"></ul>
   </section>
+
+  <footer class="foot">
+    YouTube tracks are played by the embedded YouTube player. Your own music files never leave this device.
+    <a href="help.html">How to use</a> · <a href="privacy.html">Privacy</a> ·
+    <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">YouTube Terms of Service</a>
+  </footer>
 </main>
 
-<footer class="foot">
-  YouTube tracks are played by the embedded YouTube player. Your own music files never leave this device. <a href="privacy.html">Privacy</a> ·
-  <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">YouTube Terms of Service</a>
-</footer>
+<div class="dock" id="dock">
+  <div class="panel" id="panel" hidden>
+    <div class="row wrap">
+      <button id="btn-autodj" title="Play the queue automatically">Auto DJ: Off</button>
+      <button id="btn-fade" title="Fade to the next player automatically">Fade</button>
+      <label>over <select id="fade-sec"><option>2</option><option>4</option><option>8</option><option>12</option><option>16</option><option>24</option></select> s</label>
+    </div>
+    <label class="row"><span class="lbl">Master</span><input type="range" id="master" min="0" max="100" value="100" aria-label="Master volume"></label>
+    <label class="row" id="hp-row" hidden><span class="lbl">Phones</span><input type="range" id="hp-vol" min="0" max="100" value="80" aria-label="Headphone volume"></label>
+    <label class="row chk"><input type="checkbox" id="stop-out" checked> Pause the old player once the new one has taken over</label>
+    <div class="pads">
+      <button data-fx="horn">Horn</button><button data-fx="siren">Siren</button>
+      <button data-fx="laser">Laser</button><button data-fx="riser">Riser</button>
+    </div>
+  </div>
+  <div class="mixrow">
+    <span id="mix-from" class="mixlbl" title="Playing on the speaker now">1</span>
+    <input type="range" id="mix" min="0" max="1000" value="0" aria-label="Mix from the current player to the next one">
+    <button id="mix-to" class="mixlbl" title="Next player. Tap to choose the other one.">2</button>
+    <button id="btn-panel" title="Auto DJ, fade, master volume, effects" aria-label="More mixer controls">⋯</button>
+  </div>
+  <div class="mixhint" id="mix-hint"></div>
+</div>
 
 <dialog id="settings">
   <form method="dialog">
     <h2>Settings</h2>
-    <label>YouTube Data API key (lets you browse and search YouTube in the app)
-      <input id="api-key" type="text" placeholder="AIza…" autocomplete="off">
-    </label>
-    <ol class="hint">
-      <li>Open <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener">Google Cloud Console → YouTube Data API v3</a> and press Enable (create a project if asked).</li>
-      <li>Go to Credentials → Create credentials → API key, and copy it.</li>
-      <li>Paste it above and press Save. Search then works inside the app.</li>
-    </ol>
-    <p class="hint">This is a one-time step that YouTube requires for search. The key is stored only on this device. Pasting a link works without it.</p>
     <h3>Speaker and headphones</h3>
     <p class="hint" id="out-note">Preview the next track in headphones while the speaker keeps playing. Works with your own music files, on Chrome or Edge on a computer.</p>
     <button type="button" id="btn-outs">Find my sound devices</button>
@@ -104,8 +91,12 @@
       <label>Speaker (everyone hears this) <select id="out-main"></select></label>
       <label>Headphones (only you hear this) <select id="out-hp"></select></label>
     </div>
-    <p class="hint">Shortcuts: <kbd>Q</kbd> play 1 · <kbd>P</kbd> play 2 · <kbd>←</kbd><kbd>→</kbd> mix · <kbd>F</kbd> fade</p>
-    <div class="row end"><button value="save" class="big">Save</button></div>
+    <h3>YouTube search key</h3>
+    <label>Use a different YouTube Data API key (optional)
+      <input id="api-key" type="text" placeholder="Leave empty to use the app's own key" autocomplete="off">
+    </label>
+    <p class="hint">Keyboard: <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> play or pause a player · <kbd>←</kbd><kbd>→</kbd> mix · <kbd>F</kbd> fade</p>
+    <div class="row end"><button value="save" class="on">Save</button></div>
   </form>
 </dialog>
 <div id="toast" role="status"></div>

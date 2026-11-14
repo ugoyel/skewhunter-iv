@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b0d12">
+<title>CrossDeck — How to use</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  :root{--bg:#0b0d12;--card:#151923;--line:#28303f;--text:#eef1f7;--mut:#9aa2b5;--acc:#4cc9f0}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  main{max-width:720px;margin:0 auto;padding:16px 16px 60px}
+  a{color:var(--acc)}
+  h1{font-size:26px;margin:8px 0 4px}
+  h2{font-size:19px;margin:0 0 8px}
+  p{margin:8px 0}
+  .back{display:inline-block;margin:8px 0 16px;padding:6px 14px;border:1px solid var(--line);border-radius:999px;text-decoration:none;color:var(--text);background:var(--card);font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin:14px 0}
+  img{display:block;width:100%;max-width:390px;height:auto;border-radius:12px;border:1px solid var(--line);margin:10px auto}
+  dl{margin:8px 0}
+  dt{font-weight:700;margin-top:12px}
+  dd{margin:2px 0 0;color:var(--mut)}
+  dd b{color:var(--text);font-weight:600}
+  .k{display:inline-grid;place-items:center;min-width:26px;height:26px;padding:0 7px;border-radius:8px;border:1px solid var(--line);background:#1d2331;font-size:13px;font-weight:700;color:var(--text);vertical-align:middle}
+  .k1{background:#4cc9f0;color:#07080b;border-color:transparent}.k2{background:#f72585;color:#07080b;border-color:transparent}.k3{background:#ffb703;color:#07080b;border-color:transparent}
+  ol{padding-left:20px}
+  li{margin:6px 0}
+  .tip{border-left:3px solid var(--acc);padding:2px 0 2px 12px;color:var(--mut);margin:12px 0}
+  nav{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+  nav a{font-size:13px;padding:4px 10px;border:1px solid var(--line);border-radius:999px;text-decoration:none;color:var(--mut)}
+</style>
+</head>
+<body>
+<main>
+<a class="back" href="index.html">← Back to the mixer</a>
+<h1>How to use CrossDeck</h1>
+<p>Three players, one slider. Pick songs, slide between them, keep the party going.</p>
+<nav>
+  <a href="#quick">Quick start</a><a href="#players">Players</a><a href="#search">Search</a><a href="#list">Song buttons</a>
+  <a href="#mix">Mix slider</a><a href="#tabs">Tabs</a><a href="#panel">Auto DJ &amp; extras</a><a href="#more">More controls</a>
+  <a href="#music">My music</a><a href="#phones">Headphones</a><a href="#fix">If something goes wrong</a>
+</nav>
+
+<section id="quick">
+  <h2>Quick start: your first mix in 4 taps</h2>
+  <ol>
+    <li>Type a song or artist in <b>Search YouTube</b> and press <b>Search</b>.</li>
+    <li>On a song, tap <span class="k k1">1</span>. It starts playing on Player 1.</li>
+    <li>On another song, tap <span class="k k2">2</span>. It starts quietly on Player 2 (10%).</li>
+    <li>When you are ready, drag the big slider at the bottom to the right. Song 2 gets louder, song 1 fades away.</li>
+  </ol>
+  <p>Now Player 2 is the main one. Pick the next song with <span class="k k3">3</span> and slide again. After 3 comes 1 again, round and round.</p>
+  <img src="help/overview.png" alt="The song list with the mix slider at the bottom of the screen">
+</section>
+
+<section id="players">
+  <h2>The three players</h2>
+  <img src="help/players.png" alt="Three players stacked: player 1 on speaker, player 2 next, player 3 empty">
+  <dl>
+    <dt>The glowing player</dt><dd>This one is <b>on the speaker</b>: it is what the room hears. The line under the title shows how loud it is, for example “On speaker · 65%”.</dd>
+    <dt>“Next”</dt><dd>The player that the slider will bring in.</dd>
+    <dt><span class="k">▶</span> / <span class="k">❚❚</span> Play and pause</dt><dd>Starts or stops that player. <b>Use it</b> to pause a song you are preparing, or to restart one.</dd>
+    <dt><span class="k">« 10</span> <span class="k">10 »</span> Skip</dt><dd>Jumps 10 seconds back or forward. <b>Use it</b> to skip a long intro or find the part you want.</dd>
+    <dt>The thin bar with a dot</dt><dd>Shows where the song is. Drag the dot to jump anywhere. Time played is on the left, time left on the right.</dd>
+    <dt><span class="k">⋯</span> More</dt><dd>Opens extra controls for that player (see <a href="#more">More controls</a>). You never need these for a normal party.</dd>
+  </dl>
+</section>
+
+<section id="search">
+  <h2>Searching YouTube</h2>
+  <img src="help/search.png" alt="Search box with the list of recent searches open underneath">
+  <dl>
+    <dt>Search box</dt><dd>Type a song, artist or mood (“90s dance hits”). Your text <b>stays in the box</b> after searching, so you can change one word and search again.</dd>
+    <dt><span class="k">✕</span> inside the box</dt><dd>Clears the text.</dd>
+    <dt>Recent searches</dt><dd>Tap the box to see your last 10 searches. Tap one to search it again. Tap its <span class="k">✕</span> to remove it from the list.</dd>
+    <dt>Show more results</dt><dd>At the bottom of the list. Loads the next page of results.</dd>
+  </dl>
+  <p class="tip">Results come from YouTube in YouTube's own order. Clips shorter than one minute and live streams are left out because they cannot be mixed.</p>
+</section>
+
+<section id="list">
+  <h2>The buttons on each song</h2>
+  <img src="help/row.png" alt="One song row with five round buttons: 1, 2, 3, plus and star">
+  <dl>
+    <dt><span class="k k1">1</span> <span class="k k2">2</span> <span class="k k3">3</span></dt><dd>Play this song on that player, straight away. If nothing else is playing it starts at full volume. If a song is already playing, the new one joins quietly at 10% so it does not interrupt.</dd>
+    <dt><span class="k">＋</span> Add to queue</dt><dd>Lines the song up for Auto DJ. <b>Use it</b> when you want the app to play a list by itself.</dd>
+    <dt><span class="k">☆</span> Save</dt><dd>Keeps the song in your <b>Saved</b> tab so you can find it next time without searching.</dd>
+    <dt><span class="k">✕</span> Remove</dt><dd>Shown in Saved, Queue and My music. Takes the song off that list.</dd>
+  </dl>
+</section>
+
+<section id="mix">
+  <h2>The mix slider</h2>
+  <img src="help/mix.png" alt="Mix bar: badge 1 on the left, slider in the middle, badge 2 on the right">
+  <dl>
+    <dt>Left badge</dt><dd>The player on the speaker now.</dd>
+    <dt>Right badge</dt><dd>The player that comes next. <b>Tap it</b> to choose the other player as next instead.</dd>
+    <dt>The slider</dt><dd>Far left: only the current song. Far right: only the next song. In between: both. Slide slowly for a smooth blend, quickly for a sharp cut.</dd>
+    <dt>Letting go at the far right</dt><dd>The next player becomes the main one, the old one stops, and the slider is ready for the following player: 1 → 2 → 3 → 1.</dd>
+  </dl>
+  <p class="tip">Good moment to slide: the last 20–30 seconds of the current song, or right after a chorus ends.</p>
+</section>
+
+<section id="tabs">
+  <h2>The four tabs</h2>
+  <img src="help/tabs.png" alt="Tabs: YouTube, Saved, Queue, My music">
+  <dl>
+    <dt>YouTube</dt><dd>Search results, or popular music when you have not searched yet.</dd>
+    <dt>Saved</dt><dd>Songs you kept with <span class="k">☆</span>, and every song you have played.</dd>
+    <dt>Queue</dt><dd>Songs waiting for Auto DJ, in order.</dd>
+    <dt>My music</dt><dd>Music files from your own device or pen drive (see <a href="#music">My music</a>).</dd>
+  </dl>
+</section>
+
+<section id="panel">
+  <h2>Auto DJ and extras <span class="k">⋯</span></h2>
+  <p>Tap <span class="k">⋯</span> at the right end of the mix bar.</p>
+  <img src="help/panel.png" alt="Opened panel above the mix slider with Auto DJ, Fade, master volume and effect buttons">
+  <dl>
+    <dt>Auto DJ</dt><dd>Plays your Queue by itself, moving from player to player with a fade between songs. <b>Use it</b> when you want to dance instead of DJ. Add songs with <span class="k">＋</span> first.</dd>
+    <dt>Fade</dt><dd>Does the slide for you, smoothly, over the number of seconds you choose. <b>Use it</b> when your hands are full.</dd>
+    <dt>Master</dt><dd>Overall loudness of everything.</dd>
+    <dt>Pause the old player…</dt><dd>When ticked, the song you mixed away from stops. Untick it to let it keep running silently.</dd>
+    <dt>Horn, Siren, Laser, Riser</dt><dd>Party sound effects. <b>Use them</b> sparingly: a horn at a drop, a riser before a big chorus.</dd>
+  </dl>
+  <img src="help/queue.png" alt="Queue tab with two songs lined up">
+</section>
+
+<section id="more">
+  <h2>More controls on a player <span class="k">⋯</span></h2>
+  <img src="help/more.png" alt="A player with its extra controls opened">
+  <dl>
+    <dt>Volume, Mute, Fade out</dt><dd>Fine control of one player only. <b>Fade out</b> lowers it gently over 3 seconds; tap again to bring it back.</dd>
+    <dt>Set start</dt><dd>Play to where the song really kicks in and tap this. Auto DJ will always start this song there. Saved for next time.</dd>
+    <dt>Set mix-out</dt><dd>Play to where the song should hand over (for example before a long ending) and tap this. Auto DJ will leave the song there.</dd>
+    <dt>Go to start / Clear</dt><dd>Jump back to the saved start point, or forget the saved points.</dd>
+    <dt>Hot cue 1–4</dt><dd>Bookmarks. Tap an empty one to remember this moment; tap it again any time to jump back there. Long-press to clear. <b>Use them</b> to replay a favourite chorus.</dd>
+    <dt>Loop In / Out / Exit</dt><dd>Tap <b>In</b> at the start of a part, <b>Out</b> at its end, and it repeats until you tap <b>Exit</b>. The 4 / 8 / 16 buttons loop that many beats (tap the BPM first).</dd>
+    <dt>Tempo</dt><dd>Makes the song faster or slower. <b>1×</b> puts it back to normal.</dd>
+    <dt>BPM: Tap and Sync</dt><dd>Tap the <b>Tap</b> button in time with the beat a few times to tell the app the song's speed. <b>Sync</b> then matches this song's speed to the other player's.</dd>
+  </dl>
+</section>
+
+<section id="music">
+  <h2>My music: your own files, mixed on the beat</h2>
+  <img src="help/mymusic.png" alt="My music tab listing three tracks with their tempo and an Auto-mix this folder button">
+  <dl>
+    <dt>Open music folder</dt><dd>Choose a folder on your device or pen drive. The app reads every song in it and works out each one's tempo and beats. Nothing is uploaded.</dd>
+    <dt>Add music files</dt><dd>Pick individual songs instead of a whole folder.</dd>
+    <dt>Auto-mix this folder</dt><dd>Plays the whole folder by itself. Each new song starts on the beat, at matching speed, with a smooth 16-beat blend.</dd>
+  </dl>
+  <img src="help/fileplayer.png" alt="A player showing the sound wave of a music file instead of a video">
+  <p>For your own files the player shows the song's sound wave. The green line is the start point, the red line is the mix-out point, and you can tap anywhere on it to jump there. These players also get a 3-band EQ (Low / Mid / High) under <span class="k">⋯</span>.</p>
+</section>
+
+<section id="phones">
+  <h2>Headphones: listen before the room does</h2>
+  <p>On a computer with Chrome or Edge you can hear the next song in headphones while the speaker keeps playing the current one.</p>
+  <ol>
+    <li>Open <b>Settings</b> and tap <b>Find my sound devices</b>. Allow the permission the browser asks for (nothing is recorded).</li>
+    <li>Choose your <b>Speaker</b> and your <b>Headphones</b>, then <b>Save</b>.</li>
+    <li>Pick a song from <b>My music</b> for the next player. You hear it in the headphones only. A <b>Phones</b> volume slider appears under <span class="k">⋯</span> on the mix bar.</li>
+  </ol>
+  <p class="tip">This works for your own music files only. YouTube videos cannot be sent to a second device, and phone browsers cannot choose between sound devices.</p>
+</section>
+
+<section id="fix">
+  <h2>If something goes wrong</h2>
+  <dl>
+    <dt>A video will not play (“owner does not allow…”)</dt><dd>Some music labels block their videos outside YouTube. Pick another upload of the same song.</dd>
+    <dt>A song starts silent</dt><dd>Tap the video once. Some phones only allow sound after you touch the video itself.</dd>
+    <dt>An advert plays</dt><dd>Adverts come from YouTube and cannot be skipped by the app. Start the next song a little early so an advert has time to finish before you slide over.</dd>
+    <dt>Music stops when I switch apps</dt><dd>YouTube videos must stay on screen to play. Your own music files keep playing in the background.</dd>
+    <dt>Search says the limit is reached</dt><dd>YouTube allows a limited number of searches per day for the whole app. Saved songs and pasted YouTube links still work.</dd>
+  </dl>
+</section>
+<a class="back" href="index.html">← Back to the mixer</a>
+</main>
+</body>
+</html>

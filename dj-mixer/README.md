@@ -14,28 +14,39 @@ It must be served over http(s); the YouTube player does not work from a `file://
 
 ## Features
 
-- 2 decks (A, B), switchable to 4 (C, D)
-- Crossfader with Blend / Linear / Cut curves, snap-cut buttons, master volume
-- Timed fade button (2–24 s) that brings in the other deck and fades across
-- Auto DJ: plays a queue across decks A and B with fade-out / fade-in transitions
-- Per deck: play/pause, cue point, 4 hot cues, manual loop (In/Out), beat loops (4/8/16),
-  tempo 0.5×–1.5×, tap BPM, BPM sync, volume, mute, fade in/out, crossfader bypass, seek, ±5 s
-- Library and queue saved on the device; add tracks by pasting a link
-- Search by name with your own YouTube Data API key (Settings)
+- Three players. The mix slider moves the sound from the live player to the next one,
+  in a cycle: 1 → 2 → 3 → 1
+- Picking a track (buttons 1 / 2 / 3 on any list row) plays it at once: full volume if
+  nothing else is playing, otherwise it joins at 10%
+- YouTube search inside the app, in YouTube's relevance order, with "Show more results",
+  clips under a minute and live streams filtered out, the last query kept in the box and
+  a history of the last 10 searches
+- Saved list and queue stored on the device; Auto DJ plays the queue round the players
+- Your own music files: tempo and beat analysis, beat-matched automatic mixing, waveform,
+  3-band EQ, headphone preview
+- Per player (under ⋯): volume, mute, fade, saved start / mix-out points, 4 hot cues,
+  loops, tempo, tap BPM and sync
 - FX pads (horn, siren, laser, riser) synthesised in the browser
+- `help.html`: every button explained with screenshots
 - Installable PWA (manifest + service worker), privacy page included
 
 ## The main screen
 
-Two small players and one mix control; everything else is under "More controls".
+1. Search, then tap 1 on a track. It plays on Player 1 ("On speaker").
+2. Tap 2 on another track. It joins at 10% while Player 1 drops to 90%.
+3. Drag the mix slider right: Player 2 rises as Player 1 falls. Released at the far end,
+   Player 2 becomes the live one, Player 1 stops, and the slider now points at Player 3.
 
-1. Pick a track for Player 1 from the list. It starts playing and is "On speaker".
-2. Pick a track for Player 2. It starts too, joining at 10% while Player 1 drops to 90%.
-3. Slide the mix slider right: Player 2 rises as Player 1 falls. At the far end only
-   Player 2 is heard, Player 1 stops, and the roles swap for the next track.
+The video is shown at 160×90 (128×72 on phones) by request. YouTube's rules ask for a
+player of at least 200×200, so change `.screen` in `styles.css` back before submitting
+to a store.
 
-The video is shown at 160×90 by request. YouTube's rules ask for a player of at least
-200×200, so change `.screen` in `styles.css` back before submitting to a store.
+### Search quota
+
+The built-in YouTube Data API key is shared by every user of the app. A search or a
+"Show more results" page costs about 101 quota units; the default free quota is 10,000
+units a day, i.e. roughly 100 searches a day across all users. Apply for a quota
+extension in Google Cloud before publishing.
 
 **Headphone preview** (Settings → Speaker and headphones): the next track plays in a
 second sound device, with its own volume, before and while it is brought in. This works
