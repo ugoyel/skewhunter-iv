@@ -319,7 +319,7 @@ class Deck {
         <div class="placeholder">Pick a track from the list below</div></div>
       <div class="ctl">
       <div class="row"><span class="time el">0:00</span><input type="range" class="seek" min="0" max="1000" value="0" aria-label="Seek"><span class="time r rem">-0:00</span></div>
-      <button class="play big" data-act="play">▶ Play</button>
+      <div class="transport"><button data-act="back10" title="Back 10 seconds" aria-label="Back 10 seconds">« 10</button><button class="play big" data-act="play">▶ Play</button><button data-act="fwd10" title="Forward 10 seconds" aria-label="Forward 10 seconds">10 »</button></div>
       <details class="more"><summary>More controls</summary><div class="morebody">
       <form class="row" data-form="load"><input type="text" placeholder="Search YouTube or paste a link" aria-label="Load player ${NUM[this.id]}"><button>Load</button></form>
       <div class="grid">
@@ -403,7 +403,7 @@ class Deck {
     }
     const arg = { videoId: track.id, startSeconds: this.cue };
     if (!this.yt) {
-      const vars = { playsinline: 1, rel: 0, autoplay: autoplay ? 1 : 0 };
+      const vars = { playsinline: 1, rel: 0, fs: 0, autoplay: autoplay ? 1 : 0 };
       if (this.cue >= 1) vars.start = Math.floor(this.cue);
       if (location.protocol.startsWith('http')) vars.origin = location.origin;
       this.yt = new YT.Player('player-' + this.id, {
@@ -428,6 +428,11 @@ class Deck {
   onState(s) {
     if (s === -2) return this.onError('file');
     this.pstate = s;
+    if (s === 1 && (this === deck.A || this === deck.B) && !state.transitioning && !anims.has('xf')) {
+      if (!otherDeck(this).isPlaying()) { // the only thing playing: it gets the speaker
+        if ((this.side === 'L' ? state.x : 1 - state.x) > 0.001) { setX(this.side === 'L' ? 0 : 1); syncLive(); }
+      } else if (this.id !== state.live && !this.inHeadphones() && mixPos() < 0.1) setMix(0.1); // joins quietly at 10% unless it is in the headphones
+    }
     $('.play', this.el).textContent = s === 1 || s === 3 ? '❚❚ Pause' : '▶ Play';
     $('.play', this.el).classList.toggle('on', s === 1);
     if (this.kind === 'yt' && (s === 1 || s === 5)) {
@@ -473,7 +478,7 @@ class Deck {
       return;
     }
     const v = Math.round(g * 100);
-    if (v !== this.lastVol) { this.lastVol = v; this.yt.setVolume(v); }
+    if (v !== this.lastVol) { this.lastVol = v; this.yt.setVolume(v); if (v > 0 && this.yt.isMuted?.()) this.yt.unMute(); }
   }
 
   inHeadphones() { return out.ready && this.kind === 'file' && this.id !== state.live && (this === deck.A || this === deck.B); }
@@ -499,6 +504,8 @@ class Deck {
         t.out = +this.time().toFixed(2); saveTrack(t); this.renderPoints(); toast(`Mix-out point saved at ${fmt(t.out)}`); break;
       case 'clearpts': delete t.start; delete t.out; this.cue = 0; saveTrack(t); this.renderPoints(); break;
       case 'back': this.seek(this.time() - 5); break;
+      case 'back10': this.seek(this.time() - 10); break;
+      case 'fwd10': this.seek(this.time() + 10); break;
       case 'fwd': this.seek(this.time() + 5); break;
       case 'loopin': this.loop = { in: this.time(), out: null, on: false }; this.renderPads(); break;
       case 'loopout':
@@ -817,8 +824,8 @@ function renderList() {
     ${file ? '<div class="note">♪</div>' : `<img loading="lazy" alt="" src="https://i.ytimg.com/vi/${esc(t.id)}/mqdefault.jpg">`}
     <div class="meta"><b>${esc(t.title || t.id)}</b><span>${esc(sub)}</span></div>
     <div class="acts">${loadBtns}
-      ${state.tab === 'queue' ? '' : '<button data-do="queue">+ Queue</button>'}
-      ${state.tab === 'results' ? '<button data-do="save">Save</button>' : '<button data-do="del" aria-label="Remove">✕</button>'}
+      ${state.tab === 'queue' ? '' : '<button data-do="queue" title="Add to queue" aria-label="Add to queue">＋</button>'}
+      ${state.tab === 'results' ? '<button data-do="save" title="Save to library" aria-label="Save to library">☆</button>' : '<button data-do="del" title="Remove" aria-label="Remove">✕</button>'}
     </div></li>`;
   }).join('');
 }
@@ -829,7 +836,9 @@ $('#list').addEventListener('click', e => {
   const own = () => state.tab === 'queue' || t.kind === 'file' ? t : addToLibrary(t);
   switch (b.dataset.do) {
     case 'load': {
-      const d = deck[b.dataset.deck]; d.load(own(), false);
+      const d = deck[b.dataset.deck], main = d === deck.A || d === deck.B;
+      if (main && !otherDeck(d).isPlaying()) { cancelAnim('xf'); setX(d.side === 'L' ? 0 : 1); syncLive(); } // nothing else playing: full volume from the start
+      d.load(own(), true);
       d.el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); break;
     }
     case 'queue': state.queue.push(own()); saveQueue(); renderList(); toast('Added to queue'); break;

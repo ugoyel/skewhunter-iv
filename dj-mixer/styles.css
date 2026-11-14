@@ -49,7 +49,7 @@ dialog h3{font-size:14px;margin:16px 0 4px}
 .points{color:var(--mut);font-size:12px}
 .deck:not(.isfile) .eqrow{display:none}
 .eqband{flex:1;min-width:0;display:flex;flex-direction:column;font-size:11px;color:var(--mut);text-transform:uppercase}
-.list .note{width:96px;height:54px;flex:none;display:grid;place-items:center;background:#0f1218;border-radius:6px;font-size:22px;color:var(--mut)}
+.list .note{width:56px;height:32px;font-size:16px;flex:none;display:grid;place-items:center;background:#0f1218;border-radius:6px;font-size:22px;color:var(--mut)}
 .list li.head{background:none;justify-content:space-between;color:var(--mut);padding:2px 4px;flex-wrap:wrap}
 .placeholder{position:absolute;inset:0;display:grid;place-items:center;color:var(--mut);text-align:center;padding:16px}
 .row{display:flex;align-items:center;gap:8px;min-width:0}
@@ -80,12 +80,15 @@ dialog h3{font-size:14px;margin:16px 0 4px}
 .tabs{display:flex;gap:6px;flex-wrap:wrap}
 .list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:420px;overflow:auto}
 .list li{display:flex;align-items:center;gap:10px;background:var(--panel2);border-radius:10px;padding:6px 8px;min-width:0}
-.list img{width:96px;height:54px;object-fit:cover;border-radius:6px;background:#000;flex:none}
+.list img{width:56px;height:32px;object-fit:cover;border-radius:6px;background:#000;flex:none}
 .list .meta{flex:1;min-width:0}
-.list .meta b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.list .meta span{color:var(--mut);font-size:12px}
-.list .acts{display:flex;gap:4px;flex:none;flex-wrap:wrap;justify-content:flex-end}
-.list .acts button{padding:4px 9px;min-height:32px}
+.list .meta b{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:13px;font-weight:600;line-height:1.25;overflow-wrap:anywhere}
+.list .meta span{color:var(--mut);font-size:11px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.list .acts{display:flex;gap:4px;flex:none}
+.list .acts button{padding:0;width:32px;height:32px;min-height:32px}
+.list li{gap:8px}
+.transport{display:grid;grid-template-columns:auto 1fr auto;gap:6px}
+.transport button:not(.play){padding:8px 10px;white-space:nowrap}
 .empty{color:var(--mut);padding:14px;text-align:center}
 .foot{color:var(--mut);font-size:12px;text-align:center;padding:16px}
 dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:14px;max-width:min(460px,92vw);padding:18px}
@@ -104,3 +107,11 @@ kbd{background:#0f1218;border:1px solid var(--line);border-radius:4px;padding:0 
   .screen{flex:none;width:100%}
 }
 ol.hint{padding-left:18px}ol.hint li{margin:4px 0}
+@media (max-width:520px){
+  /* phone: title gets the full width, buttons sit on their own row underneath */
+  .list li{flex-wrap:wrap}
+  .list .meta{flex:1 1 0}
+  .list .meta b{-webkit-line-clamp:3}
+  .list .acts{flex:1 1 100%;justify-content:flex-end}
+  .tabs button{padding:6px 9px;font-size:13px}
+}

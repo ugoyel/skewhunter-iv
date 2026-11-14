@@ -1,5 +1,5 @@
 // Caches only this app's own shell. Third-party requests (the video player) are never touched.
-const CACHE = 'crossdeck-v7';
+const CACHE = 'crossdeck-v8';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'icon.svg', 'manifest.webmanifest', 'privacy.html'];
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(
