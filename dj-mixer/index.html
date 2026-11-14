@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d0f14">
+<title>CrossDeck — DJ Mixer</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><img src="icon.svg" alt="" width="28" height="28"><b>CrossDeck</b></div>
+  <div class="topbtns">
+    <button id="btn-autodj" class="pill" title="Play the queue automatically">Auto DJ: Off</button>
+    <button id="btn-4deck" class="pill" title="Show decks C and D">4 decks</button>
+    <button id="btn-settings" class="pill" aria-label="Settings">Settings</button>
+  </div>
+</header>
+
+<main>
+  <div class="stage" id="stage">
+    <div id="slot-A"></div>
+    <section class="mixer" id="mixer">
+      <h2>Mixer</h2>
+      <label class="row">Master <input type="range" id="master" min="0" max="100" value="100"><output id="master-out">100</output></label>
+      <div class="xf">
+        <div class="xf-labels"><span>A<span class="cd"> / C</span></span><span>B<span class="cd"> / D</span></span></div>
+        <input type="range" id="xfader" min="0" max="1000" value="0" aria-label="Crossfader">
+      </div>
+      <div class="row wrap">
+        <button id="btn-fade" class="big">Fade ⇄</button>
+        <label>over <select id="fade-sec"><option>2</option><option>4</option><option>8</option><option>12</option><option>16</option><option>24</option></select> s</label>
+      </div>
+      <div class="row wrap">
+        <label>Curve <select id="curve"><option value="blend">Blend</option><option value="linear">Linear</option><option value="cut">Cut</option></select></label>
+        <button id="btn-cutL" title="Snap to left">◀ Cut</button><button id="btn-center">Center</button><button id="btn-cutR" title="Snap to right">Cut ▶</button>
+      </div>
+      <label class="row chk"><input type="checkbox" id="stop-out" checked> Pause outgoing deck after fade</label>
+      <h2>FX pads</h2>
+      <div class="pads">
+        <button data-fx="horn">Horn</button><button data-fx="siren">Siren</button>
+        <button data-fx="laser">Laser</button><button data-fx="riser">Riser</button>
+      </div>
+    </section>
+    <div id="slot-B"></div>
+    <div id="slot-C" class="extra"></div>
+    <div id="slot-D" class="extra"></div>
+  </div>
+
+  <section class="library">
+    <form id="search-form" class="row">
+      <input id="search" type="search" placeholder="Search, or paste a YouTube link" autocomplete="off">
+      <button>Add / Search</button>
+    </form>
+    <div class="tabs" role="tablist">
+      <button data-tab="library" class="on">Library <span id="n-library"></span></button>
+      <button data-tab="queue">Queue <span id="n-queue"></span></button>
+      <button data-tab="results">Search results</button>
+    </div>
+    <ul id="list" class="list"></ul>
+  </section>
+</main>
+
+<footer class="foot">
+  Videos are played by the embedded YouTube player. <a href="privacy.html">Privacy</a> ·
+  <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">YouTube Terms of Service</a>
+</footer>
+
+<dialog id="settings">
+  <form method="dialog">
+    <h2>Settings</h2>
+    <label>YouTube Data API key (optional, enables search)
+      <input id="api-key" type="text" placeholder="AIza…" autocomplete="off">
+    </label>
+    <p class="hint">Without a key you can still add any track by pasting its link. The key is stored only on this device.</p>
+    <p class="hint">Shortcuts: <kbd>Q</kbd> play A · <kbd>P</kbd> play B · <kbd>←</kbd><kbd>→</kbd> crossfader · <kbd>F</kbd> fade</p>
+    <div class="row end"><button value="save" class="big">Save</button></div>
+  </form>
+</dialog>
+<div id="toast" role="status"></div>
+<script src="app.js"></script>
+</body>
+</html>
