@@ -100,22 +100,11 @@ function syncLive() {
   $('#mix').value = Math.round(mixPos() * 1000);
   const lab = (id, d) => { const e = $(id); e.textContent = NUM[d.id]; e.style.setProperty('--c', COLORS[d.id]); };
   lab('#mix-from', live); lab('#mix-to', next);
-  $('#btn-bring').textContent = `Play Player ${NUM[next.id]} on speaker too`;
-  $('#btn-bring').style.setProperty('--c', COLORS[next.id]);
   $('#hp-row').hidden = !out.ready;
   $('#mix-hint').textContent = out.ready && next.track && next.kind === 'yt'
     ? 'YouTube tracks cannot be sent to headphones. Only your own music files can be previewed there.'
     : `Slide right to bring Player ${NUM[next.id]} in and fade Player ${NUM[live.id]} out.`;
   decks.forEach(d => d.renderRole()); applyVolumes();
-}
-// The button: start the next player on the speaker quietly (10%), ready to be mixed in with the slider.
-function bringIn() {
-  const live = deck[state.live], next = otherDeck(live);
-  if (!next.track) return toast(`Load a track on Player ${NUM[next.id]} first`);
-  cancelAnim('xf');
-  if (!live.isPlaying()) { setX(next.side === 'L' ? 0 : 1); next.play(); return syncLive(); } // nothing to mix with: just switch over
-  if (!next.isPlaying()) next.play();
-  if (mixPos() < 0.1) setMix(0.1);
 }
 function applyVolumes() { for (const d of decks) d.applyVolume(); }
 
@@ -319,7 +308,8 @@ class Deck {
         <div class="placeholder">Pick a track from the list below</div></div>
       <div class="ctl">
       <div class="row"><span class="time el">0:00</span><input type="range" class="seek" min="0" max="1000" value="0" aria-label="Seek"><span class="time r rem">-0:00</span></div>
-      <div class="transport"><button data-act="back10" title="Back 10 seconds" aria-label="Back 10 seconds">« 10</button><button class="play big" data-act="play">▶ Play</button><button data-act="fwd10" title="Forward 10 seconds" aria-label="Forward 10 seconds">10 »</button></div>
+      <div class="transport"><button data-act="back10" title="Back 10 seconds" aria-label="Back 10 seconds">« 10</button><button class="play" data-act="play" aria-label="Play">▶</button><button data-act="fwd10" title="Forward 10 seconds" aria-label="Forward 10 seconds">10 »</button></div>
+      </div></div>
       <details class="more"><summary>More controls</summary><div class="morebody">
       <form class="row" data-form="load"><input type="text" placeholder="Search YouTube or paste a link" aria-label="Load player ${NUM[this.id]}"><button>Load</button></form>
       <div class="grid">
@@ -346,8 +336,7 @@ class Deck {
       <div class="grid">
         <button data-act="mute">Mute</button><button data-act="fadeout">Fade out</button>
         <button data-act="xf" class="on" title="Route this player through the mix slider">X-fader</button>
-      </div></div></details>
-      </div></div>`;
+      </div></div></details>`;
     $('#slot-' + this.id).append(el);
 
     el.addEventListener('click', e => {
@@ -411,6 +400,7 @@ class Deck {
         events: {
           onReady: () => {
             this.ytReady = true; this.lastVol = -1; this.applyVolume();
+            if (autoplay && !this.pending) { this.yt.unMute?.(); this.yt.playVideo(); } // do not rely on the autoplay flag alone
             if (this.pending) { const p = this.pending; this.pending = null; this.cueOrLoad(p.arg, p.autoplay); }
           },
           onStateChange: e => { if (this.kind === 'yt') this.onState(e.data); },
@@ -423,7 +413,7 @@ class Deck {
   }
   cueOrLoad(arg, autoplay) {
     this.setRate(1);
-    if (autoplay) this.yt.loadVideoById(arg); else this.yt.cueVideoById(arg);
+    if (autoplay) { this.yt.unMute?.(); this.yt.loadVideoById(arg); } else this.yt.cueVideoById(arg);
   }
   onState(s) {
     if (s === -2) return this.onError('file');
@@ -433,8 +423,10 @@ class Deck {
         if ((this.side === 'L' ? state.x : 1 - state.x) > 0.001) { setX(this.side === 'L' ? 0 : 1); syncLive(); }
       } else if (this.id !== state.live && !this.inHeadphones() && mixPos() < 0.1) setMix(0.1); // joins quietly at 10% unless it is in the headphones
     }
-    $('.play', this.el).textContent = s === 1 || s === 3 ? '❚❚ Pause' : '▶ Play';
+    $('.play', this.el).textContent = s === 1 || s === 3 ? '❚❚' : '▶';
+    $('.play', this.el).setAttribute('aria-label', s === 1 || s === 3 ? 'Pause' : 'Play');
     $('.play', this.el).classList.toggle('on', s === 1);
+    if (this.kind === 'yt' && s === 1 && this.level() > 0 && this.yt.isMuted?.()) this.yt.unMute(); // the browser or an old setting may have started it muted
     if (this.kind === 'yt' && (s === 1 || s === 5)) {
       const d = this.yt.getVideoData?.();
       if (d && d.title && this.track && d.video_id === this.track.id && this.track.title !== d.title) {
@@ -878,7 +870,6 @@ $$('[data-fx]').forEach(b => b.addEventListener('click', () => fx(b.dataset.fx))
 /* ---------- mixer wiring ---------- */
 $('#xfader').addEventListener('input', e => { cancelAnim('xf'); setX(e.target.value / 1000); });
 $('#xfader').addEventListener('change', syncLive);
-$('#btn-bring').addEventListener('click', bringIn);
 $('#mix').addEventListener('input', e => {
   cancelAnim('xf');
   const next = otherDeck(deck[state.live]), m = e.target.value / 1000;

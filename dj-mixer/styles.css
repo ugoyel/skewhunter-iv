@@ -3,18 +3,18 @@
 html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
 a{color:var(--acc)}
 button,select,input{font:inherit;color:inherit}
-button{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer;min-height:36px}
+button{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:4px 9px;cursor:pointer;min-height:30px;font-size:13px}
 button:hover{border-color:#4a5368}
 button:active{transform:translateY(1px)}
 button.on{background:var(--c,var(--acc));color:#08090c;border-color:transparent;font-weight:600}
-button.big{font-weight:700;padding:8px 16px}
-select,input[type=text],input[type=search]{background:#0f1218;border:1px solid var(--line);border-radius:8px;padding:8px;min-height:36px}
+button.big{font-weight:600}
+select,input[type=text],input[type=search]{background:#0f1218;border:1px solid var(--line);border-radius:7px;padding:5px 8px;min-height:30px;font-size:13px}
 input[type=range]{accent-color:var(--c,var(--acc));width:100%;min-width:0}
 h2{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin:0}
 .top{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .brand{display:flex;align-items:center;gap:8px;font-size:17px}
 .topbtns{display:flex;gap:6px;flex-wrap:wrap}
-.pill{border-radius:999px;padding:6px 12px}
+.pill{border-radius:999px;padding:4px 11px}
 main{padding:12px 16px;max-width:1500px;margin:0 auto}
 .stage{display:grid;gap:12px;grid-template-columns:minmax(0,1fr) 270px minmax(0,1fr);grid-template-areas:"A M B" "C M D";align-items:start}
 #slot-A{grid-area:A}#slot-B{grid-area:B}#slot-C{grid-area:C}#slot-D{grid-area:D}.mixer{grid-area:M}
@@ -29,18 +29,17 @@ main{padding:12px 16px;max-width:1500px;margin:0 auto}
 .status.err{color:#ff7b7b;white-space:normal}
 .deckmain{display:flex;gap:12px;align-items:flex-start}
 .ctl{flex:1;min-width:0;display:flex;flex-direction:column;gap:10px}
-/* 200x200 is the smallest size YouTube allows for its player */
-.screen{position:relative;flex:0 0 200px;width:200px;height:200px;background:#000;border-radius:10px;overflow:hidden}
+/* Picture-in-picture sized by request. NOTE: YouTube's rules ask for at least 200x200; restore that before store submission. */
+.screen{position:relative;flex:0 0 160px;width:160px;height:90px;background:#000;border-radius:8px;overflow:hidden}
 .deck.isfile .deckmain{flex-direction:column;align-items:stretch}
 .deck.isfile .screen{flex:none;width:100%;height:84px}
 .role{font-size:12px;color:var(--mut);white-space:nowrap;border:1px solid var(--line);border-radius:999px;padding:2px 9px}
 .role:empty,.status:empty{display:none}
 .role.live{background:var(--c);color:#08090c;border-color:transparent;font-weight:700}
-.play.big{font-size:16px;padding:12px}
+.placeholder{font-size:11px;padding:6px}
 .mixrow{display:flex;align-items:center;gap:10px}
 .mixlbl{background:var(--c);color:#08090c;font-weight:800;border-radius:6px;padding:2px 9px}
-#mix{height:40px}
-#btn-bring{padding:12px}
+#mix{height:34px}
 #hp-row[hidden],#out-pick[hidden]{display:none}
 dialog h3{font-size:14px;margin:16px 0 4px}
 .screen iframe,.screen .yt,.ytwrap,.wave{width:100%;height:100%;border:0;display:block}
@@ -58,7 +57,7 @@ dialog h3{font-size:14px;margin:16px 0 4px}
 .time{font-variant-numeric:tabular-nums;color:var(--mut);font-size:12px;min-width:44px}
 .time.r{text-align:right}
 .grid{display:grid;gap:6px;grid-template-columns:repeat(auto-fit,minmax(58px,1fr))}
-.grid button{padding:8px 4px}
+.grid button{padding:4px}
 .play{font-weight:800}
 .more summary{cursor:pointer;color:var(--mut);font-size:12px;letter-spacing:.08em;text-transform:uppercase;padding:6px 0;list-style:none;user-select:none}
 .more summary::-webkit-details-marker{display:none}
@@ -75,7 +74,7 @@ dialog h3{font-size:14px;margin:16px 0 4px}
 #xfader{height:34px}
 .chk{color:var(--mut);font-size:13px}
 .pads{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.pads button{padding:14px 4px;font-weight:700}
+.pads button{padding:8px 4px}
 .library{margin-top:12px}
 .tabs{display:flex;gap:6px;flex-wrap:wrap}
 .list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:420px;overflow:auto}
@@ -85,10 +84,11 @@ dialog h3{font-size:14px;margin:16px 0 4px}
 .list .meta b{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:13px;font-weight:600;line-height:1.25;overflow-wrap:anywhere}
 .list .meta span{color:var(--mut);font-size:11px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .list .acts{display:flex;gap:4px;flex:none}
-.list .acts button{padding:0;width:32px;height:32px;min-height:32px}
+.list .acts button{padding:0;width:28px;height:28px;min-height:28px}
 .list li{gap:8px}
-.transport{display:grid;grid-template-columns:auto 1fr auto;gap:6px}
-.transport button:not(.play){padding:8px 10px;white-space:nowrap}
+.transport{display:flex;gap:6px}
+.transport button{white-space:nowrap}
+.transport .play{min-width:44px}
 .empty{color:var(--mut);padding:14px;text-align:center}
 .foot{color:var(--mut);font-size:12px;text-align:center;padding:16px}
 dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:14px;max-width:min(460px,92vw);padding:18px}
@@ -102,10 +102,7 @@ kbd{background:#0f1218;border:1px solid var(--line);border-radius:4px;padding:0 
   .stage{grid-template-columns:minmax(0,1fr);grid-template-areas:"A" "M" "B" "C" "D"}
   .mixer{position:static}
 }
-@media (max-width:520px){
-  .deckmain{flex-direction:column;align-items:stretch}
-  .screen{flex:none;width:100%}
-}
+
 ol.hint{padding-left:18px}ol.hint li{margin:4px 0}
 @media (max-width:520px){
   /* phone: title gets the full width, buttons sit on their own row underneath */

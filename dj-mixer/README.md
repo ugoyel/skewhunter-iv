@@ -29,11 +29,13 @@ It must be served over http(s); the YouTube player does not work from a `file://
 
 Two small players and one mix control; everything else is under "More controls".
 
-1. Play Player 1. It is "On speaker".
-2. Load and play Player 2. It is silent on the speaker.
-3. Press "Play Player 2 on speaker too": Player 2 comes in at 10%, Player 1 drops to 90%.
-4. Slide the mix slider right: Player 2 rises as Player 1 falls. At the far end only
+1. Pick a track for Player 1 from the list. It starts playing and is "On speaker".
+2. Pick a track for Player 2. It starts too, joining at 10% while Player 1 drops to 90%.
+3. Slide the mix slider right: Player 2 rises as Player 1 falls. At the far end only
    Player 2 is heard, Player 1 stops, and the roles swap for the next track.
+
+The video is shown at 160×90 by request. YouTube's rules ask for a player of at least
+200×200, so change `.screen` in `styles.css` back before submitting to a store.
 
 **Headphone preview** (Settings → Speaker and headphones): the next track plays in a
 second sound device, with its own volume, before and while it is brought in. This works
