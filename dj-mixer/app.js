@@ -103,8 +103,10 @@ class Deck {
       <div class="row"><span class="time el">0:00</span><input type="range" class="seek" min="0" max="1000" value="0" aria-label="Seek"><span class="time r rem">-0:00</span></div>
       <div class="grid">
         <button class="play" data-act="play">▶ Play</button><button data-act="cue" title="Jump to cue point and pause">Cue</button>
-        <button data-act="setcue" title="Set cue point here">Set cue</button><button data-act="back">−5s</button><button data-act="fwd">+5s</button>
+        <button data-act="back">−5s</button><button data-act="fwd">+5s</button>
       </div>
+      <div class="row"><span class="lbl">Volume</span><input type="range" class="vol" min="0" max="100" value="100" aria-label="Deck volume"></div>
+      <details class="more"><summary>More controls</summary><div class="morebody">
       <div class="row"><span class="lbl">Hot cue</span><div class="grid" style="flex:1">
         ${[0, 1, 2, 3].map(i => `<button data-hot="${i}" title="Tap to set or jump. Long-press to clear.">${i + 1}</button>`).join('')}</div></div>
       <div class="row"><span class="lbl">Loop</span><div class="grid" style="flex:1">
@@ -113,11 +115,10 @@ class Deck {
       <div class="row"><span class="lbl">Tempo</span><input type="range" class="tempo" min="50" max="150" value="100" aria-label="Tempo"><span class="read rate">1.00×</span><button data-act="ratereset">1×</button></div>
       <div class="row"><span class="lbl">BPM</span><span class="read bpm" style="text-align:left">—</span><span style="flex:1"></span>
         <button data-act="tap" title="Tap along with the beat">Tap</button><button data-act="sync" title="Match the other deck's BPM">Sync</button></div>
-      <div class="row"><span class="lbl">Volume</span><input type="range" class="vol" min="0" max="100" value="100" aria-label="Deck volume"></div>
       <div class="grid">
-        <button data-act="mute">Mute</button><button data-act="fadeout">Fade out</button>
+        <button data-act="setcue" title="Set cue point here">Set cue</button><button data-act="mute">Mute</button><button data-act="fadeout">Fade out</button>
         <button data-act="xf" class="on" title="Route this deck through the crossfader">X-fader</button>
-      </div>`;
+      </div></div></details>`;
     $('#slot-' + this.id).append(el);
 
     el.addEventListener('click', e => {
