@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity(), Actions {
     private var warning by mutableStateOf<String?>(null)
     private var scr by mutableStateOf(Scr.HOME)
     private var tab by mutableIntStateOf(0)
-    private var server by mutableStateOf("")
+    private var serverUrl by mutableStateOf("")
     private var askedBattery = false
 
     private val micReq = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity(), Actions {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        server = app.prefs.getString("server", "") ?: ""
+        serverUrl = app.prefs.getString("server", "") ?: ""
         if (core.state.value.me != null || app.prefs.getString("me", null) != null) {
             if (!app.prefs.getBoolean("setupDone", false)) scr = Scr.SETUP
         }
@@ -85,7 +85,7 @@ class MainActivity : ComponentActivity(), Actions {
             val mode by app.linkMode.collectAsState()
             LaunchedEffect(s.me?.id) { if (s.me != null) RadioService.start(this@MainActivity) }
             BackHandler(enabled = s.me != null && scr != Scr.HOME) { scr = Scr.HOME }
-            AppRoot(s, perms, mode, server, this, scr, tab, { tab = it }) { scr = it }
+            AppRoot(s, perms, mode, serverUrl, this, scr, tab, { tab = it }) { scr = it }
             warning?.let { w ->
                 Sheet("Warning", { warning = null }) {
                     Body(w, size = 14.sp)
@@ -169,5 +169,5 @@ class MainActivity : ComponentActivity(), Actions {
     override fun setTtl(sec: Int) { core.setTtl(sec) }
     override fun setBeep(on: Boolean) { core.setBeep(on) }
     override fun setMode(m: String) { app.setMode(m) }
-    override fun setServer(s: String) { server = s; app.setServer(s) }
+    override fun setServer(s: String) { serverUrl = s; app.setServer(s) }
 }
