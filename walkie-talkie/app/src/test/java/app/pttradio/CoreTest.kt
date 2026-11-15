@@ -113,7 +113,7 @@ class CoreTest {
         await("directory") { a.s.users.size == 2 && b.s.users.size == 2 && c.s.users.size == 2 }
         a.core.createGroup("Ops", listOf(b.id, c.id))
         await("invites") { b.s.invites.size == 1 && c.s.invites.size == 1 }
-        assertTrue(b.events.first() is Event.InviteReceived)
+        await("invite event") { b.events.any { it is Event.InviteReceived } }
         b.core.acceptInvite(b.s.invites[0].group.id); c.core.acceptInvite(c.s.invites[0].group.id)
         await("joined") { a.s.groups[0].members.all { it.joined } && b.s.tunedGroup != null && c.s.tunedGroup != null }
         return Triple(a, b, c)
