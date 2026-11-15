@@ -6,12 +6,13 @@ plugins {
 
 android {
     namespace = "app.pttradio"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "app.pttradio"
         minSdk = 26
-        targetSdk = 34
+        // Google Play requires new apps to target Android 16 (API 36)
+        targetSdk = 36
         // Every CI build gets a higher number so a newer APK always installs over an older one.
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionName = "1.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")

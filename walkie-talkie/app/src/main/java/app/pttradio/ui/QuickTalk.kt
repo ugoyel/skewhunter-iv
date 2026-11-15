@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -142,6 +143,7 @@ class QuickTalkActivity : ComponentActivity() {
             startActivity(Intent(this, MainActivity::class.java)); finish(); return
         }
         handle(intent)
+        darkBars()
         setContent {
             val s by app.core.state.collectAsState()
             val g = s.group
@@ -160,7 +162,7 @@ class QuickTalkActivity : ComponentActivity() {
             var downAt by remember { mutableLongStateOf(0L) }
             var wasTx by remember { mutableStateOf(false) }
             var wasArmed by remember { mutableStateOf(false) }
-            Box(Modifier.fillMaxSize().clickable(remember { MutableInteractionSource() }, null) { app.core.pttUp(); finish() }, contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize().clickable(remember { MutableInteractionSource() }, null) { app.core.pttUp(); finish() }.safeDrawingPadding(), contentAlignment = Alignment.Center) {
                 Column(Modifier.fillMaxWidth().padding(20.dp).clip(RoundedCornerShape(18.dp)).background(C.bg).border(1.dp, C.line, RoundedCornerShape(18.dp))
                     .clickable(remember { MutableInteractionSource() }, null) {}.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -244,11 +246,12 @@ class WidgetConfigActivity : ComponentActivity() {
         if (id == AppWidgetManager.INVALID_APPWIDGET_ID) { finish(); return }
         if (PttWidget.isAssigned(this, id)) { done(id); return }
         if (app.prefs.getString("me", null) == null) { startActivity(Intent(this, MainActivity::class.java)); finish(); return }
+        darkBars()
         setContent {
             val s by app.core.state.collectAsState()
             val near by app.nearby.info.collectAsState()
             val now by produceState(System.currentTimeMillis()) { while (true) { delay(1000); value = System.currentTimeMillis() } }
-            Column(Modifier.fillMaxSize().background(C.bg)) {
+            Column(Modifier.fillMaxSize().background(C.bg).safeDrawingPadding()) {
                 Text("Widget for which chat?", Modifier.padding(start = 18.dp, top = 18.dp, bottom = 4.dp), color = C.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Text("Tapping the widget starts talking to this group or person.", Modifier.padding(start = 18.dp, bottom = 10.dp), color = C.dim, fontSize = 13.sp)
                 if (s.groups.isEmpty() && onAppNow(s, now).isEmpty())

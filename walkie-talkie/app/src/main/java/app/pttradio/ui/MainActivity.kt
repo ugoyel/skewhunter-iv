@@ -11,6 +11,8 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -45,7 +48,8 @@ import kotlinx.coroutines.delay
 fun AppRoot(s: RadioState, p: Perms, near: NearbyInfo, alerts: List<app.pttradio.net.SosAlert>, sending: app.pttradio.net.SosSending?,
             field: Pair<String, String>, sosAnyone: Boolean, level: kotlinx.coroutines.flow.StateFlow<Float>?, login: Boolean, mode: String, server: String, btn: ButtonCfg, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
     val now by produceState(System.currentTimeMillis()) { while (true) { delay(500); value = System.currentTimeMillis() } }
-    Box(Modifier.fillMaxSize().background(C.bg)) {
+    // Android 16 draws apps edge to edge: keep content clear of the status bar, navigation bar and keyboard
+    Box(Modifier.fillMaxSize().background(C.bg).safeDrawingPadding()) {
         when {
             !s.ready -> {}
             s.me == null -> Welcome(a, login)
@@ -350,6 +354,7 @@ class MainActivity : ComponentActivity(), Actions {
             if (!app.prefs.getBoolean("setupDone", false)) scr = Scr.SETUP
         }
         handle(intent)
+        darkBars()
         setContent {
             val s by core.state.collectAsState()
             val mode by app.linkMode.collectAsState()
@@ -456,3 +461,8 @@ class MainActivity : ComponentActivity(), Actions {
     override fun setMode(m: String) { app.setMode(m) }
     override fun setServer(s: String) { serverUrl = s; app.setServer(s) }
 }
+
+/** Edge-to-edge with light icons on the dark background. */
+fun ComponentActivity.darkBars() = enableEdgeToEdge(
+    statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+    navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
