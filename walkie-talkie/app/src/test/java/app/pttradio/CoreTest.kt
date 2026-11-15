@@ -8,9 +8,9 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 class MemKV : KV {
-    val m = HashMap<String, String?>()
+    val m = java.util.concurrent.ConcurrentHashMap<String, String>()
     override fun get(k: String) = m[k]
-    override fun put(k: String, v: String?) { m[k] = v }
+    override fun put(k: String, v: String?) { if (v == null) m.remove(k) else m[k] = v }
 }
 
 class FakeAudio : AudioIO {
@@ -28,6 +28,7 @@ class Bus {
     val nodes = CopyOnWriteArrayList<BusTransport>()
     val retained = HashMap<String, ByteArray>()
     val log = CopyOnWriteArrayList<Pair<String, ByteArray>>()
+    val profiles = java.util.concurrent.ConcurrentHashMap<String, Pair<String, String>>()
     fun match(sub: String, topic: String): Boolean {
         val a = sub.split("/"); val b = topic.split("/")
         return a.size == b.size && a.indices.all { a[it] == "+" || a[it] == b[it] }
@@ -44,7 +45,10 @@ class BusTransport(val bus: Bus, override val relays: Boolean = false) : Transpo
     init { bus.nodes.add(this) }
     override fun setProfile(id: String, name: String, pub: String) {
         this.id = id
-        if (!relays) bus.nodes.forEach { if (it !== this && !it.relays) it.listener?.onUser(id, name, pub, true, System.currentTimeMillis()) }
+        if (relays) return
+        bus.profiles[id] = name to pub
+        bus.nodes.forEach { if (it !== this && !it.relays) it.listener?.onUser(id, name, pub, true, System.currentTimeMillis()) }
+        bus.profiles.forEach { (k, v) -> if (k != id) listener?.onUser(k, v.first, v.second, true, System.currentTimeMillis()) }
     }
     override fun setSubscriptions(topics: Set<String>) {
         val fresh = topics - subs
@@ -116,6 +120,7 @@ class CoreTest {
     }
 
     private fun talk(n: Node, frames: Int = 3) {
+        Thread.sleep(150) // let channel subscriptions settle
         n.core.pttDown()
         await("tx") { n.s.transmitting }
         repeat(frames) { n.audio.onFrame!!(tone()) }
@@ -145,7 +150,7 @@ class CoreTest {
         assertEquals("meet at gate 4", b.s.messages[0].text); assertEquals("Alpha", b.s.messages[0].from)
         assertTrue(bus.log.none { String(it.second, Charsets.ISO_8859_1).contains("gate 4") })
         assertTrue(synchronized(bus.retained) { bus.retained.isEmpty() })
-        assertTrue((a.kv.m.values + b.kv.m.values).none { it?.contains("gate 4") == true })
+        assertTrue((a.kv.m.values + b.kv.m.values).none { it.contains("gate 4") })
         await("expired on b", 8000) { b.s.messages.isEmpty() }
         assertEquals(1, c.s.messages.size) // c keeps the default 2 minutes
     }
