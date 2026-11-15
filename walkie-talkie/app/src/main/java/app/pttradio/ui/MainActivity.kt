@@ -31,6 +31,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pttradio.App
+import app.pttradio.BuildConfig
+import app.pttradio.net.Auth
 import app.pttradio.RadioService
 import app.pttradio.core.RadioState
 import app.pttradio.net.NearbyInfo
@@ -63,7 +65,7 @@ class MainActivity : ComponentActivity(), Actions {
     private var tab by mutableIntStateOf(0)
     private var serverUrl by mutableStateOf("")
     private var askedBattery = false
-    private val auth by lazy { app.pttradio.net.Auth(app.pttradio.BuildConfig.LOGIN_URL, app.pttradio.BuildConfig.LOGIN_KEY) }
+    private val auth by lazy { Auth(BuildConfig.LOGIN_URL, BuildConfig.LOGIN_KEY) }
 
     override fun requestCode(email: String, name: String, phone: String, marketing: Boolean, done: (String?) -> Unit) =
         auth.requestCode(email, name, phone, marketing) { e -> runOnUiThread { done(e) } }
