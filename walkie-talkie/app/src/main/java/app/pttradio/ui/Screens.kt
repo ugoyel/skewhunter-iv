@@ -52,6 +52,9 @@ data class Perms(val mic: Boolean = true, val notif: Boolean = true, val nearby:
     val allOk get() = mic && notif && nearby && battery
 }
 
+/** Hardware talk button settings. */
+data class ButtonCfg(val key: Int = 0, val learning: Boolean = false, val group: String = "", val outside: Boolean = false)
+
 enum class Scr { HOME, RADIO, SETTINGS, SETUP }
 
 interface Actions {
@@ -74,6 +77,10 @@ interface Actions {
     fun setServer(s: String)
     fun requestPerm(kind: String)
     fun setupDone()
+    fun setPttKey(code: Int)
+    fun learnKey()
+    fun setPttGroup(gid: String)
+    fun openKeyService()
 }
 
 fun isNearby(u: User, now: Long) = now - u.nearbyAt < RadioCore.NEARBY_EXPIRE
@@ -310,7 +317,7 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, a: Actions, onBack: () -> Unit) {
+fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: ButtonCfg, a: Actions, onBack: () -> Unit) {
     var name by remember { mutableStateOf(s.me?.name ?: "") }
     var srv by remember { mutableStateOf(server) }
     Column(Modifier.fillMaxSize()) {
@@ -320,6 +327,44 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, a: Act
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Field(name, { name = it.take(24) }, "Name", Modifier.weight(1f))
                     Btn("Save", enabled = name.isNotBlank() && name.trim() != s.me?.name) { a.setName(name) }
+                }
+            }
+            Section("Talk button") {
+                val vd = android.view.KeyEvent.KEYCODE_VOLUME_DOWN
+                val vu = android.view.KeyEvent.KEYCODE_VOLUME_UP
+                val sel = when (btn.key) { 0 -> "off"; vd -> "vd"; vu -> "vu"; else -> "custom" }
+                Segments(listOf("off" to "Off", "vd" to "Vol −", "vu" to "Vol +", "custom" to "Other"), if (btn.learning) "custom" else sel, Modifier.fillMaxWidth()) {
+                    when (it) { "off" -> a.setPttKey(0); "vd" -> a.setPttKey(vd); "vu" -> a.setPttKey(vu); else -> a.learnKey() }
+                }
+                when {
+                    btn.learning -> WarningBox("Press the button you want to use now.")
+                    sel == "custom" -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Body("Using " + android.view.KeyEvent.keyCodeToString(btn.key).removePrefix("KEYCODE_").replace('_', ' '), Modifier.weight(1f), color = C.dim, size = 13.sp)
+                        Btn("Change") { a.learnKey() }
+                    }
+                }
+                Body("Hold the button to talk, release to mute. Android does not let any app take over the power button; volume keys and programmable side keys work.", color = C.dim, size = 12.sp)
+                if (btn.key != 0) {
+                    Label("Button talks on", Modifier.padding(top = 6.dp))
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).border(1.dp, C.line, RoundedCornerShape(6.dp)).background(C.panel)) {
+                        (listOf("" to "Current channel") + s.groups.map { it.id to it.name }).forEach { (id, name) ->
+                            val on = btn.group == id || (id.isEmpty() && s.groups.none { it.id == btn.group })
+                            Row(Modifier.fillMaxWidth().clickable { a.setPttGroup(id) }.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Dot(if (on) C.amber else C.line)
+                                Spacer(Modifier.width(12.dp))
+                                Body(name, color = if (on) C.text else C.dim, maxLines = 1)
+                                if (id.isNotEmpty()) Label("  ·  main room", size = 10.sp)
+                            }
+                        }
+                    }
+                    Label("Outside the app", Modifier.padding(top = 6.dp))
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(C.panel).border(1.dp, C.line, RoundedCornerShape(8.dp)).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Body(if (btn.outside) "The button also works while other apps are open." else "Turn on \"PTT Radio talk button\" in Accessibility so the button works while other apps are open. Only that one key is watched.",
+                            Modifier.weight(1f), color = C.dim, size = 12.sp)
+                        Spacer(Modifier.width(12.dp))
+                        if (btn.outside) Icon(Icons.Filled.Check, "On", Modifier.size(22.dp), tint = C.green) else Btn("Turn on", primary = true) { a.openKeyService() }
+                    }
+                    if (btn.outside && (btn.key == vd || btn.key == vu)) Body("That volume key no longer changes the volume while this is on.", color = C.dim, size = 12.sp)
                 }
             }
             Section("Messages delete themselves after") {

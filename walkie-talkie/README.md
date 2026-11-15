@@ -8,6 +8,11 @@ A push-to-talk walkie-talkie for Android. Audio only, no calls, nothing recorded
 - **Groups and channels** – a group is the main room (`MAIN`) plus channels `CH 01`–`CH 16`. Move to a channel for a side
   conversation, **Bring** a member onto your channel, and **lock** it so nobody else can enter or listen.
 - **Push to talk** – hold the talk key to speak, release to mute. Everyone tuned to the same channel hears it live.
+- **Talk button** – Settings → Talk button maps a hardware key (volume key, or any programmable side key via *Other*) to
+  hold-to-talk, optionally always on one chosen group. Works inside the app as is; for other apps turn on the
+  "PTT Radio talk button" accessibility service. Dedicated PTT keys on rugged phones that broadcast
+  `android.intent.action.PTT.down/up` (or can be set to send `app.pttradio.PTT_DOWN` / `PTT_UP`) work too.
+  The power button cannot be remapped by any Android app.
 - **Messages** – text on the channel deletes itself after 2 minutes (or 15 s / 30 s / 1 min, in Settings). It lives in memory
   only: not on a server, not on disk.
 - **Links, in order** – internet first. When there is no internet the app finds phones around it and links to them over

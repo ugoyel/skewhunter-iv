@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -36,14 +37,14 @@ import app.pttradio.net.NearbyTransport
 import kotlinx.coroutines.delay
 
 @Composable
-fun AppRoot(s: RadioState, p: Perms, mode: String, server: String, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
+fun AppRoot(s: RadioState, p: Perms, mode: String, server: String, btn: ButtonCfg, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
     val now by produceState(System.currentTimeMillis()) { while (true) { delay(500); value = System.currentTimeMillis() } }
     Box(Modifier.fillMaxSize().background(C.bg)) {
         when {
             !s.ready -> {}
             s.me == null -> Welcome(a)
             scr == Scr.SETUP -> Setup(p, a) { go(Scr.HOME) }
-            scr == Scr.SETTINGS -> SettingsScreen(s, p, mode, server, a) { go(Scr.HOME) }
+            scr == Scr.SETTINGS -> SettingsScreen(s, p, mode, server, btn, a) { go(Scr.HOME) }
             scr == Scr.RADIO && s.group != null -> RadioScreen(s, a, now) { go(Scr.HOME) }
             else -> Home(s, p, a, now, tab, onTab, go)
         }
@@ -61,9 +62,34 @@ class MainActivity : ComponentActivity(), Actions {
     private var tab by mutableIntStateOf(0)
     private var serverUrl by mutableStateOf("")
     private var askedBattery = false
+    private var btn by mutableStateOf(ButtonCfg())
+
+    private fun refreshButton(learning: Boolean = false) {
+        val on = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)?.contains("$packageName/") == true
+        btn = ButtonCfg(app.pttKey(), learning, app.pttGroup(), on)
+    }
+
+    /** The talk button while this app is on screen (other apps: [app.pttradio.PttKeyService]). */
+    override fun dispatchKeyEvent(e: KeyEvent): Boolean {
+        if (btn.learning) {
+            if (e.keyCode == KeyEvent.KEYCODE_BACK) { if (e.action == KeyEvent.ACTION_UP) refreshButton(); return true }
+            if (e.action == KeyEvent.ACTION_DOWN) { app.setPttKey(e.keyCode); refreshButton() }
+            return true
+        }
+        if (btn.key != 0 && e.keyCode == btn.key) {
+            if (e.action == KeyEvent.ACTION_DOWN) app.buttonDown() else if (e.action == KeyEvent.ACTION_UP) app.buttonUp()
+            return true
+        }
+        return super.dispatchKeyEvent(e)
+    }
+
+    override fun setPttKey(code: Int) { app.setPttKey(code); refreshButton() }
+    override fun learnKey() { refreshButton(learning = true) }
+    override fun setPttGroup(gid: String) { app.setPttGroup(gid); refreshButton() }
+    override fun openKeyService() { try { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } catch (e: Exception) { } }
 
     private val micReq = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        refreshPerms(); if (!ok) warning = "Microphone denied. You can listen, but nobody will hear you. The app won't work properly."
+        refreshPerms(); if (ok) RadioService.start(this, mic = true) else warning = "Microphone denied. You can listen, but nobody will hear you. The app won't work properly."
     }
     private val notifReq = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         refreshPerms(); if (!ok) warning = "Notifications denied. You won't be told about group invitations or channel calls. The app won't work properly."
@@ -86,7 +112,7 @@ class MainActivity : ComponentActivity(), Actions {
             val mode by app.linkMode.collectAsState()
             LaunchedEffect(s.me?.id) { if (s.me != null) RadioService.start(this@MainActivity) }
             BackHandler(enabled = s.me != null && scr != Scr.HOME) { scr = Scr.HOME }
-            AppRoot(s, perms, mode, serverUrl, this, scr, tab, { tab = it }) { scr = it }
+            AppRoot(s, perms, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
             warning?.let { w ->
                 Sheet("Warning", { warning = null }) {
                     Body(w, size = 14.sp)
@@ -115,14 +141,15 @@ class MainActivity : ComponentActivity(), Actions {
         super.onResume()
         visible = true
         refreshPerms()
-        RadioService.start(this)
+        refreshButton()
+        RadioService.start(this, mic = perms.mic)
         if (askedBattery) {
             askedBattery = false
             if (!perms.battery) warning = "Background running was not allowed. Android will put the radio to sleep and you will miss calls. The app won't work properly."
         }
     }
 
-    override fun onPause() { visible = false; core.pttUp(); super.onPause() }
+    override fun onPause() { visible = false; app.buttonUp(); super.onPause() }
 
     private fun has(p: String) = checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
 

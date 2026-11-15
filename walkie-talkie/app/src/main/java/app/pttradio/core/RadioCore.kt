@@ -363,7 +363,9 @@ class RadioCore(
     private fun channelKey(g: Group, ch: Int): ByteArray? =
         if (s.lockOf(g.id, ch) != null) chKeys["${g.id}/$ch"] else unb64(g.key)
 
-    fun pttDown() = run {
+    /** @param gid when set (hardware talk button with a default group), tune to that group's main room first. */
+    fun pttDown(gid: String? = null) = run {
+        if (gid != null && gid != s.tunedGroup && s.groups.any { it.id == gid }) tuneNow(gid, 0)
         val g = s.group
         if (g == null || s.transmitting) return@run
         if (transports.none { it.isUp }) { notice("NO LINK"); return@run }

@@ -1,5 +1,7 @@
 package app.pttradio
 
+import android.Manifest
+import android.accessibilityservice.AccessibilityService
 import android.app.AlarmManager
 import android.app.Application
 import android.app.Notification
@@ -12,6 +14,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
@@ -19,6 +22,10 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.view.KeyEvent
+import android.view.accessibility.AccessibilityEvent
 import androidx.core.content.ContextCompat
 import app.pttradio.audio.AudioEngine
 import app.pttradio.core.Event
@@ -77,6 +84,11 @@ class App : Application() {
         getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) { mqtt.kick() }
         })
+        // Rugged phones announce their dedicated PTT key with a broadcast instead of a key code.
+        ContextCompat.registerReceiver(this, object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) { if (i.action in PTT_DOWN) buttonDown() else buttonUp() }
+        }, IntentFilter().apply { (PTT_DOWN + PTT_UP).forEach { addAction(it) } }, ContextCompat.RECEIVER_EXPORTED)
+
         scope.launch {
             combine(core.state.map { it.netUp to (it.me != null) }.distinctUntilChanged(), linkMode, bump) { a, m, _ -> Triple(a.first, a.second, m) }
                 .collectLatest { (netUp, ready, mode) ->
@@ -103,7 +115,28 @@ class App : Application() {
     /** Re-evaluate links, e.g. after the nearby permissions were granted. */
     fun refreshLinks() { bump.value++ }
 
+    // ---- hardware talk button ------------------------------------------------------------------
+    @Volatile private var held = false
+    /** Key code chosen as talk button, 0 = none. */
+    fun pttKey(): Int = prefs.getInt("pttKey", 0)
+    fun setPttKey(code: Int) { prefs.edit().putInt("pttKey", code).apply() }
+    /** Group the button talks on; empty = whatever channel the radio is tuned to. */
+    fun pttGroup(): String = prefs.getString("pttGroup", "") ?: ""
+    fun setPttGroup(gid: String) { prefs.edit().putString("pttGroup", gid).apply() }
+
+    fun buttonDown() {
+        if (held) return // key auto-repeat
+        held = true
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
+        core.pttDown(pttGroup().ifEmpty { null })
+        try { getSystemService(Vibrator::class.java)?.vibrate(VibrationEffect.createOneShot(35, VibrationEffect.DEFAULT_AMPLITUDE)) } catch (e: Exception) { }
+    }
+
+    fun buttonUp() { held = false; core.pttUp() }
+
     companion object {
+        val PTT_DOWN = setOf("app.pttradio.PTT_DOWN", "android.intent.action.PTT.down", "com.sonim.intent.action.PTT_KEY_DOWN")
+        val PTT_UP = setOf("app.pttradio.PTT_UP", "android.intent.action.PTT.up", "com.sonim.intent.action.PTT_KEY_UP")
         fun normalize(v: String?): String {
             val s = v?.trim().orEmpty()
             return when { s.isEmpty() -> DEFAULT_SERVER; s.contains("://") -> s; s.contains(":") -> "ssl://$s"; else -> "ssl://$s:8883" }
@@ -205,15 +238,40 @@ class RadioService : Service() {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Sent while the app is on screen: Android only grants background microphone use (needed for the
+        // hardware talk button) to a service that was promoted while the app was visible.
+        if (intent?.action == ACTION_MIC && Build.VERSION.SDK_INT >= 30) try {
+            startForeground(1, Notifier.standby(this, Notifier.statusLine((application as App).core.state.value)),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+        } catch (e: Exception) { }
+        return START_STICKY
+    }
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onDestroy() { scope.cancel(); super.onDestroy() }
 
     companion object {
-        fun start(c: Context) {
+        const val ACTION_MIC = "mic"
+        fun start(c: Context, mic: Boolean = false) {
             if ((c.applicationContext as App).core.state.value.me == null && (c.applicationContext as App).prefs.getString("me", null) == null) return
-            try { c.startForegroundService(Intent(c, RadioService::class.java)) } catch (e: Exception) { }
+            try { c.startForegroundService(Intent(c, RadioService::class.java).setAction(if (mic) ACTION_MIC else null)) } catch (e: Exception) { }
         }
+    }
+}
+
+/**
+ * Lets the chosen hardware key work as push-to-talk while another app is in front.
+ * It asks Android for key events only and ignores every key except the configured one.
+ */
+class PttKeyService : AccessibilityService() {
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onInterrupt() {}
+    override fun onKeyEvent(e: KeyEvent): Boolean {
+        val app = application as App
+        val key = app.pttKey()
+        if (key == 0 || e.keyCode != key) return false
+        if (e.action == KeyEvent.ACTION_DOWN) app.buttonDown() else if (e.action == KeyEvent.ACTION_UP) app.buttonUp()
+        return true
     }
 }
 
