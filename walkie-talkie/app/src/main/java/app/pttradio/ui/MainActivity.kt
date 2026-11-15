@@ -33,11 +33,12 @@ import androidx.compose.ui.unit.sp
 import app.pttradio.App
 import app.pttradio.RadioService
 import app.pttradio.core.RadioState
+import app.pttradio.net.NearbyInfo
 import app.pttradio.net.NearbyTransport
 import kotlinx.coroutines.delay
 
 @Composable
-fun AppRoot(s: RadioState, p: Perms, mode: String, server: String, btn: ButtonCfg, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
+fun AppRoot(s: RadioState, p: Perms, near: NearbyInfo, mode: String, server: String, btn: ButtonCfg, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
     val now by produceState(System.currentTimeMillis()) { while (true) { delay(500); value = System.currentTimeMillis() } }
     Box(Modifier.fillMaxSize().background(C.bg)) {
         when {
@@ -46,7 +47,7 @@ fun AppRoot(s: RadioState, p: Perms, mode: String, server: String, btn: ButtonCf
             scr == Scr.SETUP -> Setup(p, a) { go(Scr.HOME) }
             scr == Scr.SETTINGS -> SettingsScreen(s, p, mode, server, btn, a) { go(Scr.HOME) }
             scr == Scr.RADIO && s.group != null -> RadioScreen(s, a, now) { go(Scr.HOME) }
-            else -> Home(s, p, a, now, tab, onTab, go)
+            else -> Home(s, p, near, a, now, tab, onTab, go)
         }
     }
 }
@@ -86,6 +87,16 @@ class MainActivity : ComponentActivity(), Actions {
     override fun setPttKey(code: Int) { app.setPttKey(code); refreshButton() }
     override fun learnKey() { refreshButton(learning = true) }
     override fun setPttGroup(gid: String) { app.setPttGroup(gid); refreshButton() }
+    override fun fixNearby(problem: String) {
+        try {
+            when (problem) {
+                "perm" -> requestPerm("nearby")
+                "bt" -> startActivity(Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE))
+                "loc" -> startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                else -> { app.nearby.stop(); app.refreshLinks() }
+            }
+        } catch (e: Exception) { }
+    }
     override fun openKeyService() { try { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } catch (e: Exception) { } }
 
     private val micReq = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
@@ -98,6 +109,7 @@ class MainActivity : ComponentActivity(), Actions {
         refreshPerms()
         if (r.values.any { !it }) warning = "Nearby devices denied. Without internet the radio can't reach phones around you. The app won't work properly."
         else app.refreshLinks()
+        app.nearby.publish()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -110,9 +122,10 @@ class MainActivity : ComponentActivity(), Actions {
         setContent {
             val s by core.state.collectAsState()
             val mode by app.linkMode.collectAsState()
+            val near by app.nearby.info.collectAsState()
             LaunchedEffect(s.me?.id) { if (s.me != null) RadioService.start(this@MainActivity) }
             BackHandler(enabled = s.me != null && scr != Scr.HOME) { scr = Scr.HOME }
-            AppRoot(s, perms, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
+            AppRoot(s, perms, near, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
             warning?.let { w ->
                 Sheet("Warning", { warning = null }) {
                     Body(w, size = 14.sp)
@@ -140,6 +153,10 @@ class MainActivity : ComponentActivity(), Actions {
     override fun onResume() {
         super.onResume()
         visible = true
+        app.onScreen.value = true
+        app.nearby.restartIfIdle()
+        app.nearby.publish()
+        app.refreshLinks()
         refreshPerms()
         refreshButton()
         RadioService.start(this, mic = perms.mic)
@@ -149,7 +166,7 @@ class MainActivity : ComponentActivity(), Actions {
         }
     }
 
-    override fun onPause() { visible = false; app.buttonUp(); super.onPause() }
+    override fun onPause() { visible = false; app.onScreen.value = false; app.buttonUp(); super.onPause() }
 
     private fun has(p: String) = checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
 

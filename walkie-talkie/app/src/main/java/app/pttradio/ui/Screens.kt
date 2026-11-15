@@ -47,6 +47,7 @@ import app.pttradio.core.RadioCore
 import app.pttradio.core.RadioState
 import app.pttradio.core.User
 import app.pttradio.core.chName
+import app.pttradio.net.NearbyInfo
 
 data class Perms(val mic: Boolean = true, val notif: Boolean = true, val nearby: Boolean = true, val battery: Boolean = true) {
     val allOk get() = mic && notif && nearby && battery
@@ -81,6 +82,7 @@ interface Actions {
     fun learnKey()
     fun setPttGroup(gid: String)
     fun openKeyService()
+    fun fixNearby(problem: String)
 }
 
 fun isNearby(u: User, now: Long) = now - u.nearbyAt < RadioCore.NEARBY_EXPIRE
@@ -140,7 +142,7 @@ fun PermList(p: Perms, a: Actions) {
         PermRow("Always on in background", "Keeps the radio connected when the app is closed. Idle use is light on battery.", p.battery) { a.requestPerm("battery") }
         PermRow("Microphone", "Used only while you hold the talk key.", p.mic) { a.requestPerm("mic") }
         PermRow("Notifications", "Group invitations and channel calls.", p.notif) { a.requestPerm("notif") }
-        PermRow("Nearby devices", "Bluetooth and Wi-Fi link to phones around you when there is no internet.", p.nearby) { a.requestPerm("nearby") }
+        PermRow("Nearby devices and Location", "Bluetooth and Wi-Fi link to phones around you with no internet. Android only lets apps scan for phones with Location allowed; your position is never read or sent.", p.nearby) { a.requestPerm("nearby") }
     }
 }
 
@@ -168,7 +170,7 @@ fun WarningBox(text: String, onClick: (() -> Unit)? = null) {
 }
 
 @Composable
-fun Home(s: RadioState, p: Perms, a: Actions, now: Long, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
+fun Home(s: RadioState, p: Perms, near: NearbyInfo, a: Actions, now: Long, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -182,7 +184,7 @@ fun Home(s: RadioState, p: Perms, a: Actions, now: Long, tab: Int, onTab: (Int) 
             WarningBox("Permissions missing. The radio won't work properly. Tap to fix.") { go(Scr.SETUP) }
         }
         Box(Modifier.weight(1f)) {
-            if (tab == 0) Contacts(s, a, now) { go(Scr.RADIO) } else Groups(s, a, { onTab(0) }) { gid, ch -> a.tune(gid, ch); go(Scr.RADIO) }
+            if (tab == 0) Contacts(s, near, a, now) { go(Scr.RADIO) } else Groups(s, a, { onTab(0) }) { gid, ch -> a.tune(gid, ch); go(Scr.RADIO) }
         }
         Row(Modifier.fillMaxWidth().background(C.panel).border(1.dp, C.line)) {
             listOf("Contacts", "Groups").forEachIndexed { i, t ->
@@ -204,10 +206,12 @@ fun UserRow(u: User, now: Long, selected: Boolean, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).background(if (selected) C.raised else Color.Transparent).padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Dot(if (near) C.amber else if (u.online) C.green else C.faint)
+        if (near && u.online) { Spacer(Modifier.width(4.dp)); Dot(C.green) }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Body(u.name, weight = FontWeight.Medium, maxLines = 1)
-            Label(if (near) "Nearby" else if (u.online) "Online" else "Off air", size = 10.sp, color = if (near) C.amber else C.dim)
+            Label(when { near && u.online -> "Nearby · on internet"; near -> "Nearby · no internet"; u.online -> "On internet"; else -> "Off air" },
+                size = 10.sp, color = if (near) C.amber else if (u.online) C.green else C.dim)
         }
         Box(Modifier.size(22.dp).clip(RoundedCornerShape(4.dp)).background(if (selected) C.amber else Color.Transparent).border(1.dp, if (selected) C.amber else C.line, RoundedCornerShape(4.dp)),
             contentAlignment = Alignment.Center) { if (selected) Icon(Icons.Filled.Check, null, Modifier.size(16.dp), tint = C.bg) }
@@ -220,17 +224,44 @@ fun visibleUsers(s: RadioState, now: Long, q: String = ""): List<User> = s.users
     .sortedWith(compareByDescending<User> { isNearby(it, now) }.thenByDescending { it.online }.thenBy { it.name.lowercase() })
 
 @Composable
-fun Contacts(s: RadioState, a: Actions, now: Long, onCreated: () -> Unit) {
+private fun NearbyBar(s: RadioState, near: NearbyInfo, users: List<User>, now: Long, a: Actions) {
+    val nearN = users.count { isNearby(it, now) }
+    val netN = users.count { it.online }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Dot(C.amber, 7.dp); Label("$nearN nearby", color = C.text, size = 10.sp)
+            Spacer(Modifier.width(8.dp))
+            Dot(C.green, 7.dp); Label("$netN on internet", color = C.text, size = 10.sp)
+            Spacer(Modifier.weight(1f))
+            Label(when {
+                !near.running -> "Nearby radio off"
+                near.linked > 0 -> "${near.linked} phone${if (near.linked > 1) "s" else ""} linked"
+                near.found > 0 -> "Found ${near.found} · linking"
+                else -> "Scanning nearby"
+            }, size = 10.sp)
+        }
+        if (near.problem != null && (near.running || !s.netUp)) Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0x22FFB020)).border(1.dp, Color(0x66FFB020), RoundedCornerShape(8.dp)).padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Body(near.detail ?: "The nearby link is not working.", Modifier.weight(1f), size = 13.sp)
+            Btn(if (near.problem == "err") "Retry" else "Fix", primary = true) { a.fixNearby(near.problem) }
+        }
+    }
+}
+
+@Composable
+fun Contacts(s: RadioState, near: NearbyInfo, a: Actions, now: Long, onCreated: () -> Unit) {
     var q by remember { mutableStateOf("") }
     var sel by remember { mutableStateOf(setOf<String>()) }
     var naming by remember { mutableStateOf(false) }
     val users = visibleUsers(s, now, q)
     Column(Modifier.fillMaxSize()) {
         Field(q, { q = it }, "Search people", Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp))
+        NearbyBar(s, near, users, now, a)
         if (users.isEmpty()) Column(Modifier.weight(1f).fillMaxWidth().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Label(if (q.isNotBlank()) "No match" else if (s.netUp || s.nearbyUp) "Nobody else on air yet" else "Searching for a link")
             Spacer(Modifier.height(8.dp))
-            Body("Everyone who installs the app appears here. With no internet, phones in range show up as Nearby.", color = C.faint, size = 13.sp)
+            Body("Everyone who installs the app appears here. With no internet, keep Bluetooth and Location on and the app open on both phones; phones in range show up as Nearby within about half a minute.", color = C.faint, size = 13.sp)
         } else LazyColumn(Modifier.weight(1f)) {
             items(users, key = { it.id }) { u -> UserRow(u, now, u.id in sel) { sel = if (u.id in sel) sel - u.id else sel + u.id } }
         }
@@ -377,7 +408,7 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: B
                     "net" -> "Internet only. Bluetooth and Wi-Fi discovery stay off."
                     "nearby" -> "Phone-to-phone only, over Bluetooth and Wi-Fi. No server is used."
                     "both" -> "Internet and nearby together. Lets this phone stay reachable both ways; uses the most battery."
-                    else -> "Internet first. When there is none, nearby phones are found and linked automatically."
+                    else -> "Internet when there is one. Nearby phones are found over Bluetooth and Wi-Fi whenever there is no internet, and also while the app is open."
                 }, color = C.dim, size = 12.sp)
             }
             Section("End-of-transmission beep") {

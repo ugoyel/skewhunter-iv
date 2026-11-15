@@ -553,7 +553,7 @@ class RadioCore(
         val near = transports.any { it.relays && it.isUp }
         val netCameUp = net && !s.netUp
         update { copy(netUp = net, nearbyUp = near, users = if (net) users else users.mapValues { it.value.copy(online = false) }) }
-        if (t.relays && t.isUp && clock() - lastHelloAt > 1500) sendHello()
+        if (t.relays && t.isUp) sendHello()
         if (netCameUp || (t.relays && t.isUp)) {
             resendInvites()
             s.group?.let { sendPresence(it, s.tunedCh) }
@@ -583,7 +583,7 @@ class RadioCore(
         if (s.transmitting && now - txStart > MAX_TX) { pttUpNow(); notice("TX TIME LIMIT") }
         val g = s.group
         if (g != null && now - lastPresenceAt > PRESENCE_EVERY) { setMyPresence(); sendPresence(g, s.tunedCh) }
-        if (s.nearbyUp && now - lastHelloAt > 60_000) sendHello()
+        if (s.nearbyUp && now - lastHelloAt > 20_000) sendHello()
         if (usersDirty && now - usersSavedAt > 10_000) {
             usersDirty = false; usersSavedAt = now
             val a = JSONArray()

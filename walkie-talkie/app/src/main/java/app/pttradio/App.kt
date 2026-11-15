@@ -58,9 +58,11 @@ class App : Application() {
     lateinit var core: RadioCore
     lateinit var mqtt: MqttTransport
     lateinit var nearby: NearbyTransport
-    /** auto = internet first, nearby when there is none · net · nearby · both */
+    /** auto = internet, plus nearby whenever there is no internet or the app is on screen · net · nearby · both */
     val linkMode = MutableStateFlow("auto")
     private val bump = MutableStateFlow(0)
+    /** True while the app is on screen. */
+    val onScreen = MutableStateFlow(false)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     override fun onCreate() {
@@ -90,16 +92,20 @@ class App : Application() {
         }, IntentFilter().apply { (PTT_DOWN + PTT_UP).forEach { addAction(it) } }, ContextCompat.RECEIVER_EXPORTED)
 
         scope.launch {
-            combine(core.state.map { it.netUp to (it.me != null) }.distinctUntilChanged(), linkMode, bump) { a, m, _ -> Triple(a.first, a.second, m) }
-                .collectLatest { (netUp, ready, mode) ->
+            combine(core.state.map { it.netUp to (it.me != null) }.distinctUntilChanged(), linkMode, bump, onScreen) { a, m, _, vis -> listOf(a.first, a.second, m, vis) }
+                .collectLatest { (netUpV, readyV, modeV, visV) ->
+                    val netUp = netUpV as Boolean; val ready = readyV as Boolean; val mode = modeV as String; val vis = visV as Boolean
                     if (!ready) return@collectLatest
                     if (mode == "nearby") mqtt.stop() else mqtt.start()
                     when {
                         mode == "nearby" || mode == "both" -> nearby.start()
                         mode == "net" -> nearby.stop()
                         // auto: radios (the battery-hungry part) are only switched on while there is no internet
-                        netUp -> { delay(20_000); nearby.stop() }
-                        else -> { delay(5_000); nearby.start() }
+                        // auto: the radios run whenever there is no internet, and also while the app is open so
+                        // people around you are visible; with internet and the app closed they rest to save battery
+                        !netUp || vis -> { if (!vis) delay(3_000); nearby.start() }
+                        // never drop phones that are linked right now: they may have no other way to reach us
+                        else -> { delay(20_000); if (nearby.info.value.linked == 0) nearby.stop() }
                     }
                 }
         }
