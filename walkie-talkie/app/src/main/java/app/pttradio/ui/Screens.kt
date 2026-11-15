@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
@@ -84,6 +85,8 @@ interface Actions {
     fun learnKey()
     fun setPttGroup(gid: String)
     fun fixNearby(problem: String)
+    /** Drop and rebuild every link now. */
+    fun reconnect()
     fun shareLocation()
     fun pickImage()
     fun openMap(lat: Double, lon: Double, label: String)
@@ -225,7 +228,8 @@ fun Home(s: RadioState, p: Perms, near: NearbyInfo, a: Actions, now: Long, tab: 
                 Label(s.me?.name ?: "", size = 10.sp)
             }
             LinkPill(s)
-            Icon(Icons.Filled.Settings, "Settings", Modifier.padding(start = 4.dp).clip(RoundedCornerShape(20.dp)).clickable { go(Scr.SETTINGS) }.padding(10.dp).size(22.dp), tint = C.dim)
+            Icon(Icons.Filled.Refresh, "Reconnect", Modifier.padding(start = 4.dp).clip(RoundedCornerShape(20.dp)).clickable { a.reconnect() }.padding(10.dp).size(22.dp), tint = C.dim)
+            Icon(Icons.Filled.Settings, "Settings", Modifier.clip(RoundedCornerShape(20.dp)).clickable { go(Scr.SETTINGS) }.padding(10.dp).size(22.dp), tint = C.dim)
         }
         if (!p.allOk) Box(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
             WarningBox("Permissions missing. The radio won't work properly. Tap to fix.") { go(Scr.SETUP) }
@@ -258,7 +262,7 @@ fun UserRow(u: User, now: Long, selected: Boolean, link: PeerLink? = null, onCli
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Body(u.name, weight = FontWeight.Medium, maxLines = 1)
-            val how = if (link != null) "${link.tech} ${link.pct}%" else "via another phone"
+            val how = if (link == null) "via another phone" else if (link.pct >= 0) "${link.tech} ${link.pct}%" else link.tech
             Label(when { near && u.online -> "Nearby · $how · on internet"; near -> "Nearby · $how"; u.online -> "On internet"; else -> "Off air" },
                 size = 10.sp, color = if (near) C.amber else if (u.online) C.green else C.dim)
         }

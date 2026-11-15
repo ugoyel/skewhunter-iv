@@ -142,6 +142,13 @@ class MainActivity : ComponentActivity(), Actions {
         } catch (e: Exception) { got(null) }
     }
 
+    override fun reconnect() {
+        core.note("RECONNECTING")
+        app.nearby.restart()
+        app.mqtt.kick()
+        app.refreshLinks()
+    }
+
     override fun openMap(lat: Double, lon: Double, label: String) {
         try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:$lat,$lon?q=$lat,$lon(${Uri.encode(label)})"))) }
         catch (e: Exception) { warning = "No maps app is installed to show this position." }

@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Icon
@@ -142,8 +143,11 @@ private fun Lcd(s: RadioState, near: NearbyInfo, now: Long) {
             // Without internet: which radio carries the link and how strongly the other phone is received.
             val direct = near.peers.entries.filter { it.key in occ }.ifEmpty { near.peers.entries }
             val nearText = when {
-                direct.size == 1 -> direct.first().value.let { "${it.tech} ${it.pct}%" }
-                direct.size > 1 -> direct.groupBy { it.value.tech }.entries.joinToString(" · ") { (t, l) -> "$t ${l.minOf { it.value.pct }}–${l.maxOf { it.value.pct }}%" }
+                direct.size == 1 -> direct.first().value.let { if (it.pct >= 0) "${it.tech} ${it.pct}%" else it.tech }
+                direct.size > 1 -> direct.groupBy { it.value.tech }.entries.joinToString(" · ") { (t, l) ->
+                    val m = l.map { it.value.pct }.filter { it >= 0 }
+                    if (m.isEmpty()) "$t ×${l.size}" else "$t ${m.min()}–${m.max()}%"
+                }
                 else -> "NEARBY"
             }
             val (lc, lt) = when { s.netUp -> C.green to "INTERNET"; s.nearbyUp -> C.amber to nearText; else -> C.red to "NO LINK" }
@@ -226,6 +230,7 @@ fun RadioScreen(s: RadioState, near: NearbyInfo, a: Actions, now: Long, onBack: 
 
     Column(Modifier.fillMaxSize()) {
         TopBar(g.name, onBack) {
+            Icon(Icons.Filled.Refresh, "Reconnect", Modifier.clip(RoundedCornerShape(20.dp)).clickable { a.reconnect() }.padding(10.dp).size(22.dp), tint = C.dim)
             Icon(Icons.Filled.Lock, if (lock != null) "Unlock channel" else "Lock channel",
                 Modifier.clip(RoundedCornerShape(20.dp)).clickable { if (lock != null) a.unlock() else a.lock() }.padding(10.dp).size(22.dp),
                 tint = if (lock != null) C.amber else C.faint)
