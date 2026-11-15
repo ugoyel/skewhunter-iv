@@ -148,7 +148,18 @@ data class Group(val id: String, val name: String, val key: String, val owner: S
 data class Invite(val group: Group, val fromId: String, val fromName: String)
 data class Lock(val ch: Int, val by: String, val allow: Set<String>)
 data class Pres(val ch: Int, val at: Long)
-data class TextMsg(val id: Long, val fromId: String, val from: String, val text: String, val at: Long, val expires: Long, val mine: Boolean)
+/** [image] holds a JPEG for picture messages. A [text] of the form "geo:lat,lon,accuracy" is a shared location. */
+data class TextMsg(val id: Long, val fromId: String, val from: String, val text: String, val at: Long, val expires: Long, val mine: Boolean,
+                   val image: ByteArray? = null) {
+    /** latitude, longitude, accuracy in metres - or null when this is not a location message. */
+    val geo: Triple<Double, Double, Int>? get() {
+        if (!text.startsWith("geo:")) return null
+        val p = text.substring(4).split(",")
+        val la = p.getOrNull(0)?.toDoubleOrNull(); val lo = p.getOrNull(1)?.toDoubleOrNull()
+        if (la == null || lo == null || la !in -90.0..90.0 || lo !in -180.0..180.0) return null
+        return Triple(la, lo, p.getOrNull(2)?.toIntOrNull() ?: 0)
+    }
+}
 
 data class RadioState(
     val me: User? = null,

@@ -38,15 +38,15 @@ import app.pttradio.net.NearbyTransport
 import kotlinx.coroutines.delay
 
 @Composable
-fun AppRoot(s: RadioState, p: Perms, near: NearbyInfo, mode: String, server: String, btn: ButtonCfg, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
+fun AppRoot(s: RadioState, p: Perms, near: NearbyInfo, login: Boolean, mode: String, server: String, btn: ButtonCfg, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
     val now by produceState(System.currentTimeMillis()) { while (true) { delay(500); value = System.currentTimeMillis() } }
     Box(Modifier.fillMaxSize().background(C.bg)) {
         when {
             !s.ready -> {}
-            s.me == null -> Welcome(a)
+            s.me == null -> Welcome(a, login)
             scr == Scr.SETUP -> Setup(p, a) { go(Scr.HOME) }
             scr == Scr.SETTINGS -> SettingsScreen(s, p, mode, server, btn, a) { go(Scr.HOME) }
-            scr == Scr.RADIO && s.group != null -> RadioScreen(s, a, now) { go(Scr.HOME) }
+            scr == Scr.RADIO && s.group != null -> RadioScreen(s, near, a, now) { go(Scr.HOME) }
             else -> Home(s, p, near, a, now, tab, onTab, go)
         }
     }
@@ -63,6 +63,87 @@ class MainActivity : ComponentActivity(), Actions {
     private var tab by mutableIntStateOf(0)
     private var serverUrl by mutableStateOf("")
     private var askedBattery = false
+    private val auth by lazy { app.pttradio.net.Auth(app.pttradio.BuildConfig.LOGIN_URL, app.pttradio.BuildConfig.LOGIN_KEY) }
+
+    override fun requestCode(email: String, name: String, phone: String, marketing: Boolean, done: (String?) -> Unit) =
+        auth.requestCode(email, name, phone, marketing) { e -> runOnUiThread { done(e) } }
+    override fun verifyCode(email: String, code: String, done: (String?) -> Unit) =
+        auth.verify(email, code) { e -> runOnUiThread { done(e) } }
+
+    // ---- pictures: shrunk to a small JPEG, sent encrypted, never written to storage ----
+    private val imageReq = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) kotlin.concurrent.thread(isDaemon = true) {
+            try {
+                val src = if (Build.VERSION.SDK_INT >= 28)
+                    android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(contentResolver, uri)) { d, info, _ ->
+                        d.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+                        val big = maxOf(info.size.width, info.size.height)
+                        if (big > 960) { val k = 960f / big; d.setTargetSize((info.size.width * k).toInt().coerceAtLeast(1), (info.size.height * k).toInt().coerceAtLeast(1)) }
+                    }
+                else contentResolver.openInputStream(uri).use { android.graphics.BitmapFactory.decodeStream(it) }.let { b ->
+                    val big = maxOf(b.width, b.height)
+                    if (big > 960) android.graphics.Bitmap.createScaledBitmap(b, b.width * 960 / big, b.height * 960 / big, true) else b
+                }
+                var q = 75
+                var out: ByteArray
+                do {
+                    val bos = java.io.ByteArrayOutputStream()
+                    src.compress(android.graphics.Bitmap.CompressFormat.JPEG, q, bos)
+                    out = bos.toByteArray(); q -= 15
+                } while (out.size > 180_000 && q >= 30)
+                core.sendImage(out)
+            } catch (e: Exception) { core.note("COULD NOT READ PICTURE") }
+        }
+    }
+    override fun pickImage() { try { imageReq.launch("image/*") } catch (e: Exception) { } }
+
+    // ---- location: GPS works with no internet; the fix is sent as a normal expiring message ----
+    override fun shareLocation() {
+        if (!has(Manifest.permission.ACCESS_FINE_LOCATION)) { requestPerm("nearby"); return }
+        val lm = getSystemService(android.location.LocationManager::class.java)
+        val order = listOf(android.location.LocationManager.GPS_PROVIDER, "fused", android.location.LocationManager.NETWORK_PROVIDER)
+            .filter { p -> try { lm.allProviders.contains(p) && lm.isProviderEnabled(p) } catch (e: Exception) { false } }
+        if (order.isEmpty()) { warning = "Location is switched off. Turn it on to share where you are."; return }
+        core.note("GETTING POSITION")
+        locate(lm, order, 0)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun locate(lm: android.location.LocationManager, order: List<String>, i: Int) {
+        if (i >= order.size) { core.note("NO POSITION FIX"); return }
+        val handler = android.os.Handler(mainLooper)
+        var done = false
+        val got = { l: android.location.Location? ->
+            if (!done) {
+                done = true
+                if (l != null) core.sendLocation(l.latitude, l.longitude, if (l.hasAccuracy()) l.accuracy.toInt().coerceAtLeast(1) else 0)
+                else locate(lm, order, i + 1)
+            }
+        }
+        try {
+            // GPS gets up to 30 s (a cold fix without internet is slow); the fall-backs get 10 s
+            val wait = if (i == 0) 30_000L else 10_000L
+            if (Build.VERSION.SDK_INT >= 30) {
+                val cancel = android.os.CancellationSignal()
+                lm.getCurrentLocation(order[i], cancel, mainExecutor) { l -> got(l) }
+                handler.postDelayed({ if (!done) { cancel.cancel(); got(null) } }, wait)
+            } else {
+                val listener = object : android.location.LocationListener {
+                    override fun onLocationChanged(l: android.location.Location) { got(l) }
+                    @Deprecated("Deprecated in Java") override fun onStatusChanged(p: String?, s: Int, b: Bundle?) {}
+                    override fun onProviderEnabled(p: String) {}
+                    override fun onProviderDisabled(p: String) {}
+                }
+                @Suppress("DEPRECATION") lm.requestSingleUpdate(order[i], listener, mainLooper)
+                handler.postDelayed({ if (!done) { lm.removeUpdates(listener); got(null) } }, wait)
+            }
+        } catch (e: Exception) { got(null) }
+    }
+
+    override fun openMap(lat: Double, lon: Double, label: String) {
+        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:$lat,$lon?q=$lat,$lon(${Uri.encode(label)})"))) }
+        catch (e: Exception) { warning = "No maps app is installed to show this position." }
+    }
     private var btn by mutableStateOf(ButtonCfg())
 
     private fun refreshButton(learning: Boolean = false) {
@@ -123,7 +204,7 @@ class MainActivity : ComponentActivity(), Actions {
             val near by app.nearby.info.collectAsState()
             LaunchedEffect(s.me?.id) { if (s.me != null) RadioService.start(this@MainActivity) }
             BackHandler(enabled = s.me != null && scr != Scr.HOME) { scr = Scr.HOME }
-            AppRoot(s, perms, near, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
+            AppRoot(s, perms, near, auth.enabled, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
             warning?.let { w ->
                 Sheet("Warning", { warning = null }) {
                     Body(w, size = 14.sp)

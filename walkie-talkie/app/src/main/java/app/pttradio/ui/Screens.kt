@@ -48,6 +48,7 @@ import app.pttradio.core.RadioState
 import app.pttradio.core.User
 import app.pttradio.core.chName
 import app.pttradio.net.NearbyInfo
+import app.pttradio.net.PeerLink
 
 data class Perms(val mic: Boolean = true, val notif: Boolean = true, val nearby: Boolean = true, val battery: Boolean = true) {
     val allOk get() = mic && notif && nearby && battery
@@ -82,6 +83,12 @@ interface Actions {
     fun learnKey()
     fun setPttGroup(gid: String)
     fun fixNearby(problem: String)
+    fun shareLocation()
+    fun pickImage()
+    fun openMap(lat: Double, lon: Double, label: String)
+    /** E-mail code sign-in; callbacks get null on success or a message to show. */
+    fun requestCode(email: String, name: String, phone: String, marketing: Boolean, done: (String?) -> Unit)
+    fun verifyCode(email: String, code: String, done: (String?) -> Unit)
 }
 
 fun isNearby(u: User, now: Long) = now - u.nearbyAt < RadioCore.NEARBY_EXPIRE
@@ -106,18 +113,58 @@ fun TopBar(title: String, onBack: (() -> Unit)? = null, actions: @Composable () 
 }
 
 @Composable
-fun Welcome(a: Actions) {
+fun Welcome(a: Actions, login: Boolean) {
     var name by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.Center) {
+    var email by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var marketing by remember { mutableStateOf(false) }
+    var code by remember { mutableStateOf("") }
+    var sent by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val emailOk = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]{2,}$").matches(email.trim())
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp), verticalArrangement = Arrangement.Center) {
         Text("PTT RADIO", color = C.amber, fontFamily = Mono, fontSize = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
         Spacer(Modifier.height(8.dp))
         Body("Push-to-talk voice for your groups. Over internet, or straight phone-to-phone when there is none.", color = C.dim)
-        Spacer(Modifier.height(36.dp))
-        Label("Your call sign")
-        Spacer(Modifier.height(8.dp))
-        Field(name, { name = it.take(24) }, "Name shown to others", Modifier.fillMaxWidth()) { if (name.isNotBlank()) a.setName(name) }
-        Spacer(Modifier.height(16.dp))
-        Btn("Power on", Modifier.fillMaxWidth(), primary = true, enabled = name.isNotBlank()) { a.setName(name) }
+        Spacer(Modifier.height(28.dp))
+        if (!sent) {
+            Label("Your call sign")
+            Spacer(Modifier.height(8.dp))
+            Field(name, { name = it.take(24) }, "Name shown to others", Modifier.fillMaxWidth())
+            if (login) {
+                Spacer(Modifier.height(14.dp)); Label("E-mail"); Spacer(Modifier.height(8.dp))
+                Field(email, { email = it.trim().take(120) }, "We send a sign-in code here", Modifier.fillMaxWidth())
+                Spacer(Modifier.height(14.dp)); Label("Mobile number"); Spacer(Modifier.height(8.dp))
+                Field(phone, { v -> phone = v.filter { it.isDigit() || it == '+' }.take(16) }, "With country code", Modifier.fillMaxWidth())
+                Spacer(Modifier.height(14.dp))
+                Row(Modifier.clickable { marketing = !marketing }, verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(22.dp).clip(RoundedCornerShape(4.dp)).background(if (marketing) C.amber else Color.Transparent).border(1.dp, if (marketing) C.amber else C.line, RoundedCornerShape(4.dp)),
+                        contentAlignment = Alignment.Center) { if (marketing) Icon(Icons.Filled.Check, null, Modifier.size(16.dp), tint = C.bg) }
+                    Spacer(Modifier.width(12.dp))
+                    Body("Send me news and offers by e-mail or SMS. Optional.", Modifier.weight(1f), color = C.dim, size = 13.sp)
+                }
+            }
+            error?.let { Spacer(Modifier.height(12.dp)); Body(it, color = C.red, size = 13.sp) }
+            Spacer(Modifier.height(16.dp))
+            if (!login) Btn("Power on", Modifier.fillMaxWidth(), primary = true, enabled = name.isNotBlank()) { a.setName(name) }
+            else Btn(if (busy) "Sending" else "Send code", Modifier.fillMaxWidth(), primary = true, enabled = !busy && name.isNotBlank() && emailOk && phone.length >= 8) {
+                busy = true; error = null
+                a.requestCode(email.trim(), name.trim(), phone, marketing) { e -> busy = false; error = e; if (e == null) sent = true }
+            }
+        } else {
+            Label("Code sent to $email")
+            Spacer(Modifier.height(8.dp))
+            Field(code, { v -> code = v.filter { it.isDigit() }.take(8) }, "Enter the code", Modifier.fillMaxWidth())
+            error?.let { Spacer(Modifier.height(12.dp)); Body(it, color = C.red, size = 13.sp) }
+            Spacer(Modifier.height(16.dp))
+            Btn(if (busy) "Checking" else "Power on", Modifier.fillMaxWidth(), primary = true, enabled = !busy && code.length >= 6) {
+                busy = true; error = null
+                a.verifyCode(email.trim(), code) { e -> busy = false; error = e; if (e == null) a.setName(name) }
+            }
+            Spacer(Modifier.height(10.dp))
+            Btn("Change e-mail", Modifier.fillMaxWidth(), enabled = !busy) { sent = false; code = ""; error = null }
+        }
     }
 }
 
@@ -200,7 +247,7 @@ fun Home(s: RadioState, p: Perms, near: NearbyInfo, a: Actions, now: Long, tab: 
 }
 
 @Composable
-fun UserRow(u: User, now: Long, selected: Boolean, onClick: () -> Unit) {
+fun UserRow(u: User, now: Long, selected: Boolean, link: PeerLink? = null, onClick: () -> Unit) {
     val near = isNearby(u, now)
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).background(if (selected) C.raised else Color.Transparent).padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically) {
@@ -209,7 +256,8 @@ fun UserRow(u: User, now: Long, selected: Boolean, onClick: () -> Unit) {
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Body(u.name, weight = FontWeight.Medium, maxLines = 1)
-            Label(when { near && u.online -> "Nearby · on internet"; near -> "Nearby · no internet"; u.online -> "On internet"; else -> "Off air" },
+            val how = if (link != null) "${link.tech} ${link.pct}%" else "via another phone"
+            Label(when { near && u.online -> "Nearby · $how · on internet"; near -> "Nearby · $how"; u.online -> "On internet"; else -> "Off air" },
                 size = 10.sp, color = if (near) C.amber else if (u.online) C.green else C.dim)
         }
         Box(Modifier.size(22.dp).clip(RoundedCornerShape(4.dp)).background(if (selected) C.amber else Color.Transparent).border(1.dp, if (selected) C.amber else C.line, RoundedCornerShape(4.dp)),
@@ -218,7 +266,7 @@ fun UserRow(u: User, now: Long, selected: Boolean, onClick: () -> Unit) {
 }
 
 fun visibleUsers(s: RadioState, now: Long, q: String = ""): List<User> = s.users.values
-    .filter { it.name.isNotBlank() && (it.online || isNearby(it, now) || now - it.ts < RadioCore.STALE_PROFILE) }
+    .filter { it.name.isNotBlank() && (it.online || isNearby(it, now)) } // only people who are on the app right now
     .filter { q.isBlank() || it.name.contains(q.trim(), ignoreCase = true) }
     .sortedWith(compareByDescending<User> { isNearby(it, now) }.thenByDescending { it.online }.thenBy { it.name.lowercase() })
 
@@ -258,11 +306,11 @@ fun Contacts(s: RadioState, near: NearbyInfo, a: Actions, now: Long, onCreated: 
         Field(q, { q = it }, "Search people", Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp))
         NearbyBar(s, near, users, now, a)
         if (users.isEmpty()) Column(Modifier.weight(1f).fillMaxWidth().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-            Label(if (q.isNotBlank()) "No match" else if (s.netUp || s.nearbyUp) "Nobody else on air yet" else "Searching for a link")
+            Label(if (q.isNotBlank()) "No match" else if (s.netUp || s.nearbyUp) "Nobody else on air right now" else "Searching for a link")
             Spacer(Modifier.height(8.dp))
-            Body("Everyone who installs the app appears here. With no internet, keep Bluetooth and Location on and the app open on both phones; phones in range show up as Nearby within about half a minute.", color = C.faint, size = 13.sp)
+            Body("People appear here while they are on the app. With no internet, keep Bluetooth and Location on and the app open on both phones; phones in range show up as Nearby within about half a minute.", color = C.faint, size = 13.sp)
         } else LazyColumn(Modifier.weight(1f)) {
-            items(users, key = { it.id }) { u -> UserRow(u, now, u.id in sel) { sel = if (u.id in sel) sel - u.id else sel + u.id } }
+            items(users, key = { it.id }) { u -> UserRow(u, now, u.id in sel, near.peers[u.id]) { sel = if (u.id in sel) sel - u.id else sel + u.id } }
         }
         if (sel.isNotEmpty()) Btn("Create group · ${sel.size}", Modifier.fillMaxWidth().padding(16.dp), primary = true) { naming = true }
     }

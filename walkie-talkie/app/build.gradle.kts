@@ -15,6 +15,8 @@ android {
         // Every CI build gets a higher number so a newer APK always installs over an older one.
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionName = "1.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
+        buildConfigField("String", "LOGIN_URL", "\"${(project.findProperty("loginUrl") ?: "").toString().trim()}\"")
+        buildConfigField("String", "LOGIN_KEY", "\"${(project.findProperty("loginKey") ?: "").toString().trim()}\"")
     }
     signingConfigs {
         // Fixed key kept in the repo so every build has the same signature and installs as an update.
@@ -37,7 +39,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     packaging { resources.excludes += setOf("META-INF/*.kotlin_module", "META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*") }
     testOptions { unitTests.isReturnDefaultValues = true }
 }

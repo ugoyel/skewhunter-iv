@@ -22,7 +22,9 @@ class RadioCore(
 
     companion object {
         const val P = "pttr1"
-        const val T_HELLO = 1; const val T_AUDIO = 2; const val T_TEXT = 3; const val T_PRES = 4; const val T_CTL = 5; const val T_DIRECT = 6
+        const val T_HELLO = 1; const val T_AUDIO = 2; const val T_TEXT = 3; const val T_PRES = 4; const val T_CTL = 5; const val T_DIRECT = 6; const val T_IMG = 7
+        const val IMG_CHUNK = 12_000
+        const val IMG_MAX_CHUNKS = 20
         const val MAX_CH = 16
         const val MAX_TTL_SEC = 120
         const val HOPS = 3
@@ -283,6 +285,7 @@ class RadioCore(
             }
         }
         rxSeq = -1
+        incoming.clear()
         update { copy(tunedGroup = gid, tunedCh = ch, messages = emptyList(), talker = null, talkerId = null) }
         kv.put("tunedGroup", gid); kv.put("tunedCh", ch.toString())
         setMyPresence()
@@ -409,9 +412,50 @@ class RadioCore(
         addMessage(me.id, me.name, t, true)
     }
 
-    private fun addMessage(fromId: String, from: String, text: String, mine: Boolean) {
+    /** Shows a short status line on the radio display. */
+    fun note(msg: String) = run { notice(msg) }
+
+    /** Shares a position on the channel. It expires like any other message. */
+    fun sendLocation(lat: Double, lon: Double, accuracyM: Int) =
+        sendText("geo:" + String.format(java.util.Locale.US, "%.6f,%.6f,%d", lat, lon, accuracyM))
+
+    /** Sends a (small, already compressed) JPEG to the channel in encrypted pieces. Held in memory only. */
+    fun sendImage(jpeg: ByteArray) = run {
+        val me = s.me ?: return@run
+        val g = s.group ?: return@run
+        val key = channelKey(g, s.tunedCh)
+        if (key == null) { notice("${chName(s.tunedCh)} LOCKED"); return@run }
+        val total = (jpeg.size + IMG_CHUNK - 1) / IMG_CHUNK
+        if (jpeg.isEmpty() || total > IMG_MAX_CHUNKS) { notice("IMAGE TOO LARGE"); return@run }
+        val id = java.nio.ByteBuffer.allocate(8).putLong(Crypto.randomId()).array()
+        for (i in 0 until total) {
+            val part = jpeg.copyOfRange(i * IMG_CHUNK, minOf(jpeg.size, (i + 1) * IMG_CHUNK))
+            if (!sendSealed(T_IMG, g.id, s.tunedCh, key, id + byteArrayOf(i.toByte(), total.toByte()) + part, chanTopic(g.id, s.tunedCh))) { notice("NO LINK"); return@run }
+        }
+        addMessage(me.id, me.name, "", true, jpeg)
+    }
+
+    private class Asm(val parts: Array<ByteArray?>, val at: Long)
+    private val incoming = HashMap<String, Asm>()
+
+    private fun onImagePart(sender: String, plain: ByteArray) {
+        if (plain.size < 11) return
+        val idx = plain[8].toInt() and 0xff; val total = plain[9].toInt() and 0xff
+        if (total !in 1..IMG_MAX_CHUNKS || idx >= total || plain.size - 10 > IMG_CHUNK) return
+        val k = sender + java.nio.ByteBuffer.wrap(plain, 0, 8).long.hex()
+        if (incoming.size > 8 && k !in incoming) incoming.entries.minByOrNull { it.value.at }?.let { incoming.remove(it.key) }
+        val a = incoming.getOrPut(k) { Asm(arrayOfNulls(total), clock()) }
+        if (a.parts.size != total) return
+        a.parts[idx] = plain.copyOfRange(10, plain.size)
+        if (a.parts.all { it != null }) {
+            incoming.remove(k)
+            addMessage(sender, s.nameOf(sender), "", false, a.parts.fold(ByteArray(0)) { acc, b -> acc + b!! })
+        }
+    }
+
+    private fun addMessage(fromId: String, from: String, text: String, mine: Boolean, image: ByteArray? = null) {
         val now = clock()
-        update { copy(messages = (messages + TextMsg(Crypto.randomId(), fromId, from, text, now, now + ttlSec * 1000L, mine)).takeLast(100)) }
+        update { copy(messages = (messages + TextMsg(Crypto.randomId(), fromId, from, text, now, now + ttlSec * 1000L, mine, image)).takeLast(100)) }
     }
 
     // ---------------------------------------------------------------- receiving
@@ -423,7 +467,7 @@ class RadioCore(
         if (t.relays && p.ttl > 0) try { t.relay(p.encode(p.ttl - 1), src) } catch (e: Exception) { }
         when (p.type) {
             T_HELLO -> onHello(p)
-            T_AUDIO, T_TEXT -> onChannel(p)
+            T_AUDIO, T_TEXT, T_IMG -> onChannel(p)
             T_PRES -> onPresence(p)
             T_CTL -> onCtl(p)
             T_DIRECT -> if (p.scope == meId) onDirect(p)
@@ -448,6 +492,7 @@ class RadioCore(
             ?: (if (s.lockOf(g.id, p.ch) == null) Crypto.open(unb64(g.key), p.body, 0, aad) else null) ?: return
         val sender = p.sender.hex()
         if (p.type == T_TEXT) { addMessage(sender, s.nameOf(sender), String(plain).take(500), false); return }
+        if (p.type == T_IMG) { onImagePart(sender, plain); return }
         if (plain.size < 3 || s.transmitting) return
         val now = clock()
         if (s.talkerId != null && s.talkerId != sender && now - lastRxAt < 800) return // someone else holds the channel
@@ -584,6 +629,7 @@ class RadioCore(
         val g = s.group
         if (g != null && now - lastPresenceAt > PRESENCE_EVERY) { setMyPresence(); sendPresence(g, s.tunedCh) }
         if (s.nearbyUp && now - lastHelloAt > 20_000) sendHello()
+        incoming.entries.removeAll { now - it.value.at > 60_000 }
         if (usersDirty && now - usersSavedAt > 10_000) {
             usersDirty = false; usersSavedAt = now
             val a = JSONArray()

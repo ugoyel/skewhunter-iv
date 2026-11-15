@@ -230,6 +230,24 @@ class CoreTest {
         await("text back") { a.s.messages.any { it.text == "copy" } }
     }
 
+    @Test fun imageAndLocation() {
+        val bus = Bus()
+        val (a, b, _) = trio(bus)
+        Thread.sleep(150)
+        val jpeg = ByteArray(30_500) { (it * 31).toByte() }
+        a.core.sendImage(jpeg)
+        await("image") { b.s.messages.any { it.image != null } }
+        assertArrayEquals(jpeg, b.s.messages.first { it.image != null }.image)
+        assertTrue(a.s.messages.any { it.mine && it.image != null })
+        a.core.sendLocation(28.613939, 77.209021, 7)
+        await("location") { b.s.messages.any { it.geo != null } }
+        val geo = b.s.messages.first { it.geo != null }.geo!!
+        assertEquals(28.613939, geo.first, 1e-6); assertEquals(77.209021, geo.second, 1e-6); assertEquals(7, geo.third)
+        assertTrue(synchronized(bus.retained) { bus.retained.isEmpty() })
+        a.core.sendImage(ByteArray(RadioCore.IMG_CHUNK * RadioCore.IMG_MAX_CHUNKS + 1))
+        await("too large") { a.s.notice == "IMAGE TOO LARGE" }
+    }
+
     @Test fun stateSurvivesRestartButMessagesDoNot() {
         val (a, b, _) = trio()
         a.core.sendText("secret")

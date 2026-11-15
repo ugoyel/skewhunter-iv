@@ -1,7 +1,21 @@
 package app.pttradio.net
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothManager
+import android.bluetooth.le.AdvertiseCallback
+import android.bluetooth.le.AdvertiseData
+import android.bluetooth.le.AdvertiseSettings
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
+import android.os.ParcelUuid
+import app.pttradio.core.hex
+import app.pttradio.core.idLong
+import com.google.android.gms.nearby.connection.BandwidthInfo
+import java.nio.ByteBuffer
+import java.util.UUID
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.LocationManager
@@ -31,7 +45,73 @@ import java.util.concurrent.ConcurrentHashMap
  * What the no-internet radio is doing, for the UI.
  * [problem] is "perm", "bt", "loc" or "err" when something stops phones from finding each other.
  */
-data class NearbyInfo(val running: Boolean = false, val linked: Int = 0, val found: Int = 0, val problem: String? = null, val detail: String? = null)
+data class NearbyInfo(val running: Boolean = false, val linked: Int = 0, val found: Int = 0, val problem: String? = null, val detail: String? = null,
+                      val peers: Map<String, PeerLink> = emptyMap())
+
+/**
+ * A directly linked phone. [tech] is the radio carrying the link ("Wi-Fi", "Bluetooth", "Bluetooth LE").
+ * [pct] is the received Bluetooth signal of that phone on a 0-100 scale; 0 = not heard for several seconds.
+ */
+data class PeerLink(val tech: String, val pct: Int)
+
+/**
+ * Tiny Bluetooth LE beacon carrying this phone's id, used only to measure how strongly other phones are
+ * received. Nearby Connections does not report signal strength, so it is measured here.
+ */
+@SuppressLint("MissingPermission")
+class Beacon(private val ctx: Context) {
+    private val uuid = ParcelUuid(UUID.fromString("7c1f0a52-6b1e-4d7e-9a53-70747472616f"))
+    private class Seen(var rssi: Double, var at: Long)
+    private val seen = ConcurrentHashMap<String, Seen>()
+    private var on = false
+    private val adapter get() = ctx.getSystemService(BluetoothManager::class.java)?.adapter
+    private val advCb = object : AdvertiseCallback() {}
+    private val scanCb = object : ScanCallback() {
+        override fun onScanResult(type: Int, r: ScanResult) {
+            val d = r.scanRecord?.getServiceData(uuid) ?: return
+            if (d.size < 8) return
+            val id = ByteBuffer.wrap(d).long.hex()
+            val s = seen.getOrPut(id) { Seen(r.rssi.toDouble(), 0) }
+            // light smoothing: single readings jump by several dB even when nothing moves
+            s.rssi = if (System.currentTimeMillis() - s.at > 8000) r.rssi.toDouble() else s.rssi * 0.6 + r.rssi * 0.4
+            s.at = System.currentTimeMillis()
+        }
+    }
+
+    fun start(myId: String) {
+        if (on) return
+        try {
+            val a = adapter ?: return
+            if (!a.isEnabled) return
+            a.bluetoothLeAdvertiser?.startAdvertising(
+                AdvertiseSettings.Builder().setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
+                    .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH).setConnectable(false).build(),
+                AdvertiseData.Builder().setIncludeDeviceName(false).setIncludeTxPowerLevel(false)
+                    .addServiceData(uuid, ByteBuffer.allocate(8).putLong(myId.idLong()).array()).build(), advCb)
+            a.bluetoothLeScanner?.startScan(listOf(ScanFilter.Builder().setServiceData(uuid, ByteArray(0)).build()),
+                ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_BALANCED).build(), scanCb)
+            on = true
+        } catch (e: Exception) { }
+    }
+
+    fun stop() {
+        if (!on) return
+        on = false
+        try { adapter?.bluetoothLeAdvertiser?.stopAdvertising(advCb) } catch (e: Exception) { }
+        try { adapter?.bluetoothLeScanner?.stopScan(scanCb) } catch (e: Exception) { }
+        seen.clear()
+    }
+
+    /**
+     * Signal of [uid] as a percentage: -100 dBm (the weakest a phone can still decode) or weaker = 1 %,
+     * -40 dBm (phones side by side) = 100 %, linear in between; 0 % = nothing received for 12 seconds.
+     */
+    fun percent(uid: String): Int {
+        val s = seen[uid] ?: return 0
+        if (System.currentTimeMillis() - s.at > 12_000) return 0
+        return (((s.rssi + 100) / 60.0) * 100).toInt().coerceIn(1, 100)
+    }
+}
 
 /**
  * No-internet link. Google Nearby Connections finds other phones running the app and links them over
@@ -52,6 +132,10 @@ class NearbyTransport(private val ctx: Context) : Transport {
     private val peers = ConcurrentHashMap.newKeySet<String>()
     private val found = ConcurrentHashMap<String, String>()   // endpoint -> user id
     private val pending = ConcurrentHashMap.newKeySet<String>()
+    private val names = ConcurrentHashMap<String, String>()     // endpoint -> user id, for linked phones
+    private val quality = ConcurrentHashMap<String, Int>()      // endpoint -> Nearby bandwidth quality
+    private val beacon = Beacon(ctx)
+    private val refresh = object : Runnable { override fun run() { if (running) { publish(); main.postDelayed(this, 2000) } } }
     @Volatile var running = false; private set
     @Volatile private var myId = ""
     @Volatile private var error: String? = null
@@ -86,7 +170,14 @@ class NearbyTransport(private val ctx: Context) : Transport {
             error != null -> "err" to error
             else -> null to null
         }
-        info.value = NearbyInfo(running, peers.size, found.keys.count { it !in peers }, problem, detail)
+        val links = HashMap<String, PeerLink>()
+        for (e in peers) {
+            val uid = names[e] ?: found[e] ?: continue
+            // Nearby reports link speed class: 3 = a Wi-Fi link, 2 = classic Bluetooth, 1 = Bluetooth LE
+            val tech = when (quality[e]) { BandwidthInfo.Quality.HIGH -> "Wi-Fi"; BandwidthInfo.Quality.LOW -> "Bluetooth LE"; else -> "Bluetooth" }
+            links[uid] = PeerLink(tech, beacon.percent(uid))
+        }
+        info.value = NearbyInfo(running, peers.size, found.keys.count { it !in peers }, problem, detail, links)
     }
 
     private fun describe(e: Exception): String {
@@ -115,6 +206,8 @@ class NearbyTransport(private val ctx: Context) : Transport {
                     .addOnFailureListener { e -> describe(e).let { if (it.isNotEmpty()) { discovering = false; error = it } }; publish() }
             }
         } catch (e: Exception) { advertising = false; discovering = false; error = describe(e) }
+        beacon.start(myId)
+        main.removeCallbacks(refresh); main.postDelayed(refresh, 2000)
         publish()
     }
 
@@ -122,6 +215,7 @@ class NearbyTransport(private val ctx: Context) : Transport {
     fun restartIfIdle() = main.post {
         if (!running || peers.isNotEmpty() || pending.isNotEmpty()) return@post
         try { client.stopAdvertising(); client.stopDiscovery() } catch (e: Exception) { }
+        beacon.stop()
         advertising = false; discovering = false
         found.clear()
     }
@@ -131,7 +225,9 @@ class NearbyTransport(private val ctx: Context) : Transport {
         running = false
         advertising = false; discovering = false
         try { client.stopAdvertising(); client.stopDiscovery(); client.stopAllEndpoints() } catch (e: Exception) { }
-        peers.clear(); found.clear(); pending.clear()
+        peers.clear(); found.clear(); pending.clear(); names.clear(); quality.clear()
+        beacon.stop()
+        main.removeCallbacks(refresh)
         publish()
         listener?.onLink(this)
     }
@@ -165,6 +261,7 @@ class NearbyTransport(private val ctx: Context) : Transport {
         // Links are accepted automatically: everything sent over them is end-to-end encrypted with group keys.
         override fun onConnectionInitiated(endpoint: String, info: ConnectionInfo) {
             pending.add(endpoint)
+            names[endpoint] = info.endpointName
             client.acceptConnection(endpoint, payloads).addOnFailureListener { pending.remove(endpoint) }
         }
         override fun onConnectionResult(endpoint: String, r: ConnectionResolution) {
@@ -172,8 +269,9 @@ class NearbyTransport(private val ctx: Context) : Transport {
             if (r.status.isSuccess) { peers.add(endpoint); publish(); listener?.onLink(this@NearbyTransport) }
             else main.postDelayed({ request(endpoint) }, 3000 + (Math.random() * 3000).toLong())
         }
+        override fun onBandwidthChanged(endpoint: String, b: BandwidthInfo) { quality[endpoint] = b.quality; publish() }
         override fun onDisconnected(endpoint: String) {
-            peers.remove(endpoint)
+            peers.remove(endpoint); quality.remove(endpoint)
             publish()
             listener?.onLink(this@NearbyTransport)
             main.postDelayed({ request(endpoint) }, 2000 + (Math.random() * 2000).toLong())

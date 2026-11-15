@@ -55,6 +55,14 @@ import app.pttradio.core.RadioCore
 import app.pttradio.core.RadioState
 import app.pttradio.core.TextMsg
 import app.pttradio.core.chName
+import app.pttradio.net.NearbyInfo
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.window.Dialog
 
 /** The talk key: a wide rubber side-key with grip ridges, like the PTT bar on a handheld radio. */
 @Composable
@@ -119,7 +127,7 @@ fun PttKey(tx: Boolean, rx: Boolean, modifier: Modifier = Modifier, onDown: () -
 }
 
 @Composable
-private fun Lcd(s: RadioState, now: Long) {
+private fun Lcd(s: RadioState, near: NearbyInfo, now: Long) {
     val g = s.group ?: return
     val lock = s.lockOf(g.id, s.tunedCh)
     val occ = s.occupants(g.id, s.tunedCh)
@@ -131,7 +139,14 @@ private fun Lcd(s: RadioState, now: Long) {
     }
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(C.lcd).border(1.dp, C.line, RoundedCornerShape(8.dp)).padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            val (lc, lt) = when { s.netUp -> C.green to "INTERNET"; s.nearbyUp -> C.amber to "NEARBY"; else -> C.red to "NO LINK" }
+            // Without internet: which radio carries the link and how strongly the other phone is received.
+            val direct = near.peers.entries.filter { it.key in occ }.ifEmpty { near.peers.entries }
+            val nearText = when {
+                direct.size == 1 -> direct.first().value.let { "${it.tech} ${it.pct}%" }
+                direct.size > 1 -> direct.groupBy { it.value.tech }.entries.joinToString(" · ") { (t, l) -> "$t ${l.minOf { it.value.pct }}–${l.maxOf { it.value.pct }}%" }
+                else -> "NEARBY"
+            }
+            val (lc, lt) = when { s.netUp -> C.green to "INTERNET"; s.nearbyUp -> C.amber to nearText; else -> C.red to "NO LINK" }
             Dot(lc, 6.dp); Spacer(Modifier.width(6.dp)); Label(lt, size = 10.sp)
             Spacer(Modifier.weight(1f))
             Label("${occ.size} on channel", size = 10.sp)
@@ -150,13 +165,39 @@ private fun Lcd(s: RadioState, now: Long) {
 }
 
 @Composable
-private fun MessageRow(m: TextMsg, now: Long) {
+private fun MessageRow(m: TextMsg, now: Long, a: Actions) {
     val left = ((m.expires - now) / 1000).coerceAtLeast(0)
     val frac = ((m.expires - now).toFloat() / (m.expires - m.at).coerceAtLeast(1)).coerceIn(0f, 1f)
     Column(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
         Row(verticalAlignment = Alignment.Top) {
             Label(if (m.mine) "You" else m.from, Modifier.width(72.dp).padding(top = 3.dp), color = if (m.mine) C.amber else C.green, size = 10.sp)
-            Body(m.text, Modifier.weight(1f), size = 14.sp)
+            val geo = m.geo
+            val img = m.image
+            when {
+                img != null -> {
+                    var full by remember { mutableStateOf(false) }
+                    val bmp = remember(m.id) { try { BitmapFactory.decodeByteArray(img, 0, img.size)?.asImageBitmap() } catch (e: Exception) { null } }
+                    if (bmp == null) Body("Picture could not be shown", Modifier.weight(1f), color = C.dim, size = 14.sp)
+                    else {
+                        Box(Modifier.weight(1f)) {
+                            Image(bmp, "Picture from ${m.from}", Modifier.heightIn(max = 170.dp).clip(RoundedCornerShape(6.dp)).clickable { full = true }, contentScale = ContentScale.Fit)
+                        }
+                        if (full) Dialog(onDismissRequest = { full = false }) {
+                            Image(bmp, "Picture from ${m.from}", Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { full = false }, contentScale = ContentScale.Fit)
+                        }
+                    }
+                }
+                geo != null -> Row(Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).background(C.raised).border(1.dp, C.line, RoundedCornerShape(6.dp))
+                    .clickable { a.openMap(geo.first, geo.second, m.from) }.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.LocationOn, null, Modifier.size(20.dp), tint = C.amber)
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(String.format(java.util.Locale.US, "%.5f, %.5f", geo.first, geo.second), color = C.text, fontFamily = Mono, fontSize = 13.sp)
+                        Label(if (geo.third > 0) "Accurate to ${geo.third} m · tap for map" else "Tap for map", size = 10.sp)
+                    }
+                }
+                else -> Body(m.text, Modifier.weight(1f), size = 14.sp)
+            }
             Text("${left / 60}:${(left % 60).toString().padStart(2, '0')}", Modifier.padding(start = 8.dp, top = 2.dp), color = C.faint, fontFamily = Mono, fontSize = 11.sp)
         }
         Spacer(Modifier.height(5.dp))
@@ -165,7 +206,7 @@ private fun MessageRow(m: TextMsg, now: Long) {
 }
 
 @Composable
-fun RadioScreen(s: RadioState, a: Actions, now: Long, onBack: () -> Unit) {
+fun RadioScreen(s: RadioState, near: NearbyInfo, a: Actions, now: Long, onBack: () -> Unit) {
     val g = s.group
     if (g == null) {
         Column(Modifier.fillMaxSize()) {
@@ -190,7 +231,7 @@ fun RadioScreen(s: RadioState, a: Actions, now: Long, onBack: () -> Unit) {
             Icon(Icons.Filled.Person, "Members", Modifier.clip(RoundedCornerShape(20.dp)).clickable { showMembers = true }.padding(10.dp).size(22.dp), tint = C.text)
         }
         Column(Modifier.weight(1f).padding(horizontal = 16.dp)) {
-            Lcd(s, now)
+            Lcd(s, near, now)
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Btn("◀") { a.tune(g.id, if (s.tunedCh == 0) RadioCore.MAX_CH else s.tunedCh - 1) }
@@ -201,10 +242,12 @@ fun RadioScreen(s: RadioState, a: Actions, now: Long, onBack: () -> Unit) {
             if (s.messages.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Label("Messages vanish after ${if (s.ttlSec >= 60) "${s.ttlSec / 60} min" else "${s.ttlSec} s"}", color = C.faint, size = 10.sp)
             } else LazyColumn(Modifier.weight(1f).fillMaxWidth(), reverseLayout = true) {
-                items(s.messages.reversed(), key = { it.id }) { MessageRow(it, now) }
+                items(s.messages.reversed(), key = { it.id }) { MessageRow(it, now, a) }
             }
             Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Field(text, { text = it.take(500) }, "Message to ${chName(s.tunedCh)}", Modifier.weight(1f), onDone = send)
+                Icon(Icons.Filled.LocationOn, "Share my location", Modifier.clip(RoundedCornerShape(6.dp)).background(C.raised).clickable { a.shareLocation() }.padding(11.dp).size(22.dp), tint = C.text)
+                Icon(Icons.Filled.Add, "Send a picture", Modifier.clip(RoundedCornerShape(6.dp)).background(C.raised).clickable { a.pickImage() }.padding(11.dp).size(22.dp), tint = C.text)
+                Field(text, { text = it.take(500) }, "Message", Modifier.weight(1f), onDone = send)
                 Box(Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)).background(if (text.isBlank()) C.raised else C.amber).clickable(enabled = text.isNotBlank(), onClick = send),
                     contentAlignment = Alignment.Center) { Icon(Icons.Filled.Send, "Send", Modifier.size(20.dp), tint = if (text.isBlank()) C.faint else C.bg) }
             }
@@ -263,7 +306,7 @@ fun RadioScreen(s: RadioState, a: Actions, now: Long, onBack: () -> Unit) {
         Sheet("Add to ${g.name}", { showAdd = false }) {
             if (candidates.isEmpty()) Body("Everyone you can see is already in this group.", color = C.dim, size = 13.sp)
             Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-                candidates.forEach { u -> UserRow(u, now, u.id in sel) { sel = if (u.id in sel) sel - u.id else sel + u.id } }
+                candidates.forEach { u -> UserRow(u, now, u.id in sel, near.peers[u.id]) { sel = if (u.id in sel) sel - u.id else sel + u.id } }
             }
             Btn("Invite · ${sel.size}", Modifier.fillMaxWidth(), primary = true, enabled = sel.isNotEmpty()) { a.addMembers(g.id, sel.toList()); showAdd = false }
         }
