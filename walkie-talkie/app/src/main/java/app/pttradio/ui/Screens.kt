@@ -293,6 +293,7 @@ private fun NearbyBar(s: RadioState, near: NearbyInfo, users: List<User>, now: L
                 else -> "Scanning nearby"
             }, size = 10.sp)
         }
+        if (near.running && near.linked == 0 && near.lastFail != null) Label("Last try · ${near.lastFail}", color = C.faint, size = 10.sp)
         if (near.problem != null && (near.running || !s.netUp)) Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0x22FFB020)).border(1.dp, Color(0x66FFB020), RoundedCornerShape(8.dp)).padding(12.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {

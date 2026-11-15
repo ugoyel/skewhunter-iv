@@ -46,7 +46,9 @@ import java.util.concurrent.ConcurrentHashMap
  * [problem] is "perm", "bt", "loc" or "err" when something stops phones from finding each other.
  */
 data class NearbyInfo(val running: Boolean = false, val linked: Int = 0, val found: Int = 0, val problem: String? = null, val detail: String? = null,
-                      val peers: Map<String, PeerLink> = emptyMap())
+                      val peers: Map<String, PeerLink> = emptyMap(),
+                      /** Why the last connection attempt failed, while nothing is linked. */
+                      val lastFail: String? = null)
 
 /**
  * A directly linked phone. [tech] is the radio carrying the link ("Wi-Fi", "Bluetooth", "Bluetooth LE").
@@ -135,11 +137,13 @@ class NearbyTransport(private val ctx: Context) : Transport {
     private val client by lazy { Nearby.getConnectionsClient(ctx) }
     private val peers = ConcurrentHashMap.newKeySet<String>()
     private val found = ConcurrentHashMap<String, String>()   // endpoint -> user id
-    private val pending = ConcurrentHashMap.newKeySet<String>()
+    private val pending = ConcurrentHashMap<String, Long>()     // endpoint -> when the attempt started
+    @Volatile private var lastFail: String? = null
+    private var lookingSince = 0L
     private val names = ConcurrentHashMap<String, String>()     // endpoint -> user id, for linked phones
     private val quality = ConcurrentHashMap<String, Int>()      // endpoint -> Nearby bandwidth quality
     private val beacon = Beacon(ctx)
-    private val refresh = object : Runnable { override fun run() { if (running) { publish(); main.postDelayed(this, 2000) } } }
+    private val refresh = object : Runnable { override fun run() { if (running) { watchdog(); publish(); main.postDelayed(this, 2000) } } }
     @Volatile var running = false; private set
     @Volatile private var myId = ""
     @Volatile private var error: String? = null
@@ -187,7 +191,7 @@ class NearbyTransport(private val ctx: Context) : Transport {
             }
             links[uid] = PeerLink(tech, beacon.percent(uid))
         }
-        info.value = NearbyInfo(running, peers.size, found.keys.count { it !in peers }, problem, detail, links)
+        info.value = NearbyInfo(running, peers.size, found.keys.count { it !in peers }, problem, detail, links, if (peers.isEmpty()) lastFail else null)
     }
 
     private fun describe(e: Exception): String {
@@ -203,6 +207,7 @@ class NearbyTransport(private val ctx: Context) : Transport {
         if (myId.isEmpty()) return@post
         if (!hasPermissions(ctx)) { publish(); return@post }
         running = true
+        if (lookingSince == 0L || peers.isEmpty()) lookingSince = System.currentTimeMillis()
         error = null
         try {
             if (!advertising) {
@@ -266,27 +271,59 @@ class NearbyTransport(private val ctx: Context) : Transport {
         } catch (e: Exception) { }
     }
 
+    /** The phone with the smaller id dials first; the other one waits longer so the two requests do not collide. */
+    private fun dialDelay(endpoint: String): Long {
+        val peer = found[endpoint] ?: names[endpoint] ?: ""
+        return if (myId < peer) 800 + (Math.random() * 1200).toLong() else 4500 + (Math.random() * 2500).toLong()
+    }
+
+    private fun retry(endpoint: String) { main.postDelayed({ request(endpoint) }, dialDelay(endpoint)) }
+
+    private fun failed(what: String, e: Exception?) {
+        val code = (e as? ApiException)?.statusCode
+        lastFail = if (code != null) "$what: ${ConnectionsStatusCodes.getStatusCodeString(code)} ($code)" else "$what failed"
+    }
+
     private fun request(endpoint: String) {
-        if (!running || endpoint in peers || !found.containsKey(endpoint) || !pending.add(endpoint)) return
+        if (!running || endpoint in peers || !found.containsKey(endpoint) || pending.putIfAbsent(endpoint, System.currentTimeMillis()) != null) return
         client.requestConnection(myId, endpoint, lifecycle).addOnFailureListener { e ->
             pending.remove(endpoint)
-            if ((e as? ApiException)?.statusCode == ConnectionsStatusCodes.STATUS_ALREADY_CONNECTED_TO_ENDPOINT) {
-                peers.add(endpoint); publish(); listener?.onLink(this); return@addOnFailureListener
+            when ((e as? ApiException)?.statusCode) {
+                ConnectionsStatusCodes.STATUS_ALREADY_CONNECTED_TO_ENDPOINT -> { peers.add(endpoint); publish(); listener?.onLink(this) }
+                // the other phone restarted its radio: this address is dead, wait for it to be found again
+                ConnectionsStatusCodes.STATUS_ENDPOINT_UNKNOWN -> { found.remove(endpoint); failed("Dial", e); publish() }
+                // usually both phones dialled at once or the radio was busy: try again while the phone is in range
+                else -> { failed("Dial", e); publish(); retry(endpoint) }
             }
-            // Usually both phones dialled at once or the radio was busy: try again while the phone is in range.
-            main.postDelayed({ request(endpoint) }, 1200 + (Math.random() * 1500).toLong())
         }
+    }
+
+    /**
+     * Runs every 2 s while the radio is on. A request the other phone never answered would otherwise block that
+     * phone for good, and some phones silently stop scanning - so stuck attempts are dropped and a search that
+     * gets nowhere is restarted from scratch.
+     */
+    private fun watchdog() {
+        val now = System.currentTimeMillis()
+        for ((e, at) in pending) if (now - at > 12_000) {
+            pending.remove(e)
+            lastFail = "No answer from the other phone"
+            try { client.disconnectFromEndpoint(e) } catch (x: Exception) { }
+            retry(e)
+        }
+        if (peers.isNotEmpty()) { lookingSince = now; return }
+        val limit = if (found.isNotEmpty()) 40_000 else 90_000
+        if (now - lookingSince > limit) restart()
     }
 
     private val discovery = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpoint: String, info: DiscoveredEndpointInfo) {
             if (info.serviceId != serviceId) return
+            // the same phone can re-appear under a new address after its radio restarted: forget the old one
+            found.entries.removeAll { it.value == info.endpointName && it.key != endpoint && it.key !in peers }
             found[endpoint] = info.endpointName
             publish()
-            // Both phones may see each other. The smaller id dials at once; the other waits a little and
-            // dials only if no link came up, so a one-sided discovery still connects.
-            if (myId < info.endpointName) request(endpoint)
-            else main.postDelayed({ request(endpoint) }, 1500 + (Math.random() * 1000).toLong())
+            retry(endpoint)
         }
         override fun onEndpointLost(endpoint: String) { found.remove(endpoint); publish() }
     }
@@ -294,21 +331,22 @@ class NearbyTransport(private val ctx: Context) : Transport {
     private val lifecycle = object : ConnectionLifecycleCallback() {
         // Links are accepted automatically: everything sent over them is end-to-end encrypted with group keys.
         override fun onConnectionInitiated(endpoint: String, info: ConnectionInfo) {
-            pending.add(endpoint)
+            pending[endpoint] = System.currentTimeMillis()
             names[endpoint] = info.endpointName
-            client.acceptConnection(endpoint, payloads).addOnFailureListener { pending.remove(endpoint) }
+            client.acceptConnection(endpoint, payloads).addOnFailureListener { e -> pending.remove(endpoint); failed("Accept", e); retry(endpoint) }
         }
         override fun onConnectionResult(endpoint: String, r: ConnectionResolution) {
             pending.remove(endpoint)
-            if (r.status.isSuccess) { peers.add(endpoint); publish(); listener?.onLink(this@NearbyTransport) }
-            else main.postDelayed({ request(endpoint) }, 1200 + (Math.random() * 1500).toLong())
+            if (r.status.isSuccess) { lastFail = null; peers.add(endpoint); publish(); listener?.onLink(this@NearbyTransport) }
+            else { lastFail = "Link: ${ConnectionsStatusCodes.getStatusCodeString(r.status.statusCode)} (${r.status.statusCode})"; publish(); retry(endpoint) }
         }
         override fun onBandwidthChanged(endpoint: String, b: BandwidthInfo) { quality[endpoint] = b.quality; publish() }
         override fun onDisconnected(endpoint: String) {
             peers.remove(endpoint); quality.remove(endpoint)
+            lookingSince = System.currentTimeMillis()
             publish()
             listener?.onLink(this@NearbyTransport)
-            main.postDelayed({ request(endpoint) }, 800 + (Math.random() * 800).toLong())
+            retry(endpoint)
         }
     }
 
