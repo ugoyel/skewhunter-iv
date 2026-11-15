@@ -66,11 +66,10 @@ class MainActivity : ComponentActivity(), Actions {
     private var btn by mutableStateOf(ButtonCfg())
 
     private fun refreshButton(learning: Boolean = false) {
-        val on = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)?.contains("$packageName/") == true
-        btn = ButtonCfg(app.pttKey(), learning, app.pttGroup(), on)
+        btn = ButtonCfg(app.pttKey(), learning, app.pttGroup())
     }
 
-    /** The talk button while this app is on screen (other apps: [app.pttradio.PttKeyService]). */
+    /** The talk button while this app is on screen (Android blocks side-loaded apps that watch keys in other apps). */
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
         if (btn.learning) {
             if (e.keyCode == KeyEvent.KEYCODE_BACK) { if (e.action == KeyEvent.ACTION_UP) refreshButton(); return true }
@@ -97,7 +96,6 @@ class MainActivity : ComponentActivity(), Actions {
             }
         } catch (e: Exception) { }
     }
-    override fun openKeyService() { try { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } catch (e: Exception) { } }
 
     private val micReq = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         refreshPerms(); if (ok) RadioService.start(this, mic = true) else warning = "Microphone denied. You can listen, but nobody will hear you. The app won't work properly."

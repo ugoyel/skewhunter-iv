@@ -54,7 +54,7 @@ data class Perms(val mic: Boolean = true, val notif: Boolean = true, val nearby:
 }
 
 /** Hardware talk button settings. */
-data class ButtonCfg(val key: Int = 0, val learning: Boolean = false, val group: String = "", val outside: Boolean = false)
+data class ButtonCfg(val key: Int = 0, val learning: Boolean = false, val group: String = "")
 
 enum class Scr { HOME, RADIO, SETTINGS, SETUP }
 
@@ -81,7 +81,6 @@ interface Actions {
     fun setPttKey(code: Int)
     fun learnKey()
     fun setPttGroup(gid: String)
-    fun openKeyService()
     fun fixNearby(problem: String)
 }
 
@@ -374,7 +373,7 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: B
                         Btn("Change") { a.learnKey() }
                     }
                 }
-                Body("Hold the button to talk, release to mute. Android does not let any app take over the power button; volume keys and programmable side keys work.", color = C.dim, size = 12.sp)
+                Body("Hold the button to talk, release to mute, while PTT Radio is open on screen. Android does not let any app take over the power button; volume keys and programmable side keys work.", color = C.dim, size = 12.sp)
                 if (btn.key != 0) {
                     Label("Button talks on", Modifier.padding(top = 6.dp))
                     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).border(1.dp, C.line, RoundedCornerShape(6.dp)).background(C.panel)) {
@@ -388,14 +387,6 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: B
                             }
                         }
                     }
-                    Label("Outside the app", Modifier.padding(top = 6.dp))
-                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(C.panel).border(1.dp, C.line, RoundedCornerShape(8.dp)).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Body(if (btn.outside) "The button also works while other apps are open." else "Turn on \"PTT Radio talk button\" in Accessibility so the button works while other apps are open. Only that one key is watched.",
-                            Modifier.weight(1f), color = C.dim, size = 12.sp)
-                        Spacer(Modifier.width(12.dp))
-                        if (btn.outside) Icon(Icons.Filled.Check, "On", Modifier.size(22.dp), tint = C.green) else Btn("Turn on", primary = true) { a.openKeyService() }
-                    }
-                    if (btn.outside && (btn.key == vd || btn.key == vu)) Body("That volume key no longer changes the volume while this is on.", color = C.dim, size = 12.sp)
                 }
             }
             Section("Messages delete themselves after") {

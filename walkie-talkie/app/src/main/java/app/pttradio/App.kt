@@ -1,7 +1,6 @@
 package app.pttradio
 
 import android.Manifest
-import android.accessibilityservice.AccessibilityService
 import android.app.AlarmManager
 import android.app.Application
 import android.app.Notification
@@ -24,8 +23,6 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
-import android.view.KeyEvent
-import android.view.accessibility.AccessibilityEvent
 import androidx.core.content.ContextCompat
 import app.pttradio.audio.AudioEngine
 import app.pttradio.core.Event
@@ -263,24 +260,4 @@ class RadioService : Service() {
             try { c.startForegroundService(Intent(c, RadioService::class.java).setAction(if (mic) ACTION_MIC else null)) } catch (e: Exception) { }
         }
     }
-}
-
-/**
- * Lets the chosen hardware key work as push-to-talk while another app is in front.
- * It asks Android for key events only and ignores every key except the configured one.
- */
-class PttKeyService : AccessibilityService() {
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
-    override fun onInterrupt() {}
-    override fun onKeyEvent(e: KeyEvent): Boolean {
-        val app = application as App
-        val key = app.pttKey()
-        if (key == 0 || e.keyCode != key) return false
-        if (e.action == KeyEvent.ACTION_DOWN) app.buttonDown() else if (e.action == KeyEvent.ACTION_UP) app.buttonUp()
-        return true
-    }
-}
-
-class BootReceiver : BroadcastReceiver() {
-    override fun onReceive(c: Context, i: Intent) { RadioService.start(c) }
 }
