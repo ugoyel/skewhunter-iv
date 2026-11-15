@@ -40,6 +40,7 @@ fun AppRoot(s: RadioState, p: Perms, mode: String, server: String, a: Actions, s
     val now by produceState(System.currentTimeMillis()) { while (true) { delay(500); value = System.currentTimeMillis() } }
     Box(Modifier.fillMaxSize().background(C.bg)) {
         when {
+            !s.ready -> {}
             s.me == null -> Welcome(a)
             scr == Scr.SETUP -> Setup(p, a) { go(Scr.HOME) }
             scr == Scr.SETTINGS -> SettingsScreen(s, p, mode, server, a) { go(Scr.HOME) }

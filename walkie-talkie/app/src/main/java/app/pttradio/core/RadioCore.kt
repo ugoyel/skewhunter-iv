@@ -83,6 +83,7 @@ class RadioCore(
 
     private fun load() {
         var st = RadioState(
+            ready = true,
             ttlSec = (kv.get("ttl")?.toIntOrNull() ?: MAX_TTL_SEC).coerceIn(5, MAX_TTL_SEC),
             beep = kv.get("beep") != "0",
         )

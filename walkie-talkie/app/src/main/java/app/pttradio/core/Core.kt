@@ -169,6 +169,7 @@ data class RadioState(
     val noticeAt: Long = 0,
     val ttlSec: Int = 120,
     val beep: Boolean = true,
+    val ready: Boolean = false,
 ) {
     val group: Group? get() = groups.firstOrNull { it.id == tunedGroup }
     fun lockOf(gid: String?, ch: Int): Lock? = locks[gid]?.firstOrNull { it.ch == ch }

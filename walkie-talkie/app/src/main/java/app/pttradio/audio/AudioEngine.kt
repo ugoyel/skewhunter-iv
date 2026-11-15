@@ -67,7 +67,11 @@ class AudioEngine(ctx: Context) : AudioIO {
 
     override fun stopCapture() { capturing = false }
 
-    override fun play(pcm: ShortArray) { if (pcm.isNotEmpty()) queue.offer(pcm) }
+    override fun play(pcm: ShortArray) {
+        if (pcm.isEmpty()) return
+        try { wake.acquire(20_000) } catch (e: Exception) { }
+        queue.offer(pcm)
+    }
 
     override fun endOfTalk(beep: Boolean) { if (beep) queue.offer(rogerBeep) }
 

@@ -10,6 +10,8 @@ import org.eclipse.paho.client.mqttv3.MqttAsyncClient
 import org.eclipse.paho.client.mqttv3.MqttCallbackExtended
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions
 import org.eclipse.paho.client.mqttv3.MqttMessage
+import org.eclipse.paho.client.mqttv3.MqttPingSender
+import org.eclipse.paho.client.mqttv3.TimerPingSender
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
 import org.json.JSONObject
 import java.util.concurrent.Executors
@@ -21,7 +23,13 @@ import java.util.concurrent.TimeUnit
  * voice and text are sent non-retained, so the broker keeps nothing. The only stored items are the
  * user's directory entry (name + public key) and still-unanswered group invitations.
  */
-class MqttTransport(private val servers: () -> List<String>) : Transport, MqttCallbackExtended {
+class MqttTransport(
+    private val servers: () -> List<String>,
+    /** Keep-alive driver. On Android this is alarm based so pings still go out while the phone sleeps. */
+    private val pingSender: () -> MqttPingSender = { TimerPingSender() },
+    /** Asks the platform to wake the process after the given delay so a reconnect is not missed in sleep. */
+    private val wakeIn: (Long) -> Unit = {},
+) : Transport, MqttCallbackExtended {
     override val name = "net"
     override val relays = false
     override var listener: TransportListener? = null
@@ -56,6 +64,9 @@ class MqttTransport(private val servers: () -> List<String>) : Transport, MqttCa
         listener?.onLink(this)
     }
 
+    /** Called by the platform wake-up: try again without resetting the back-off. */
+    fun retryNow() = exec.execute { if (wanted && !isUp) connect() }
+
     /** Reconnect right now, e.g. when the phone regains connectivity. */
     fun kick() = exec.execute { if (wanted && !isUp) { backoff = 2; retry?.cancel(false); connect() } }
 
@@ -66,14 +77,14 @@ class MqttTransport(private val servers: () -> List<String>) : Transport, MqttCa
         try {
             try { client?.close(true) } catch (e: Exception) { }
             val uris = servers()
-            val c = MqttAsyncClient(uris.first(), "pttr-$uid-${System.nanoTime().toString(36).takeLast(4)}", MemoryPersistence())
+            val c = MqttAsyncClient(uris.first(), "pttr-$uid-${System.nanoTime().toString(36).takeLast(4)}", MemoryPersistence(), pingSender())
             client = c
             c.setCallback(this)
             val o = MqttConnectOptions().apply {
                 serverURIs = uris.toTypedArray()
                 isCleanSession = true
                 isAutomaticReconnect = false
-                keepAliveInterval = 90
+                keepAliveInterval = 120
                 connectionTimeout = 15
                 maxInflight = 500
                 setWill("${RadioCore.P}/u/$uid", profile(false), 1, true)
@@ -89,6 +100,7 @@ class MqttTransport(private val servers: () -> List<String>) : Transport, MqttCa
         if (!wanted) return
         retry?.cancel(false)
         retry = exec.schedule({ connect() }, backoff, TimeUnit.SECONDS)
+        wakeIn(backoff * 1000 + 500)
         backoff = (backoff * 2).coerceAtMost(60)
     }
 

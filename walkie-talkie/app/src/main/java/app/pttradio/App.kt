@@ -1,5 +1,6 @@
 package app.pttradio
 
+import android.app.AlarmManager
 import android.app.Application
 import android.app.Notification
 import android.app.NotificationChannel
@@ -9,12 +10,16 @@ import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
+import android.os.SystemClock
+import androidx.core.content.ContextCompat
 import app.pttradio.audio.AudioEngine
 import app.pttradio.core.Event
 import app.pttradio.core.KV
@@ -24,6 +29,8 @@ import app.pttradio.core.chName
 import app.pttradio.net.MqttTransport
 import app.pttradio.net.NearbyTransport
 import app.pttradio.ui.MainActivity
+import org.eclipse.paho.client.mqttv3.MqttPingSender
+import org.eclipse.paho.client.mqttv3.internal.ClientComms
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -58,7 +65,9 @@ class App : Application() {
             override fun get(k: String) = prefs.getString(k, null)
             override fun put(k: String, v: String?) { prefs.edit().putString(k, v).apply() }
         }, AudioEngine(this))
-        mqtt = MqttTransport { servers() }
+        val alarms = Alarms(this)
+        mqtt = MqttTransport({ servers() }, { alarms }, { alarms.retryIn(it) })
+        alarms.onRetry = { mqtt.retryNow() }
         nearby = NearbyTransport(this)
         core.onEvent = { Notifier.event(this, it) }
         core.start()
@@ -100,6 +109,42 @@ class App : Application() {
             return when { s.isEmpty() -> DEFAULT_SERVER; s.contains("://") -> s; s.contains(":") -> "ssl://$s"; else -> "ssl://$s:8883" }
         }
     }
+}
+
+/**
+ * Wakes the phone just long enough to send the relay keep-alive or retry a lost connection.
+ * Java timers stop while the CPU sleeps; alarms do not, and they cost far less than holding a wake lock.
+ */
+class Alarms(private val ctx: Context) : MqttPingSender {
+    private val ping = "app.pttradio.PING"
+    private val retry = "app.pttradio.RETRY"
+    private val am = ctx.getSystemService(AlarmManager::class.java)
+    private val wl = ctx.getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "pttradio:link").apply { setReferenceCounted(false) }
+    @Volatile private var comms: ClientComms? = null
+    @Volatile var onRetry: (() -> Unit)? = null
+
+    init {
+        ContextCompat.registerReceiver(ctx, object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                try { wl.acquire(8_000) } catch (e: Exception) { }
+                try { if (i.action == ping) comms?.checkForActivity() else onRetry?.invoke() } catch (e: Exception) { }
+            }
+        }, IntentFilter().apply { addAction(ping); addAction(retry) }, ContextCompat.RECEIVER_NOT_EXPORTED)
+    }
+
+    private fun pi(action: String) = PendingIntent.getBroadcast(ctx, 0, Intent(action).setPackage(ctx.packageName),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+    private fun set(action: String, ms: Long) {
+        try { am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + ms, pi(action)) } catch (e: Exception) { }
+    }
+
+    override fun init(c: ClientComms) { comms = c }
+    override fun start() { comms?.let { schedule(it.keepAlive) } }
+    override fun stop() { try { am.cancel(pi(ping)) } catch (e: Exception) { } }
+    // Inexact alarms may fire late, so aim early; an early check simply reschedules itself.
+    override fun schedule(delayMs: Long) = set(ping, delayMs * 55 / 100)
+    fun retryIn(ms: Long) = set(retry, ms)
 }
 
 object Notifier {
