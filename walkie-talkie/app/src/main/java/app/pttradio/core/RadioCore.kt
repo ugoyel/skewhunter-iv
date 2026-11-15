@@ -579,7 +579,7 @@ class RadioCore(
     /** The message left the phone now: its time and its delete timer start from this moment. */
     private fun markSent(o: Out) {
         val now = clock()
-        editChat(o.gid, o.ch) { l -> l.map { if (it.id == o.msgId) it.copy(pending = false, at = now, expires = now + ttlSec * 1000L) else it } }
+        editChat(o.gid, o.ch) { l -> l.map { if (it.id == o.msgId) it.copy(pending = false, at = now, expires = now + s.ttlSec * 1000L) else it } }
     }
 
     /** Sends what is waiting, oldest first, while a link is up. */
@@ -662,7 +662,7 @@ class RadioCore(
                            id: Long = Crypto.randomId(), voiceMs: Long = 0, gid: String? = s.tunedGroup, ch: Int = s.tunedCh) {
         val now = clock()
         val chat = gid ?: return
-        editChat(chat, ch) { (it + TextMsg(id, fromId, from, text, now, now + ttlSec * 1000L, mine, image, voiceMs = voiceMs)).takeLast(100) }
+        editChat(chat, ch) { (it + TextMsg(id, fromId, from, text, now, now + s.ttlSec * 1000L, mine, image, voiceMs = voiceMs)).takeLast(100) }
         if (mine) return
         if (chat != s.tunedGroup) update { copy(unread = unread + (chat to (unread[chat] ?: 0) + 1)) }
         record(fromId, chat, kindOf(text, image, voiceMs), false)
