@@ -38,6 +38,7 @@ import app.pttradio.RadioService
 import app.pttradio.core.RadioState
 import app.pttradio.net.NearbyInfo
 import app.pttradio.net.NearbyTransport
+import app.pttradio.net.SosCodes
 import kotlinx.coroutines.delay
 
 @Composable
@@ -160,7 +161,7 @@ class MainActivity : ComponentActivity(), Actions {
         if (getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter?.isEnabled != true)
             warning = "Bluetooth is off, so phones nearby cannot hear the emergency message. Turn Bluetooth on."
         app.sos.send(code)
-        val text = "SOS · " + app.pttradio.net.SosCodes.of(code)
+        val text = "SOS · " + SosCodes.of(code)
         fix { l ->
             if (l != null) {
                 app.sos.setFix(l.latitude, l.longitude)
