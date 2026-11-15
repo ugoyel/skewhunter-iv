@@ -304,6 +304,7 @@ fun RadioScreen(s: RadioState, near: NearbyInfo, a: Actions, now: Long, onBack: 
             Btn("Leave", Modifier.weight(1f), danger = true) { showMembers = false; confirmLeave = true }
             Btn("Add people", Modifier.weight(1f)) { showMembers = false; showAdd = true }
         }
+        Btn("Add talk widget to home screen", Modifier.fillMaxWidth()) { showMembers = false; a.addToHome(g.id) }
     }
 
     if (showAdd) {

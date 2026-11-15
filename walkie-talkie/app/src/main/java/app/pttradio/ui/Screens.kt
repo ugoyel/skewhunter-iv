@@ -87,6 +87,8 @@ interface Actions {
     fun fixNearby(problem: String)
     /** Drop and rebuild every link now. */
     fun reconnect()
+    /** Put a 1x1 talk widget for this group on the home screen. */
+    fun addToHome(gid: String)
     fun shareLocation()
     fun pickImage()
     fun openMap(lat: Double, lon: Double, label: String)
@@ -337,7 +339,7 @@ fun Contacts(s: RadioState, near: NearbyInfo, a: Actions, now: Long, onCreated: 
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun GroupCard(s: RadioState, g: Group, open: (String, Int) -> Unit) {
+private fun GroupCard(s: RadioState, g: Group, a: Actions, open: (String, Int) -> Unit) {
     val tuned = s.tunedGroup == g.id
     val pres = s.presence[g.id] ?: emptyMap()
     val active = (pres.values.map { it.ch } + (s.locks[g.id]?.map { it.ch } ?: emptyList()) + 0).distinct().sorted()
@@ -349,6 +351,9 @@ private fun GroupCard(s: RadioState, g: Group, open: (String, Int) -> Unit) {
                 Label("${g.members.size} members · ${pres.size} on air", size = 10.sp)
             }
             if (tuned) Label("Tuned", color = C.amber, size = 10.sp)
+            Spacer(Modifier.width(10.dp))
+            Label("+ Home", Modifier.clip(RoundedCornerShape(5.dp)).border(1.dp, C.line, RoundedCornerShape(5.dp)).clickable { a.addToHome(g.id) }.padding(horizontal = 8.dp, vertical = 6.dp),
+                color = C.text, size = 10.sp)
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             active.forEach { ch ->
@@ -391,7 +396,7 @@ fun Groups(s: RadioState, a: Actions, toContacts: () -> Unit, open: (String, Int
                 }
             }
         }
-        items(s.groups, key = { it.id }) { g -> GroupCard(s, g, open) }
+        items(s.groups, key = { it.id }) { g -> GroupCard(s, g, a, open) }
         item { Spacer(Modifier.height(8.dp)) }
     }
 }

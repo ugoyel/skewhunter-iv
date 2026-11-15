@@ -50,6 +50,21 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ui.QuickTalkActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Radio.Quick" />
+
+        <receiver android:name=".ui.PttWidget" android:exported="true" android:label="@string/widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/ptt_widget_info" />
+        </receiver>
+
         <service
             android:name=".RadioService"
             android:exported="false"

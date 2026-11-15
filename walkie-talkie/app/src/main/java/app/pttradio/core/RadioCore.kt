@@ -269,6 +269,9 @@ class RadioCore(
 
     fun tune(gid: String?, ch: Int) = run { tuneNow(gid, ch) }
 
+    /** Switch to a group's main room unless the radio is already on that group (any channel). */
+    fun tuneGroup(gid: String) = run { if (s.tunedGroup != gid) tuneNow(gid, 0) }
+
     private fun allowed(gid: String, ch: Int): Boolean {
         val l = s.lockOf(gid, ch) ?: return true
         return s.me?.id in l.allow || chKeys.containsKey("$gid/$ch")

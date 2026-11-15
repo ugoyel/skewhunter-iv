@@ -142,6 +142,11 @@ class MainActivity : ComponentActivity(), Actions {
         } catch (e: Exception) { got(null) }
     }
 
+    override fun addToHome(gid: String) {
+        val ok = try { PttWidget.pin(this, gid) } catch (e: Exception) { false }
+        if (!ok) warning = "This home screen does not let apps place widgets. Long-press the home screen, choose Widgets, and add PTT Radio from there."
+    }
+
     override fun reconnect() {
         core.note("RECONNECTING")
         app.nearby.restart()

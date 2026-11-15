@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">PTT Radio</string>
+    <string name="widget_desc">Talk key for one group. Tap it, then hold the key to speak.</string>
+    <string name="widget_label">PTT Radio group</string>
 </resources>
