@@ -142,7 +142,8 @@ class Packet(val type: Int, val ttl: Int, val msgId: Long, val scope: Long, val 
     }
 }
 
-data class User(val id: String, val name: String, val pub: String, val online: Boolean = false, val nearbyAt: Long = 0, val ts: Long = 0)
+/** [via] is the link this phone was last heard on directly: "nearby" (Bluetooth / Wi-Fi Direct) or "lan" (field Wi-Fi). */
+data class User(val id: String, val name: String, val pub: String, val online: Boolean = false, val nearbyAt: Long = 0, val ts: Long = 0, val via: String = "")
 data class Member(val id: String, val name: String, val pub: String, val joined: Boolean)
 data class Group(val id: String, val name: String, val key: String, val owner: String, val members: List<Member>)
 data class Invite(val group: Group, val fromId: String, val fromName: String)

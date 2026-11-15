@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -40,16 +41,17 @@ import app.pttradio.net.NearbyTransport
 import kotlinx.coroutines.delay
 
 @Composable
-fun AppRoot(s: RadioState, p: Perms, near: NearbyInfo, level: kotlinx.coroutines.flow.StateFlow<Float>?, login: Boolean, mode: String, server: String, btn: ButtonCfg, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
+fun AppRoot(s: RadioState, p: Perms, near: NearbyInfo, alerts: List<app.pttradio.net.SosAlert>, sending: app.pttradio.net.SosSending?,
+            field: Pair<String, String>, level: kotlinx.coroutines.flow.StateFlow<Float>?, login: Boolean, mode: String, server: String, btn: ButtonCfg, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
     val now by produceState(System.currentTimeMillis()) { while (true) { delay(500); value = System.currentTimeMillis() } }
     Box(Modifier.fillMaxSize().background(C.bg)) {
         when {
             !s.ready -> {}
             s.me == null -> Welcome(a, login)
             scr == Scr.SETUP -> Setup(p, a) { go(Scr.HOME) }
-            scr == Scr.SETTINGS -> SettingsScreen(s, p, mode, server, btn, a) { go(Scr.HOME) }
+            scr == Scr.SETTINGS -> SettingsScreen(s, p, mode, server, btn, field, a) { go(Scr.HOME) }
             scr == Scr.RADIO && s.group != null -> RadioScreen(s, near, level, a, now) { go(Scr.HOME) }
-            else -> Home(s, p, near, a, now, tab, onTab, go)
+            else -> Home(s, p, near, alerts, sending, a, now, tab, onTab, go)
         }
     }
 }
@@ -61,6 +63,8 @@ class MainActivity : ComponentActivity(), Actions {
     private val core get() = app.core
     private var perms by mutableStateOf(Perms())
     private var warning by mutableStateOf<String?>(null)
+    /** A plain note, without the "open app settings" button that warnings have. */
+    private var info by mutableStateOf<String?>(null)
     private var scr by mutableStateOf(Scr.HOME)
     private var tab by mutableIntStateOf(0)
     private var serverUrl by mutableStateOf("")
@@ -101,25 +105,29 @@ class MainActivity : ComponentActivity(), Actions {
 
     // ---- location: GPS works with no internet; the fix is sent as a normal expiring message ----
     override fun shareLocation() {
-        if (!has(Manifest.permission.ACCESS_FINE_LOCATION)) { requestPerm("nearby"); return }
+        core.note("GETTING POSITION")
+        fix { l -> if (l != null) core.sendLocation(l.latitude, l.longitude, if (l.hasAccuracy()) l.accuracy.toInt().coerceAtLeast(1) else 0) else core.note("NO POSITION FIX") }
+    }
+
+    /** One position fix: GPS first (works with no internet), then the other providers. */
+    private fun fix(done: (android.location.Location?) -> Unit) {
+        if (!has(Manifest.permission.ACCESS_FINE_LOCATION)) { requestPerm("nearby"); done(null); return }
         val lm = getSystemService(android.location.LocationManager::class.java)
         val order = listOf(android.location.LocationManager.GPS_PROVIDER, "fused", android.location.LocationManager.NETWORK_PROVIDER)
             .filter { p -> try { lm.allProviders.contains(p) && lm.isProviderEnabled(p) } catch (e: Exception) { false } }
-        if (order.isEmpty()) { warning = "Location is switched off. Turn it on to share where you are."; return }
-        core.note("GETTING POSITION")
-        locate(lm, order, 0)
+        if (order.isEmpty()) { warning = "Location is switched off. Turn it on to share where you are."; done(null); return }
+        locate(lm, order, 0, done)
     }
 
     @SuppressLint("MissingPermission")
-    private fun locate(lm: android.location.LocationManager, order: List<String>, i: Int) {
-        if (i >= order.size) { core.note("NO POSITION FIX"); return }
+    private fun locate(lm: android.location.LocationManager, order: List<String>, i: Int, done0: (android.location.Location?) -> Unit) {
+        if (i >= order.size) { done0(null); return }
         val handler = android.os.Handler(mainLooper)
         var done = false
         val got = { l: android.location.Location? ->
             if (!done) {
                 done = true
-                if (l != null) core.sendLocation(l.latitude, l.longitude, if (l.hasAccuracy()) l.accuracy.toInt().coerceAtLeast(1) else 0)
-                else locate(lm, order, i + 1)
+                if (l != null) done0(l) else locate(lm, order, i + 1, done0)
             }
         }
         try {
@@ -147,9 +155,58 @@ class MainActivity : ComponentActivity(), Actions {
         if (!ok) warning = "This home screen does not let apps place widgets. Long-press the home screen, choose Widgets, and add PTT Radio from there."
     }
 
+    override fun sendSos(code: Int) {
+        if (!NearbyTransport.hasPermissions(this)) { requestPerm("nearby"); return }
+        if (getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter?.isEnabled != true)
+            warning = "Bluetooth is off, so phones nearby cannot hear the emergency message. Turn Bluetooth on."
+        app.sos.send(code)
+        val text = "SOS · " + app.pttradio.net.SosCodes.of(code)
+        fix { l ->
+            if (l != null) {
+                app.sos.setFix(l.latitude, l.longitude)
+                core.alertGroups(text, "geo:" + String.format(java.util.Locale.US, "%.6f,%.6f,%d", l.latitude, l.longitude, if (l.hasAccuracy()) l.accuracy.toInt().coerceAtLeast(1) else 0))
+            } else core.alertGroups(text, null)
+        }
+    }
+    override fun stopSos() { app.sos.stop() }
+    override fun dismissAlert(key: String) { app.sos.dismiss(key) }
+
+    private val field get() = (app.prefs.getString("fieldSsid", null) ?: "PTT-FIELD") to (app.prefs.getString("fieldPass", null) ?: "pttradio-field")
+
+    override fun saveFieldWifi(ssid: String, pass: String) {
+        app.prefs.edit().putString("fieldSsid", ssid).putString("fieldPass", pass).apply()
+        try {
+            val sug = android.net.wifi.WifiNetworkSuggestion.Builder().setSsid(ssid).setWpa2Passphrase(pass).build()
+            if (Build.VERSION.SDK_INT >= 30) {
+                // the system asks once, then the phone joins this network by itself whenever it is in range
+                startActivity(Intent(Settings.ACTION_WIFI_ADD_NETWORKS).putParcelableArrayListExtra(Settings.EXTRA_WIFI_NETWORK_LIST, arrayListOf(sug)))
+            } else {
+                getSystemService(android.net.wifi.WifiManager::class.java).addNetworkSuggestions(listOf(sug))
+                info = "Saved. Android may show a notification asking to allow networks suggested by PTT Radio: allow it."
+            }
+        } catch (e: Exception) {
+            info = "This phone could not save the network automatically. Open Wi-Fi settings and add \"$ssid\" with the password by hand."
+        }
+    }
+
+    override fun openHotspot(ssid: String, pass: String) {
+        app.prefs.edit().putString("fieldSsid", ssid).putString("fieldPass", pass).apply()
+        try {
+            getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("Hotspot password", pass))
+        } catch (e: Exception) { }
+        info = "Set the hotspot name to \"$ssid\", security WPA2, password \"$pass\" (copied), then switch the hotspot on. " +
+            "You only set this once; afterwards the hotspot button in quick settings is enough."
+        val tries = listOf(
+            Intent().setClassName("com.android.settings", "com.android.settings.TetherSettings"),
+            Intent("android.settings.TETHER_SETTINGS"),
+            Intent(Settings.ACTION_WIRELESS_SETTINGS))
+        for (i in tries) try { startActivity(i); return } catch (e: Exception) { }
+    }
+
     override fun reconnect() {
         core.note("RECONNECTING")
         app.nearby.restart()
+        app.lan.stop(); app.lan.start()
         app.mqtt.kick()
         app.refreshLinks()
     }
@@ -216,9 +273,11 @@ class MainActivity : ComponentActivity(), Actions {
             val s by core.state.collectAsState()
             val mode by app.linkMode.collectAsState()
             val near by app.nearby.info.collectAsState()
+            val alerts by app.sos.alerts.collectAsState()
+            val sending by app.sos.sending.collectAsState()
             LaunchedEffect(s.me?.id) { if (s.me != null) RadioService.start(this@MainActivity) }
             BackHandler(enabled = s.me != null && scr != Scr.HOME) { scr = Scr.HOME }
-            AppRoot(s, perms, near, core.level, auth.enabled, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
+            AppRoot(s, perms, near, alerts, sending, field, core.level, auth.enabled, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
             warning?.let { w ->
                 Sheet("Warning", { warning = null }) {
                     Body(w, size = 14.sp)
@@ -229,6 +288,12 @@ class MainActivity : ComponentActivity(), Actions {
                             try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) } catch (e: Exception) { }
                         }
                     }
+                }
+            }
+            info?.let { t ->
+                Sheet("Note", { info = null }) {
+                    Body(t, size = 14.sp)
+                    Btn("OK", Modifier.fillMaxWidth(), primary = true) { info = null }
                 }
             }
         }

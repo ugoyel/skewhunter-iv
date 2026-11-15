@@ -21,6 +21,8 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <!-- field Wi-Fi: receive broadcasts from other phones on the same hotspot -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
     <!-- Android withholds Bluetooth scan results from apps without Location, on every version. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />

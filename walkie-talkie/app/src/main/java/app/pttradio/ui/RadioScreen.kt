@@ -214,6 +214,7 @@ private fun Lcd(s: RadioState, near: NearbyInfo, now: Long) {
                     val m = l.map { it.value.pct }.filter { it >= 0 }
                     if (m.isEmpty()) "$t ×${l.size}" else "$t ${m.min()}–${m.max()}%"
                 }
+                s.users.values.any { it.via == "lan" && now - it.nearbyAt < app.pttradio.core.RadioCore.NEARBY_EXPIRE } -> "FIELD WI-FI"
                 else -> "NEARBY"
             }
             val (lc, lt) = when { s.netUp -> C.green to "INTERNET"; s.nearbyUp -> C.amber to nearText; else -> C.red to "NO LINK" }

@@ -32,7 +32,11 @@ import app.pttradio.core.RadioCore
 import app.pttradio.core.RadioState
 import app.pttradio.core.chName
 import app.pttradio.net.MqttTransport
+import app.pttradio.net.LanTransport
 import app.pttradio.net.NearbyTransport
+import app.pttradio.net.Sos
+import app.pttradio.net.SosAlert
+import app.pttradio.net.SosCodes
 import app.pttradio.ui.MainActivity
 import org.eclipse.paho.client.mqttv3.MqttPingSender
 import org.eclipse.paho.client.mqttv3.internal.ClientComms
@@ -56,6 +60,8 @@ class App : Application() {
     lateinit var core: RadioCore
     lateinit var mqtt: MqttTransport
     lateinit var nearby: NearbyTransport
+    lateinit var lan: LanTransport
+    lateinit var sos: Sos
     /** auto = internet, plus nearby whenever there is no internet or the app is on screen · net · nearby · both */
     val linkMode = MutableStateFlow("auto")
     private val bump = MutableStateFlow(0)
@@ -80,6 +86,13 @@ class App : Application() {
         core.start()
         core.attach(mqtt)
         core.attach(nearby)
+        lan = LanTransport(this)
+        core.attach(lan)
+        sos = Sos(this, { core.state.value.me?.id ?: "" }, { id ->
+            core.state.value.let { st -> if (st.users[id] != null || st.groups.any { g -> g.members.any { it.id == id } }) st.nameOf(id) else null }
+        }, { Notifier.sos(this, it) })
+        // emergency alerts are listened for whenever the local radios run
+        scope.launch { nearby.info.map { it.running }.distinctUntilChanged().collect { sos.listen(it) } }
 
         getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) { mqtt.kick() }
@@ -96,18 +109,20 @@ class App : Application() {
                     if (!ready) return@collectLatest
                     if (mode == "nearby") mqtt.stop() else mqtt.start()
                     when {
-                        mode == "nearby" || mode == "both" -> nearby.start()
-                        mode == "net" -> nearby.stop()
-                        // auto: radios (the battery-hungry part) are only switched on while there is no internet
+                        mode == "nearby" || mode == "both" -> radios(true)
+                        mode == "net" -> radios(false)
                         // auto: the radios run whenever there is no internet, and also while the app is open so
                         // people around you are visible; with internet and the app closed they rest to save battery
-                        !netUp || vis -> { if (!vis) delay(3_000); nearby.start() }
+                        !netUp || vis -> { if (!vis) delay(3_000); radios(true) }
                         // never drop phones that are linked right now: they may have no other way to reach us
-                        else -> { delay(20_000); if (nearby.info.value.linked == 0) nearby.stop() }
+                        else -> { delay(20_000); if (nearby.info.value.linked == 0 && lan.peerCount == 0) radios(false) }
                     }
                 }
         }
     }
+
+    /** Bluetooth / Wi-Fi Direct and field Wi-Fi links are switched on and off together. */
+    private fun radios(on: Boolean) { if (on) { nearby.start(); lan.start() } else { nearby.stop(); lan.stop() } }
 
     fun servers(): List<String> {
         val s = normalize(prefs.getString("server", null))
@@ -187,11 +202,15 @@ class Alarms(private val ctx: Context) : MqttPingSender {
 object Notifier {
     private const val STANDBY = "standby"
     private const val ALERT = "alert"
+    private const val SOS = "sos"
 
     fun channels(c: Context) {
         val nm = c.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(STANDBY, "Radio standby", NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) })
         nm.createNotificationChannel(NotificationChannel(ALERT, "Invitations and channel calls", NotificationManager.IMPORTANCE_HIGH))
+        nm.createNotificationChannel(NotificationChannel(SOS, "Emergency alerts from nearby phones", NotificationManager.IMPORTANCE_HIGH).apply {
+            enableVibration(true); vibrationPattern = longArrayOf(0, 600, 250, 600, 250, 600)
+        })
     }
 
     private fun open(c: Context, req: Int, gid: String? = null, ch: Int = -1): PendingIntent =
@@ -213,12 +232,24 @@ object Notifier {
         .setOngoing(true).setOnlyAlertOnce(true).setContentIntent(open(c, 0)).build()
 
     /** Vibrates through the alarm channel, which the ringer's silent and vibrate modes do not mute. */
-    fun buzz(c: Context) {
+    fun sos(c: Context, a: SosAlert) {
+        buzz(c, longArrayOf(0, 600, 250, 600, 250, 600))
+        val where = if (a.lat != null) " · position included" else ""
+        val via = if (a.hops > 0) " · passed on by ${a.hops} phone${if (a.hops > 1) "s" else ""}" else if (a.pct >= 0) " · signal ${a.pct}%" else ""
+        try {
+            c.getSystemService(NotificationManager::class.java).notify(a.from.hashCode() + 7, Notification.Builder(c, SOS)
+                .setSmallIcon(R.drawable.ic_stat_radio).setContentTitle("${a.name}: ${SosCodes.of(a.code)}")
+                .setContentText("Emergency message$where$via").setCategory(Notification.CATEGORY_ALARM)
+                .setAutoCancel(true).setContentIntent(open(c, 3)).build())
+        } catch (e: Exception) { }
+    }
+
+    fun buzz(c: Context, pattern: LongArray = longArrayOf(0, 140, 90, 140)) {
         try {
             val v = if (Build.VERSION.SDK_INT >= 31) c.getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator
                     else c.getSystemService(Vibrator::class.java)
             if (v == null || !v.hasVibrator()) return
-            val effect = VibrationEffect.createWaveform(longArrayOf(0, 140, 90, 140), -1)
+            val effect = VibrationEffect.createWaveform(pattern, -1)
             if (Build.VERSION.SDK_INT >= 33) v.vibrate(effect, android.os.VibrationAttributes.createForUsage(android.os.VibrationAttributes.USAGE_ALARM))
             else @Suppress("DEPRECATION") v.vibrate(effect, android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_ALARM).build())
         } catch (x: Exception) { }

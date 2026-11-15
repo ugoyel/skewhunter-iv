@@ -467,6 +467,17 @@ class RadioCore(
         if (t.isNotEmpty()) post(t, null)
     }
 
+    /** Emergency: the text (and position) to the main room of every group, now or as soon as a link is back. */
+    fun alertGroups(text: String, geo: String?) = run {
+        val me = s.me ?: return@run
+        for (g in s.groups) for (t in listOfNotNull(text, geo)) {
+            if (channelKey(g, 0) == null) continue
+            val o = Out(Crypto.randomId(), g.id, 0, t, null, null, clock())
+            if (outbox.isEmpty() && deliver(g, o)) { if (s.tunedGroup == g.id && s.tunedCh == 0) addMessage(me.id, me.name, t, true, id = o.msgId) }
+            else queue(o)
+        }
+    }
+
     /** Sends now when a link is up, otherwise keeps the message and sends it as soon as one is. */
     private fun post(text: String, image: ByteArray?) {
         val me = s.me ?: return
@@ -596,9 +607,12 @@ class RadioCore(
         val p = Packet.parse(raw) ?: return@run
         if (meId == 0L || p.sender == meId) return@run
         if (seen.put(p.msgId, true) != null) return@run
-        if (t.relays && p.ttl > 0) try { t.relay(p.encode(p.ttl - 1), src) } catch (e: Exception) { }
+        if (p.ttl > 0) {
+            val out = p.encode(p.ttl - 1)
+            for (o in transports) if (o.relays && o.isUp) try { o.relay(out, if (o === t) src else null) } catch (e: Exception) { }
+        }
         when (p.type) {
-            T_HELLO -> onHello(p)
+            T_HELLO -> onHello(p, if (p.ttl >= HOPS) t.name else "")
             T_AUDIO, T_TEXT, T_IMG -> onChannel(p)
             T_PRES -> onPresence(p)
             T_CTL -> onCtl(p)
@@ -606,11 +620,15 @@ class RadioCore(
         }
     }
 
-    private fun onHello(p: Packet) {
+    private fun onHello(p: Packet, via: String) {
         val o = JSONObject(String(p.body))
         val id = o.getString("id")
         if (!isId(id) || id.idLong() != p.sender) return
-        val u = (s.users[id] ?: User(id, "", "")).copy(name = o.getString("name").take(24), pub = o.getString("pub"), nearbyAt = clock(), ts = clock())
+        val pub = o.getString("pub")
+        if (!pinned(id, pub)) return
+        val old = s.users[id]
+        // via: the link it came in on when heard directly, empty when another phone passed it on
+        val u = (old ?: User(id, "", "")).copy(name = o.getString("name").take(24), pub = pub, nearbyAt = clock(), ts = clock(), via = via)
         update { copy(users = users + (id to u)) }
         usersDirty = true
         resendInvites(onlyTo = id)
@@ -705,6 +723,7 @@ class RadioCore(
         val key = try { pairKey(pub) } catch (e: Exception) { return }
         val o = JSONObject(String(Crypto.open(key, p.body, 1 + n, p.aad()) ?: return))
         val from = p.sender.hex()
+        if (!pinned(from, pub)) return
         when (o.getString("t")) {
             "invite" -> {
                 val g = groupOf(o.getJSONObject("group"))
@@ -729,9 +748,19 @@ class RadioCore(
         }
     }
 
+    /**
+     * Key pinning: once a phone's public key is known, a different key for the same id is rejected. Stops anyone
+     * from overwriting a person's directory entry (or faking an invite) to impersonate them.
+     */
+    private fun knownPub(id: String): String? =
+        s.users[id]?.pub?.takeIf { it.isNotEmpty() } ?: s.groups.firstNotNullOfOrNull { g -> g.members.firstOrNull { it.id == id }?.pub }
+
+    private fun pinned(id: String, pub: String): Boolean = knownPub(id).let { it == null || it == pub }
+
     override fun onUser(id: String, name: String, pub: String, online: Boolean, ts: Long) = run {
         if (!isId(id) || id == s.me?.id || name.isBlank() || pub.isEmpty()) return@run
         if (s.users.size > 5000 && id !in s.users) return@run
+        if (!pinned(id, pub)) return@run
         val old = s.users[id]
         val u = (old ?: User(id, "", "")).copy(name = name.take(24), pub = pub, online = online, ts = ts)
         if (u == old) return@run

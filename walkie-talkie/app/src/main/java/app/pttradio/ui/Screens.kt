@@ -51,6 +51,9 @@ import app.pttradio.core.User
 import app.pttradio.core.chName
 import app.pttradio.net.NearbyInfo
 import app.pttradio.net.PeerLink
+import app.pttradio.net.SosAlert
+import app.pttradio.net.SosCodes
+import app.pttradio.net.SosSending
 
 data class Perms(val mic: Boolean = true, val notif: Boolean = true, val nearby: Boolean = true, val battery: Boolean = true) {
     val allOk get() = mic && notif && nearby && battery
@@ -90,6 +93,12 @@ interface Actions {
     fun reconnect()
     /** Put a 1x1 talk widget for this group on the home screen. */
     fun addToHome(gid: String)
+    /** Emergency broadcast to every phone with the app nearby, no connection needed. */
+    fun sendSos(code: Int)
+    fun stopSos()
+    fun dismissAlert(key: String)
+    fun saveFieldWifi(ssid: String, pass: String)
+    fun openHotspot(ssid: String, pass: String)
     fun shareLocation()
     fun pickImage()
     fun openMap(lat: Double, lon: Double, label: String)
@@ -223,17 +232,41 @@ fun WarningBox(text: String, onClick: (() -> Unit)? = null) {
 }
 
 @Composable
-fun Home(s: RadioState, p: Perms, near: NearbyInfo, a: Actions, now: Long, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
+fun Home(s: RadioState, p: Perms, near: NearbyInfo, alerts: List<SosAlert>, sending: SosSending?, a: Actions, now: Long, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
+    var sosMenu by remember { mutableStateOf(false) }
+    if (sosMenu) Sheet("Emergency message", { sosMenu = false }) {
+        Body("Sent over Bluetooth to every phone with PTT Radio in range, with no connection needed, and passed on by those phones. " +
+            "Long-range Bluetooth is used where the phone supports it. Your GPS position is included. With internet it also goes to your groups.",
+            color = C.dim, size = 12.sp)
+        Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SosCodes.text.forEachIndexed { i, t -> Btn(t, Modifier.fillMaxWidth(), primary = i == 0) { sosMenu = false; a.sendSos(i) } }
+        }
+    }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("PTT RADIO", color = C.amber, fontFamily = Mono, fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
                 Label(s.me?.name ?: "", size = 10.sp)
             }
+            Label("SOS", Modifier.padding(end = 8.dp).clip(RoundedCornerShape(20.dp)).background(if (sending != null) C.red else Color(0x33FF4B3E))
+                .border(1.dp, C.red, RoundedCornerShape(20.dp)).clickable { sosMenu = true }.padding(horizontal = 10.dp, vertical = 6.dp),
+                color = if (sending != null) Color.White else C.red, size = 11.sp)
             LinkPill(s)
             Icon(Icons.Filled.Refresh, "Reconnect", Modifier.padding(start = 4.dp).clip(RoundedCornerShape(20.dp)).clickable { a.reconnect() }.padding(10.dp).size(22.dp), tint = C.dim)
             Icon(Icons.Filled.Settings, "Settings", Modifier.clip(RoundedCornerShape(20.dp)).clickable { go(Scr.SETTINGS) }.padding(10.dp).size(22.dp), tint = C.dim)
         }
+        if (sending != null) {
+            val left = ((sending.until - now) / 1000).coerceAtLeast(0)
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0x33FF4B3E))
+                .border(1.dp, C.red, RoundedCornerShape(8.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Body("Broadcasting: ${SosCodes.of(sending.code)}", weight = FontWeight.SemiBold, size = 14.sp)
+                    Label((if (sending.hasFix) "With position" else "Getting position") + " · ${left / 60}:${(left % 60).toString().padStart(2, '0')} left", size = 10.sp)
+                }
+                Btn("Stop", danger = true) { a.stopSos() }
+            }
+        }
+        alerts.take(3).forEach { al -> AlertCard(al, now, a) }
         if (!p.allOk) Box(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
             WarningBox("Permissions missing. The radio won't work properly. Tap to fix.") { go(Scr.SETUP) }
         }
@@ -256,6 +289,26 @@ fun Home(s: RadioState, p: Perms, near: NearbyInfo, a: Actions, now: Long, tab: 
 }
 
 @Composable
+private fun AlertCard(al: SosAlert, now: Long, a: Actions) {
+    val ago = ((now - al.firstAt) / 60_000).let { if (it < 1) "just now" else "$it min ago" }
+    val heard = when { al.hops > 0 -> "passed on by ${al.hops} phone${if (al.hops > 1) "s" else ""}"; al.pct >= 0 -> "signal ${al.pct}%"; else -> "" }
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0x22FF4B3E))
+        .border(1.dp, C.red, RoundedCornerShape(8.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Dot(C.red, 9.dp); Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Body("${al.name}: ${SosCodes.of(al.code)}", weight = FontWeight.SemiBold, size = 14.sp, maxLines = 2)
+                Label(listOf(ago, heard).filter { it.isNotEmpty() }.joinToString(" · "), size = 10.sp)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (al.lat != null && al.lon != null) Btn("Show on map", Modifier.weight(1f), primary = true) { a.openMap(al.lat, al.lon, al.name) }
+            Btn("Dismiss", Modifier.weight(1f)) { a.dismissAlert(al.key) }
+        }
+    }
+}
+
+@Composable
 fun UserRow(u: User, now: Long, selected: Boolean, link: PeerLink? = null, onClick: () -> Unit) {
     val near = isNearby(u, now)
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).background(if (selected) C.raised else Color.Transparent).padding(horizontal = 16.dp, vertical = 12.dp),
@@ -265,7 +318,7 @@ fun UserRow(u: User, now: Long, selected: Boolean, link: PeerLink? = null, onCli
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Body(u.name, weight = FontWeight.Medium, maxLines = 1)
-            val how = if (link == null) "via another phone" else if (link.pct >= 0) "${link.tech} ${link.pct}%" else link.tech
+            val how = when { link != null -> if (link.pct >= 0) "${link.tech} ${link.pct}%" else link.tech; u.via == "lan" -> "Field Wi-Fi"; else -> "via another phone" }
             Label(when { near && u.online -> "Nearby · $how · on internet"; near -> "Nearby · $how"; u.online -> "On internet"; else -> "Off air" },
                 size = 10.sp, color = if (near) C.amber else if (u.online) C.green else C.dim)
         }
@@ -421,7 +474,9 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: ButtonCfg, a: Actions, onBack: () -> Unit) {
+fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: ButtonCfg, field: Pair<String, String>, a: Actions, onBack: () -> Unit) {
+    var fSsid by remember { mutableStateOf(field.first) }
+    var fPass by remember { mutableStateOf(field.second) }
     var name by remember { mutableStateOf(s.me?.name ?: "") }
     var srv by remember { mutableStateOf(server) }
     Column(Modifier.fillMaxSize()) {
@@ -486,6 +541,21 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: B
             }
             Section("End-of-transmission beep") {
                 Segments(listOf("1" to "On", "0" to "Off"), if (s.beep) "1" else "0", Modifier.width(180.dp)) { a.setBeep(it == "1") }
+            }
+            Section("Range extender · field Wi-Fi") {
+                Body("For places with no internet. One phone turns on its hotspot with this name and password; every other phone that saved it " +
+                    "joins automatically when in range, and the app talks over that Wi-Fi. The hotspot phone is the hub, so people can be further " +
+                    "apart than Bluetooth allows. Use the same name and password on every phone.", color = C.dim, size = 12.sp)
+                Field(fSsid, { fSsid = it.take(32) }, "Network name", Modifier.fillMaxWidth())
+                Field(fPass, { fPass = it.take(63) }, "Password (8+ characters)", Modifier.fillMaxWidth())
+                val ok = fSsid.isNotBlank() && fPass.length >= 8
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Btn("Save on this phone", Modifier.weight(1f), enabled = ok) { a.saveFieldWifi(fSsid.trim(), fPass) }
+                    Btn("Be the hotspot", Modifier.weight(1f), primary = true, enabled = ok) { a.openHotspot(fSsid.trim(), fPass) }
+                }
+                Body("Android does not let apps switch the hotspot on by themselves: \"Be the hotspot\" opens the hotspot settings and copies the " +
+                    "password. Set security to WPA2. When internet is back, turn the hotspot off; the other phones go back to their usual networks on their own.",
+                    color = C.dim, size = 12.sp)
             }
             Section("Relay server") {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

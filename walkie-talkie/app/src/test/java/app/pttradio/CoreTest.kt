@@ -321,6 +321,35 @@ class CoreTest {
 
     private fun TextMsg.ttlMs(n: Node) = n.s.ttlSec * 1000L
 
+    @Test fun keyPinningRejectsImpersonation() {
+        val (a, b, _) = trio()
+        val real = b.s.users[a.id]!!.pub
+        val (fake, _) = Crypto.newKeyPair()
+        b.core.onUser(a.id, "Evil", fake, true, System.currentTimeMillis())
+        Thread.sleep(250)
+        assertEquals(real, b.s.users[a.id]!!.pub)
+        assertEquals("Alpha", b.s.users[a.id]!!.name)
+    }
+
+    @Test fun phonesOnDifferentLocalLinksReachEachOtherThroughABridge() {
+        val bus = Bus()
+        val a = Node(bus, "Alpha", true); val m = Node(bus, "Mid", true); val c = Node(bus, "Charlie", true)
+        val wifi = BusTransport(bus, true)            // m's second link, e.g. field Wi-Fi
+        m.core.attach(wifi)
+        await("wifi id") { wifi.id.isNotEmpty() }
+        // a only reaches m over Bluetooth, c only reaches m over Wi-Fi
+        a.t.peers.add(m.t); m.t.peers.add(a.t); wifi.peers.add(c.t); c.t.peers.add(wifi)
+        a.core.onLink(a.t); m.core.onLink(m.t); m.core.onLink(wifi); c.core.onLink(c.t)
+        await("hello across") { a.s.users.containsKey(c.id) && c.s.users.containsKey(a.id) }
+        a.core.createGroup("Bridge", listOf(c.id))
+        await("invite across") { c.s.invites.size == 1 }
+        c.core.acceptInvite(c.s.invites[0].group.id)
+        await("joined") { a.s.groups[0].members.all { it.joined } }
+        talk(a)
+        await("c hears across the bridge") { c.audio.played.size == 3 }
+        assertEquals(0, m.audio.played.size)
+    }
+
     @Test fun stateSurvivesRestartButMessagesDoNot() {
         val (a, b, _) = trio()
         a.core.sendText("secret")

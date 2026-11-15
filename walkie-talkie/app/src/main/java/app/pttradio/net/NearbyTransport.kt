@@ -73,7 +73,7 @@ class Beacon(private val ctx: Context) {
     private val scanCb = object : ScanCallback() {
         override fun onScanResult(type: Int, r: ScanResult) {
             // current builds put the id in manufacturer data; the previous build used service data
-            val d = r.scanRecord?.getManufacturerSpecificData(MFR)?.takeIf { it.size >= 8 } ?: r.scanRecord?.getServiceData(uuid) ?: return
+            val d = r.scanRecord?.getManufacturerSpecificData(MFR)?.takeIf { it.size == 8 } ?: r.scanRecord?.getServiceData(uuid) ?: return
             if (d.size < 8) return
             val id = ByteBuffer.wrap(d).long.hex()
             val s = seen.getOrPut(id) { Seen(r.rssi.toDouble(), 0) }
