@@ -12,14 +12,24 @@ android {
         applicationId = "app.pttradio"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        // Every CI build gets a higher number so a newer APK always installs over an older one.
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
+        versionName = "1.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
+    }
+    signingConfigs {
+        // Fixed key kept in the repo so every build has the same signature and installs as an update.
+        // It only identifies side-loaded builds of this app; use a private key for any store release.
+        create("sideload") {
+            storeFile = file("sideload.keystore")
+            storePassword = "pttradio"
+            keyAlias = "pttradio"
+            keyPassword = "pttradio"
+        }
     }
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Signed with the debug key so the APK installs directly (sideload build).
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("sideload")
         }
     }
     compileOptions {

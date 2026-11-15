@@ -48,7 +48,8 @@ cd walkie-talkie
 ```
 
 Every push that touches this folder also builds the APK in GitHub Actions (workflow **PTT Radio APK**, artifact
-`ptt-radio-apk`). The APK is signed with the build machine's debug key, so it installs directly; an APK from a different
-machine needs the old one uninstalled first.
+`ptt-radio-apk`). Builds are signed with the fixed key in
+`app/sideload.keystore`, so a newer APK installs over an older one. (APKs built before that key existed must be
+uninstalled once.)
 
 Requires Android 8.0+. The no-internet link needs Google Play services.
