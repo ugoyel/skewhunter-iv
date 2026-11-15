@@ -43,14 +43,14 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun AppRoot(s: RadioState, p: Perms, near: NearbyInfo, alerts: List<app.pttradio.net.SosAlert>, sending: app.pttradio.net.SosSending?,
-            field: Pair<String, String>, level: kotlinx.coroutines.flow.StateFlow<Float>?, login: Boolean, mode: String, server: String, btn: ButtonCfg, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
+            field: Pair<String, String>, sosAnyone: Boolean, level: kotlinx.coroutines.flow.StateFlow<Float>?, login: Boolean, mode: String, server: String, btn: ButtonCfg, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
     val now by produceState(System.currentTimeMillis()) { while (true) { delay(500); value = System.currentTimeMillis() } }
     Box(Modifier.fillMaxSize().background(C.bg)) {
         when {
             !s.ready -> {}
             s.me == null -> Welcome(a, login)
             scr == Scr.SETUP -> Setup(p, a) { go(Scr.HOME) }
-            scr == Scr.SETTINGS -> SettingsScreen(s, p, mode, server, btn, field, a) { go(Scr.HOME) }
+            scr == Scr.SETTINGS -> SettingsScreen(s, p, mode, server, btn, field, sosAnyone, a) { go(Scr.HOME) }
             scr == Scr.RADIO && s.group != null -> RadioScreen(s, near, level, a, now) { go(Scr.HOME) }
             else -> Home(s, p, near, alerts, sending, a, now, tab, onTab, go)
         }
@@ -77,32 +77,106 @@ class MainActivity : ComponentActivity(), Actions {
     override fun verifyCode(email: String, code: String, done: (String?) -> Unit) =
         auth.verify(email, code) { e -> runOnUiThread { done(e) } }
 
-    // ---- pictures: shrunk to a small JPEG, sent encrypted, never written to storage ----
+    // ---- pictures: shrunk to a JPEG, sent encrypted, never kept on the phone ----
+
+    /** Reads an image at most [maxDim] pixels on its long side, upright (camera rotation applied). */
+    private fun decode(src: android.graphics.ImageDecoder.Source?, uri: Uri?, file: java.io.File?, maxDim: Int): android.graphics.Bitmap {
+        if (Build.VERSION.SDK_INT >= 28 && src != null)
+            return android.graphics.ImageDecoder.decodeBitmap(src) { d, info, _ ->
+                d.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+                val big = maxOf(info.size.width, info.size.height)
+                if (big > maxDim) { val k = maxDim.toFloat() / big; d.setTargetSize((info.size.width * k).toInt().coerceAtLeast(1), (info.size.height * k).toInt().coerceAtLeast(1)) }
+            }
+        val opts = android.graphics.BitmapFactory.Options()
+        var b = (if (file != null) android.graphics.BitmapFactory.decodeFile(file.path, opts) else contentResolver.openInputStream(uri!!).use { android.graphics.BitmapFactory.decodeStream(it) })
+        val big = maxOf(b.width, b.height)
+        if (big > maxDim) b = android.graphics.Bitmap.createScaledBitmap(b, b.width * maxDim / big, b.height * maxDim / big, true)
+        val turn = try {
+            when ((if (file != null) android.media.ExifInterface(file.path) else contentResolver.openInputStream(uri!!).use { android.media.ExifInterface(it!!) })
+                .getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 1)) { 6 -> 90f; 3 -> 180f; 8 -> 270f; else -> 0f }
+        } catch (e: Exception) { 0f }
+        return if (turn == 0f) b else android.graphics.Bitmap.createBitmap(b, 0, 0, b.width, b.height, android.graphics.Matrix().apply { postRotate(turn) }, true)
+    }
+
+    private fun jpeg(b: android.graphics.Bitmap, maxBytes: Int): ByteArray {
+        var q = 80
+        var out: ByteArray
+        do {
+            val bos = java.io.ByteArrayOutputStream()
+            b.compress(android.graphics.Bitmap.CompressFormat.JPEG, q, bos)
+            out = bos.toByteArray(); q -= 10
+        } while (out.size > maxBytes && q >= 30)
+        return out
+    }
+
+    /** HD over internet, SD (smaller, quicker over Bluetooth / Wi-Fi) without. */
+    private fun quality() = if (core.state.value.netUp) 1600 to 600_000 else 960 to 170_000
+
     private val imageReq = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) kotlin.concurrent.thread(isDaemon = true) {
             try {
-                val src = if (Build.VERSION.SDK_INT >= 28)
-                    android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(contentResolver, uri)) { d, info, _ ->
-                        d.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
-                        val big = maxOf(info.size.width, info.size.height)
-                        if (big > 960) { val k = 960f / big; d.setTargetSize((info.size.width * k).toInt().coerceAtLeast(1), (info.size.height * k).toInt().coerceAtLeast(1)) }
-                    }
-                else contentResolver.openInputStream(uri).use { android.graphics.BitmapFactory.decodeStream(it) }.let { b ->
-                    val big = maxOf(b.width, b.height)
-                    if (big > 960) android.graphics.Bitmap.createScaledBitmap(b, b.width * 960 / big, b.height * 960 / big, true) else b
-                }
-                var q = 75
-                var out: ByteArray
-                do {
-                    val bos = java.io.ByteArrayOutputStream()
-                    src.compress(android.graphics.Bitmap.CompressFormat.JPEG, q, bos)
-                    out = bos.toByteArray(); q -= 15
-                } while (out.size > 180_000 && q >= 30)
-                core.sendImage(out)
+                val (dim, bytes) = quality()
+                val src = if (Build.VERSION.SDK_INT >= 28) android.graphics.ImageDecoder.createSource(contentResolver, uri) else null
+                core.sendImage(jpeg(decode(src, uri, null, dim), bytes))
             } catch (e: Exception) { core.note("COULD NOT READ PICTURE") }
         }
     }
     override fun pickImage() { try { imageReq.launch("image/*") } catch (e: Exception) { } }
+
+    // ---- camera: the photo (SD) plus a text with address, coordinates, time and a map link ----
+    private var shot: java.io.File? = null
+    @Volatile private var lastFix: android.location.Location? = null
+
+    private val cameraReq = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        val f = shot
+        shot = null
+        if (!ok || f == null) { f?.delete(); return@registerForActivityResult }
+        kotlin.concurrent.thread(isDaemon = true) {
+            try {
+                val src = if (Build.VERSION.SDK_INT >= 28) android.graphics.ImageDecoder.createSource(f) else null
+                core.sendImage(jpeg(decode(src, null, f, 960), 170_000))
+            } catch (e: Exception) { core.note("COULD NOT READ PHOTO") }
+            finally { f.delete() }        // the photo is not kept on the phone
+            val takenAt = System.currentTimeMillis()
+            val recent = lastFix?.takeIf { System.currentTimeMillis() - it.time < 120_000 }
+            if (recent != null) stamp(recent, takenAt) else runOnUiThread { fix { l -> kotlin.concurrent.thread(isDaemon = true) { stamp(l, takenAt) } } }
+        }
+    }
+
+    override fun takePhoto() {
+        try {
+            val dir = java.io.File(cacheDir, "cam").apply { mkdirs() }
+            val f = java.io.File(dir, "shot.jpg")
+            shot = f
+            cameraReq.launch(androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", f))
+            // find the position while the camera is open, so the stamp is ready when the photo is
+            fix { l -> if (l != null) lastFix = l }
+        } catch (e: Exception) { warning = "No camera app is available." }
+    }
+
+    /** The text that goes with a photo: address (when it can be looked up), coordinates, date and time, map link. */
+    private fun stamp(l: android.location.Location?, at: Long) {
+        val time = java.text.SimpleDateFormat("dd-MM-yyyy, HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(at))
+        if (l == null) { core.sendText("📷 $time\nLocation unavailable"); return }
+        val lat = String.format(java.util.Locale.US, "%.6f", l.latitude)
+        val lon = String.format(java.util.Locale.US, "%.6f", l.longitude)
+        val address = address(l.latitude, l.longitude)
+        val acc = if (l.hasAccuracy()) " (±${l.accuracy.toInt().coerceAtLeast(1)} m)" else ""
+        core.sendText(listOfNotNull(address?.let { "📍 $it" }, "$lat,$lon$acc", time, "https://maps.google.com/?q=$lat,$lon").joinToString("\n"))
+    }
+
+    /** Street address from the phone's geocoder; usually needs internet, so it is simply left out when offline. */
+    private fun address(lat: Double, lon: Double): String? = try {
+        if (!android.location.Geocoder.isPresent()) null
+        else if (Build.VERSION.SDK_INT >= 33) {
+            val q = java.util.concurrent.ArrayBlockingQueue<String>(1)
+            android.location.Geocoder(this).getFromLocation(lat, lon, 1, object : android.location.Geocoder.GeocodeListener {
+                override fun onGeocode(list: MutableList<android.location.Address>) { q.offer(list.firstOrNull()?.getAddressLine(0) ?: "") }
+                override fun onError(msg: String?) { q.offer("") }
+            })
+            q.poll(6, java.util.concurrent.TimeUnit.SECONDS)?.ifEmpty { null }
+        } else @Suppress("DEPRECATION") android.location.Geocoder(this).getFromLocation(lat, lon, 1)?.firstOrNull()?.getAddressLine(0)
+    } catch (e: Exception) { null }
 
     // ---- location: GPS works with no internet; the fix is sent as a normal expiring message ----
     override fun shareLocation() {
@@ -160,7 +234,7 @@ class MainActivity : ComponentActivity(), Actions {
         if (!NearbyTransport.hasPermissions(this)) { requestPerm("nearby"); return }
         if (getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter?.isEnabled != true)
             warning = "Bluetooth is off, so phones nearby cannot hear the emergency message. Turn Bluetooth on."
-        app.sos.send(code)
+        app.sos.send(code, app.prefs.getBoolean("sosAnyone", false))
         val text = "SOS · " + SosCodes.of(code)
         fix { l ->
             if (l != null) {
@@ -170,6 +244,7 @@ class MainActivity : ComponentActivity(), Actions {
         }
     }
     override fun stopSos() { app.sos.stop() }
+    override fun setSosAnyone(on: Boolean) { app.prefs.edit().putBoolean("sosAnyone", on).apply(); sosAnyone = on }
     override fun dismissAlert(key: String) { app.sos.dismiss(key) }
 
     private val field get() = (app.prefs.getString("fieldSsid", null) ?: "PTT-FIELD") to (app.prefs.getString("fieldPass", null) ?: "pttradio-field")
@@ -220,6 +295,7 @@ class MainActivity : ComponentActivity(), Actions {
         catch (e: Exception) { warning = "No maps app is installed to show this position." }
     }
     private var btn by mutableStateOf(ButtonCfg())
+    private var sosAnyone by mutableStateOf(false)
 
     private fun refreshButton(learning: Boolean = false) {
         btn = ButtonCfg(app.pttKey(), learning, app.pttGroup())
@@ -269,6 +345,7 @@ class MainActivity : ComponentActivity(), Actions {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         serverUrl = app.prefs.getString("server", "") ?: ""
+        sosAnyone = app.prefs.getBoolean("sosAnyone", false)
         if (core.state.value.me != null || app.prefs.getString("me", null) != null) {
             if (!app.prefs.getBoolean("setupDone", false)) scr = Scr.SETUP
         }
@@ -281,7 +358,7 @@ class MainActivity : ComponentActivity(), Actions {
             val sending by app.sos.sending.collectAsState()
             LaunchedEffect(s.me?.id) { if (s.me != null) RadioService.start(this@MainActivity) }
             BackHandler(enabled = s.me != null && scr != Scr.HOME) { scr = Scr.HOME }
-            AppRoot(s, perms, near, alerts, sending, field, core.level, auth.enabled, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
+            AppRoot(s, perms, near, alerts, sending, field, sosAnyone, core.level, auth.enabled, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
             warning?.let { w ->
                 Sheet("Warning", { warning = null }) {
                     Body(w, size = 14.sp)

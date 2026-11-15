@@ -1,7 +1,6 @@
 package app.pttradio.ui
 
 import android.graphics.BitmapFactory
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -50,6 +49,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,7 +60,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -74,6 +73,17 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.platform.LocalView
+import android.view.ViewTreeObserver
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -216,13 +226,52 @@ private fun Bubble(m: TextMsg, now: Long, group: Boolean, a: Actions) {
                         Text(when { m.pending -> "Recorded offline · sends when connected"; m.mine -> "Sent after reconnecting"; else -> "Recorded while offline" }, color = C.dim, fontSize = 12.sp)
                     }
                 }
-                else -> Text(m.text, color = C.text, fontSize = 16.sp, lineHeight = 21.sp)
+                else -> Text(linked(m.text), color = C.text, fontSize = 16.sp, lineHeight = 21.sp)
             }
             Row(Modifier.align(Alignment.End).padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(if (m.pending) "🕓 not sent yet" else "$time · ⏳${left / 60}:${(left % 60).toString().padStart(2, '0')}",
                     color = if (m.pending) C.amber else Color(0xAAE9EDEF), fontSize = 11.sp)
             }
         }
+    }
+}
+
+/** Web links in a message become tappable. */
+private fun linked(text: String): AnnotatedString = buildAnnotatedString {
+    var i = 0
+    for (m in Regex("https?://\\S+").findAll(text)) {
+        append(text.substring(i, m.range.first))
+        withLink(LinkAnnotation.Url(m.value, TextLinkStyles(SpanStyle(color = C.blue, textDecoration = TextDecoration.Underline)))) { append(m.value) }
+        i = m.range.last + 1
+    }
+    append(text.substring(i))
+}
+
+/** True while the on-screen keyboard is up. */
+@Composable
+fun keyboardVisible(): Boolean {
+    val view = LocalView.current
+    var shown by remember { mutableStateOf(false) }
+    DisposableEffect(view) {
+        val l = ViewTreeObserver.OnGlobalLayoutListener {
+            shown = ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime()) == true
+        }
+        view.viewTreeObserver.addOnGlobalLayoutListener(l)
+        onDispose { view.viewTreeObserver.removeOnGlobalLayoutListener(l) }
+    }
+    return shown
+}
+
+/** Small camera glyph (the bundled icon set has none). */
+@Composable
+private fun CameraButton(onClick: () -> Unit) {
+    Canvas(Modifier.clip(CircleShape).clickable(onClick = onClick).padding(10.dp).size(22.dp)) {
+        val w = size.width; val h = size.height
+        val stroke = Stroke(1.8.dp.toPx())
+        drawRoundRect(C.dim, androidx.compose.ui.geometry.Offset(1f, h * 0.25f), androidx.compose.ui.geometry.Size(w - 2f, h * 0.68f),
+            androidx.compose.ui.geometry.CornerRadius(4.dp.toPx()), style = stroke)
+        drawRect(C.dim, androidx.compose.ui.geometry.Offset(w * 0.32f, h * 0.1f), androidx.compose.ui.geometry.Size(w * 0.36f, h * 0.16f))
+        drawCircle(C.dim, w * 0.2f, androidx.compose.ui.geometry.Offset(w / 2, h * 0.59f), style = stroke)
     }
 }
 
@@ -241,10 +290,12 @@ fun RadioScreen(s: RadioState, near: NearbyInfo, level: StateFlow<Float>?, a: Ac
     var confirmLeave by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var text by remember { mutableStateOf("") }
-    var typing by remember { mutableStateOf(false) }
+    var attach by remember { mutableStateOf(false) }
     val focus = LocalFocusManager.current
     val send = { if (text.isNotBlank()) { a.sendText(text); text = "" } }
-    BackHandler(typing) { focus.clearFocus() }
+    // follow the keyboard itself: when Back closes it, the talk button comes straight back
+    val typing = keyboardVisible()
+    LaunchedEffect(typing) { if (!typing) focus.clearFocus() }
 
     val occ = s.occupants(g.id, s.tunedCh).filter { it != s.me?.id }
     val talkingHere = s.talker != null && s.talkGid == g.id
@@ -305,13 +356,19 @@ fun RadioScreen(s: RadioState, near: NearbyInfo, level: StateFlow<Float>?, a: Ac
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.Bottom) {
             Row(Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(24.dp)).background(C.panel).padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Add, "Send a picture", Modifier.clip(CircleShape).clickable { a.pickImage() }.padding(8.dp).size(22.dp), tint = C.dim)
+                Box {
+                    Icon(Icons.Filled.Add, "Attach", Modifier.clip(CircleShape).clickable { attach = true }.padding(8.dp).size(22.dp), tint = C.dim)
+                    DropdownMenu(attach, { attach = false }, Modifier.background(C.raised)) {
+                        DropdownMenuItem({ Text("Picture from gallery" + if (s.netUp) " (HD)" else " (SD)", color = C.text) }, { attach = false; a.pickImage() })
+                        DropdownMenuItem({ Text("My location", color = C.text) }, { attach = false; a.shareLocation() })
+                    }
+                }
                 Box(Modifier.weight(1f).padding(vertical = 12.dp)) {
                     if (text.isEmpty()) Text("Message", color = C.dim, fontSize = 16.sp)
-                    BasicTextField(text, { text = it.take(500) }, Modifier.fillMaxWidth().onFocusChanged { typing = it.isFocused },
+                    BasicTextField(text, { text = it.take(500) }, Modifier.fillMaxWidth(),
                         textStyle = TextStyle(color = C.text, fontSize = 16.sp), cursorBrush = SolidColor(C.accent), maxLines = 5)
                 }
-                Icon(Icons.Filled.LocationOn, "Share my location", Modifier.clip(CircleShape).clickable { a.shareLocation() }.padding(8.dp).size(22.dp), tint = C.dim)
+                CameraButton { a.takePhoto() }
             }
             Spacer(Modifier.width(6.dp))
             Box(Modifier.size(48.dp).clip(CircleShape).background(if (text.isBlank()) C.raised else C.accent).clickable(enabled = text.isNotBlank(), onClick = send),

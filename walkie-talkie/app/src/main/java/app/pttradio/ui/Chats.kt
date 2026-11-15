@@ -227,8 +227,9 @@ fun Home(
 
     // ---------------------------------------------------------------- sheets
     if (sosMenu) Sheet("Emergency message", { sosMenu = false }) {
-        Body("Sent over Bluetooth to every phone with PTT Radio in range, with no connection needed, and passed on by those phones. " +
-            "Your GPS position is included. With internet it also goes to your groups.", color = C.dim, size = 13.sp)
+        Body("Sent over Bluetooth to phones with PTT Radio in range, with no connection needed, and passed on by those phones. " +
+            "Shown to your contacts only, unless you allow anyone in Settings. Your GPS position is included. With internet it also goes to your groups.",
+            color = C.dim, size = 13.sp)
         Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SosCodes.text.forEachIndexed { i, t -> Btn(t, Modifier.fillMaxWidth(), primary = i == 0) { sosMenu = false; a.sendSos(i) } }
         }

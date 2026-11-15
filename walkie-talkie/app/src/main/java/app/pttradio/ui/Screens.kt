@@ -104,6 +104,9 @@ interface Actions {
     fun openHotspot(ssid: String, pass: String)
     fun shareLocation()
     fun pickImage()
+    /** Camera photo, followed by a text with address, coordinates, time and map link. */
+    fun takePhoto()
+    fun setSosAnyone(on: Boolean)
     fun openMap(lat: Double, lon: Double, label: String)
     /** E-mail code sign-in; callbacks get null on success or a message to show. */
     fun requestCode(email: String, name: String, phone: String, marketing: Boolean, done: (String?) -> Unit)
@@ -243,7 +246,7 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: ButtonCfg, field: Pair<String, String>, a: Actions, onBack: () -> Unit) {
+fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: ButtonCfg, field: Pair<String, String>, sosAnyone: Boolean, a: Actions, onBack: () -> Unit) {
     var fSsid by remember { mutableStateOf(field.first) }
     var fPass by remember { mutableStateOf(field.second) }
     var name by remember { mutableStateOf(s.me?.name ?: "") }
@@ -310,6 +313,12 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: B
             }
             Section("End-of-transmission beep") {
                 Segments(listOf("1" to "On", "0" to "Off"), if (s.beep) "1" else "0", Modifier.width(180.dp)) { a.setBeep(it == "1") }
+            }
+            Section("Emergency (SOS) messages are shown to") {
+                Segments(listOf("c" to "My contacts", "a" to "Anyone nearby"), if (sosAnyone) "a" else "c", Modifier.fillMaxWidth()) { a.setSosAnyone(it == "a") }
+                Body(if (sosAnyone) "Every phone with PTT Radio in range shows your alert, including strangers who could help."
+                     else "Only people in your groups and chats see your alert. Other phones with the app still pass it on, without showing it, so it can reach a contact further away.",
+                    color = C.dim, size = 12.sp)
             }
             Section("Range extender · field Wi-Fi") {
                 Body("For places with no internet. One phone turns on its hotspot with this name and password; every other phone that saved it " +

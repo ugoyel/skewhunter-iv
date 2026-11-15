@@ -146,7 +146,9 @@ class Packet(val type: Int, val ttl: Int, val msgId: Long, val scope: Long, val 
 data class User(val id: String, val name: String, val pub: String, val online: Boolean = false, val nearbyAt: Long = 0, val ts: Long = 0, val via: String = "")
 data class Member(val id: String, val name: String, val pub: String, val joined: Boolean)
 /** [direct] = a one-to-one chat: shown under the other person's name. */
-data class Group(val id: String, val name: String, val key: String, val owner: String, val members: List<Member>, val direct: Boolean = false)
+/** [nameAt] = when the name was last changed, so the newest rename wins everywhere. */
+data class Group(val id: String, val name: String, val key: String, val owner: String, val members: List<Member>, val direct: Boolean = false,
+                 val nameAt: Long = 0)
 
 /** Who did what in which chat, and when. Kept without any content: used for the Recent page and to sort chats by use. */
 data class Recent(val uid: String, val gid: String, val kind: String, val at: Long, val mine: Boolean)
@@ -227,11 +229,11 @@ fun chName(ch: Int) = if (ch == 0) "MAIN" else "CH " + ch.toString().padStart(2,
 fun Member.json(): JSONObject = JSONObject().put("id", id).put("name", name).put("pub", pub).put("joined", joined)
 fun memberOf(o: JSONObject) = Member(o.getString("id"), o.getString("name").take(24), o.getString("pub"), o.optBoolean("joined"))
 fun Group.json(): JSONObject = JSONObject().put("id", id).put("name", name).put("key", key).put("owner", owner)
-    .put("members", JSONArray().also { a -> members.forEach { a.put(it.json()) } }).also { if (direct) it.put("direct", true) }
+    .put("members", JSONArray().also { a -> members.forEach { a.put(it.json()) } }).also { if (direct) it.put("direct", true); if (nameAt > 0) it.put("nv", nameAt) }
 fun groupOf(o: JSONObject): Group {
     val a = o.getJSONArray("members")
     val g = Group(o.getString("id"), o.getString("name").take(24), o.getString("key"), o.getString("owner"),
-        (0 until a.length()).map { memberOf(a.getJSONObject(it)) }, o.optBoolean("direct"))
+        (0 until a.length()).map { memberOf(a.getJSONObject(it)) }, o.optBoolean("direct"), o.optLong("nv"))
     require(isId(g.id) && g.members.all { isId(it.id) } && unb64(g.key).size == 32)
     return g
 }

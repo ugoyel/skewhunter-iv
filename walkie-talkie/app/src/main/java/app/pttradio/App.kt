@@ -92,7 +92,7 @@ class App : Application() {
         core.attach(lan)
         sos = Sos(this, { core.state.value.me?.id ?: "" }, { id ->
             core.state.value.let { st -> if (st.users[id] != null || st.groups.any { g -> g.members.any { it.id == id } }) st.nameOf(id) else null }
-        }, { Notifier.sos(this, it) })
+        }, { id -> core.state.value.groups.any { g -> g.members.any { it.id == id } } }, { Notifier.sos(this, it) })
         // emergency alerts are listened for whenever the local radios run
         scope.launch { nearby.info.map { it.running }.distinctUntilChanged().collect { sos.listen(it) } }
         scope.launch { core.state.map { it.netUp }.distinctUntilChanged().collect { nearby.internetUp = it } }

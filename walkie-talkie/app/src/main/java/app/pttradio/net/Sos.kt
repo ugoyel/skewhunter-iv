@@ -29,7 +29,7 @@ data class SosAlert(val key: String, val from: String, val name: String, val cod
                     val hops: Int, val firstAt: Long, val lastAt: Long, val pct: Int)
 
 /** This phone's own emergency broadcast, while it runs. */
-data class SosSending(val code: Int, val until: Long, val hasFix: Boolean)
+data class SosSending(val code: Int, val until: Long, val hasFix: Boolean, val anyone: Boolean = false)
 
 object SosCodes {
     val text = listOf(
@@ -57,6 +57,8 @@ class Sos(
     private val ctx: Context,
     private val myId: () -> String,
     private val nameOf: (String) -> String?,
+    /** True for people this phone shares a group or chat with. */
+    private val isContact: (String) -> Boolean,
     private val onNew: (SosAlert) -> Unit,
 ) {
     val alerts = MutableStateFlow<List<SosAlert>>(emptyList())
@@ -111,10 +113,11 @@ class Sos(
 
     // ------------------------------------------------------------------ sending
 
-    fun send(code: Int) = main.post {
+    /** [anyone] = shown on every phone with the app; otherwise only phones of people in your groups and chats show it. */
+    fun send(code: Int, anyone: Boolean) = main.post {
         stopOwn()
         seq = (seq + 1) and 0xffff
-        sending.value = SosSending(code, System.currentTimeMillis() + SEND_MS, lat != null)
+        sending.value = SosSending(code, System.currentTimeMillis() + SEND_MS, lat != null, anyone)
         startOwn()
         main.removeCallbacks(expire)
         main.postDelayed(expire, SEND_MS)
@@ -133,7 +136,8 @@ class Sos(
     private fun startOwn() {
         val s = sending.value ?: return
         val id = myId().takeIf { it.length == 16 } ?: return
-        advertise(encode(s.code, 0, java.lang.Long.parseUnsignedLong(id, 16), seq, lat, lon), ownCbs, null)
+        // top bit of the message number: "contacts only"
+        advertise(encode(s.code or (if (s.anyone) 0 else 0x80), 0, java.lang.Long.parseUnsignedLong(id, 16), seq, lat, lon), ownCbs, null)
     }
 
     private fun stopOwn() {
@@ -240,7 +244,9 @@ class Sos(
         if (d.size < 21 || d[0] != MAGIC) return
         val b = ByteBuffer.wrap(d)
         b.get()
-        val code = b.get().toInt() and 0xff
+        val raw = b.get().toInt() and 0xff
+        val code = raw and 0x7f
+        val contactsOnly = raw and 0x80 != 0
         val hops = b.get().toInt() and 0xff
         val from = b.long.hex()
         val sq = b.short.toInt() and 0xffff
@@ -261,7 +267,8 @@ class Sos(
                 relayUntil[key] = now + RELAY_MS
                 if (relayCbs.isEmpty()) main.post(rotate)
             }
-            if (key in dismissed) return@post
+            // strangers still pass a contacts-only alert on (it may reach a contact further away) but do not show it
+            if (key in dismissed || (contactsOnly && !isContact(from))) return@post
             val a = SosAlert(key, from, nameOf(from) ?: "Radio ${from.take(4).uppercase()}", code,
                 if (la == Int.MAX_VALUE) old?.lat else la / 1e7, if (lo == Int.MAX_VALUE) old?.lon else lo / 1e7,
                 minOf(hops, old?.hops ?: hops), old?.firstAt ?: now, now, if (hops == 0) pct else old?.pct ?: -1)

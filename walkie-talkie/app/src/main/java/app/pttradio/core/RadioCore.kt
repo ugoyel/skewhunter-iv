@@ -25,7 +25,7 @@ class RadioCore(
         const val P = "pttr1"
         const val T_HELLO = 1; const val T_AUDIO = 2; const val T_TEXT = 3; const val T_PRES = 4; const val T_CTL = 5; const val T_DIRECT = 6; const val T_IMG = 7
         const val IMG_CHUNK = 12_000
-        const val IMG_MAX_CHUNKS = 20
+        const val IMG_MAX_CHUNKS = 64               // 768 KB: room for HD pictures over internet
         const val MAX_CH = 16
         const val MAX_TTL_SEC = 120
         const val HOPS = 3
@@ -38,6 +38,8 @@ class RadioCore(
         fun inviteTopic(uid: String, gid: String) = "$P/inv/$uid/$gid"
         fun groupTopic(gid: String) = "$P/g/$gid/s"
         fun chanTopic(gid: String, ch: Int) = "$P/g/$gid/c/$ch"
+        /** Kept on the relay (encrypted): the group's current name, so phones that were offline catch up when they connect. */
+        fun metaTopic(gid: String) = "$P/g/$gid/m"
     }
 
     val state = MutableStateFlow(RadioState())
@@ -136,7 +138,7 @@ class RadioCore(
         val me = s.me ?: return
         val subs = HashSet<String>()
         subs += "$P/u/+"; subs += inbox(me.id); subs += "$P/inv/${me.id}/+"
-        s.groups.forEach { subs += groupTopic(it.id); subs += chanTopic(it.id, 0) }
+        s.groups.forEach { subs += groupTopic(it.id); subs += chanTopic(it.id, 0); subs += metaTopic(it.id) }
         s.tunedGroup?.let { subs += chanTopic(it, s.tunedCh) }
         transports.forEach { it.setSubscriptions(subs) }
     }
@@ -179,10 +181,10 @@ class RadioCore(
         return sent
     }
 
-    private fun sendSealed(type: Int, gid: String, ch: Int, key: ByteArray, plain: ByteArray, topic: String): Boolean {
+    private fun sendSealed(type: Int, gid: String, ch: Int, key: ByteArray, plain: ByteArray, topic: String, retained: Boolean = false): Boolean {
         val p = header(type, gid.idLong(), ch)
         p.body = Crypto.seal(key, plain, p.aad())
-        return transmit(p, topic)
+        return transmit(p, topic, retained)
     }
 
     private fun pairKey(pub: String): ByteArray = pairKeys.getOrPut(pub) { Crypto.shared(priv!!, pub) }
@@ -244,8 +246,11 @@ class RadioCore(
         val g = s.groups.firstOrNull { it.id == gid } ?: return@run
         val n = name.trim().take(24)
         if (g.direct || n.isEmpty() || n == g.name) return@run
-        replaceGroup(g.copy(name = n))
-        sendCtl(g, JSONObject().put("t", "rename").put("name", n))
+        val at = clock()
+        replaceGroup(g.copy(name = n, nameAt = at))
+        // retained on the relay: members who are offline now get the new name as soon as they connect
+        sendSealed(T_CTL, g.id, 0, unb64(g.key), JSONObject().put("t", "rename").put("name", n).put("nv", at).toString().toByteArray(),
+            metaTopic(g.id), retained = true)
     }
 
     fun addMembers(gid: String, ids: List<String>) = run {
@@ -785,7 +790,10 @@ class RadioCore(
             }
             "rename" -> {
                 val n = o.optString("name").trim().take(24)
-                if (n.isNotEmpty() && !g.direct && g.members.any { it.id == p.sender.hex() }) replaceGroup(g.copy(name = n))
+                val at = o.optLong("nv")
+                // the newest rename wins, whichever order the messages arrive in
+                if (n.isNotEmpty() && !g.direct && g.members.any { it.id == p.sender.hex() } && (at == 0L || at > g.nameAt))
+                    replaceGroup(g.copy(name = n, nameAt = if (at > 0) at else clock()))
             }
             "leave" -> {
                 val id = o.getString("id")

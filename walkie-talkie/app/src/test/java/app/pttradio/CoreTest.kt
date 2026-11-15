@@ -371,6 +371,25 @@ class CoreTest {
         await("renamed for everyone") { c.s.groups.first { it.id == ops }.name == "Team" }
     }
 
+    @Test fun renameReachesAPhoneThatWasOfflineWhenItConnects() {
+        val bus = Bus()
+        val (a, _, c) = trio(bus)
+        val gid = c.s.group!!.id
+        val subs = c.t.subs
+        c.t.isUp = false
+        a.core.renameGroup(gid, "Night patrol")
+        Thread.sleep(300)
+        assertNotEquals("Night patrol", c.s.groups.first { it.id == gid }.name)
+        // c comes back online: the relay hands it the stored (encrypted) group name
+        c.t.isUp = true
+        c.t.subs = emptySet()
+        c.t.setSubscriptions(subs)
+        await("caught up") { c.s.groups.first { it.id == gid }.name == "Night patrol" }
+        // an older rename arriving late does not undo a newer one
+        a.core.renameGroup(gid, "Day patrol")
+        await("newest wins") { c.s.groups.first { it.id == gid }.name == "Day patrol" }
+    }
+
     @Test fun stateSurvivesRestartButMessagesDoNot() {
         val (a, b, _) = trio()
         a.core.sendText("secret")
