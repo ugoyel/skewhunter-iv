@@ -292,6 +292,35 @@ class CoreTest {
         assertEquals(960, ca.played[0].size)
     }
 
+    @Test fun messagesWaitForALinkAndAreStampedWhenSent() {
+        val bus = Bus()
+        val (a, b, _) = trio(bus)
+        Thread.sleep(150)
+        a.t.isUp = false
+        a.core.sendText("sent later")
+        await("queued") { a.s.messages.any { it.pending && it.text == "sent later" } }
+        assertEquals(Long.MAX_VALUE, a.s.messages.first { it.pending }.expires) // no delete timer while waiting
+        a.core.pttDown(); await("rec") { a.s.transmitting && a.s.recording }
+        repeat(5) { a.audio.onFrame!!(tone()) }
+        a.core.pttUp(); await("voice queued") { a.s.messages.any { it.pending && it.voiceMs == 300L } }
+        Thread.sleep(400)
+        assertTrue(b.s.messages.isEmpty()); assertEquals(0, b.audio.played.size)
+        val back = System.currentTimeMillis()
+        a.t.isUp = true
+        a.core.onLink(a.t)
+        await("text arrives") { b.s.messages.any { it.text == "sent later" } }
+        val mine = a.s.messages.first { it.text == "sent later" }
+        assertFalse(mine.pending)
+        assertTrue("stamped at send time", mine.at >= back)
+        assertEquals(mine.at + mine.ttlMs(a), mine.expires)
+        await("voice plays", 6000) { b.audio.played.size == 5 }
+        await("delayed voice logged", 6000) { b.s.messages.any { it.voiceMs == 300L && !it.mine } }
+        await("voice marked sent", 6000) { a.s.messages.none { it.pending } }
+        assertTrue(synchronized(bus.retained) { bus.retained.isEmpty() })
+    }
+
+    private fun TextMsg.ttlMs(n: Node) = n.s.ttlSec * 1000L
+
     @Test fun stateSurvivesRestartButMessagesDoNot() {
         val (a, b, _) = trio()
         a.core.sendText("secret")

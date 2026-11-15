@@ -28,7 +28,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,8 +50,8 @@ import app.pttradio.core.chName
 import org.json.JSONArray
 
 /**
- * Home-screen widget, one per group. Android widgets can only report a tap, never "finger down / finger up",
- * so the widget opens the talk key over the home screen and the key there is held to speak.
+ * Home-screen widget, one per group. Android widgets only report taps, so a tap starts talking and opens
+ * the talk key over the home screen to confirm, stop or keep holding.
  */
 class PttWidget : AppWidgetProvider() {
     override fun onReceive(c: Context, i: Intent) {
@@ -82,7 +88,7 @@ class PttWidget : AppWidgetProvider() {
             val gid = prefs(c).getString("w_$id", null)
             val v = RemoteViews(c.packageName, R.layout.widget_ptt)
             v.setTextViewText(R.id.widget_group, groupName(c, gid) ?: "Radio")
-            val open = Intent(c, QuickTalkActivity::class.java).putExtra("gid", gid)
+            val open = Intent(c, QuickTalkActivity::class.java).putExtra("gid", gid).putExtra("start", true)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             v.setOnClickPendingIntent(R.id.widget_root, PendingIntent.getActivity(c, id, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             m.updateAppWidget(id, v)
@@ -99,9 +105,17 @@ class PttWidget : AppWidgetProvider() {
     }
 }
 
-/** The talk key shown over the home screen when a widget is tapped. Hold to speak, tap outside to close. */
+/**
+ * Opened by a widget tap. Talking starts at once; tap the key within 5 seconds to keep the microphone open,
+ * otherwise it closes by itself (protects against pocket taps). After that a tap on the key stops, a tap
+ * starts again, and holding the key works as a normal push-to-talk.
+ */
 class QuickTalkActivity : ComponentActivity() {
     private val app get() = application as App
+    private var armedUntil by mutableLongStateOf(0L)
+    private var closing by mutableStateOf(false)
+
+    companion object { const val CONFIRM_MS = 5_000L; const val HOLD_MS = 600L }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -109,38 +123,88 @@ class QuickTalkActivity : ComponentActivity() {
             // not set up yet, or no microphone permission: the main app handles both
             startActivity(Intent(this, MainActivity::class.java)); finish(); return
         }
-        tune(intent)
+        handle(intent)
         setContent {
             val s by app.core.state.collectAsState()
             val g = s.group
-            Box(Modifier.fillMaxSize().clickable(remember { MutableInteractionSource() }, null) { finish() }, contentAlignment = Alignment.BottomCenter) {
-                Column(Modifier.fillMaxWidth().padding(12.dp).clip(RoundedCornerShape(16.dp)).background(C.bg).border(1.dp, C.line, RoundedCornerShape(16.dp))
-                    .clickable(remember { MutableInteractionSource() }, null) {}.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            val now by produceState(System.currentTimeMillis()) { while (true) { delay(100); value = System.currentTimeMillis() } }
+            val left = ((armedUntil - now).coerceAtLeast(0) + 999) / 1000
+            // nobody confirmed in time: close the microphone and the panel
+            LaunchedEffect(armedUntil, now >= armedUntil) {
+                if (armedUntil > 0 && System.currentTimeMillis() >= armedUntil) {
+                    armedUntil = 0
+                    app.core.pttUp()
+                    closing = true
+                    delay(1200)
+                    finish()
+                }
+            }
+            var downAt by remember { mutableLongStateOf(0L) }
+            var wasTx by remember { mutableStateOf(false) }
+            var wasArmed by remember { mutableStateOf(false) }
+            Box(Modifier.fillMaxSize().clickable(remember { MutableInteractionSource() }, null) { app.core.pttUp(); finish() }, contentAlignment = Alignment.Center) {
+                Column(Modifier.fillMaxWidth().padding(20.dp).clip(RoundedCornerShape(18.dp)).background(C.bg).border(1.dp, C.line, RoundedCornerShape(18.dp))
+                    .clickable(remember { MutableInteractionSource() }, null) {}.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text(g?.name ?: "No group", color = C.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                            Text(g?.name ?: "No group", color = C.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                             Label(if (g == null) "Open the app to pick a group" else chName(s.tunedCh), color = C.amber, size = 11.sp)
                         }
                         val (col, text) = when {
-                            s.transmitting -> C.red to "Transmitting"
+                            s.recording -> C.amber to "No link"
+                            s.transmitting -> C.red to "On air"
                             s.talker != null -> C.green to "RX ${s.talker}"
-                            s.notice != null -> C.amber to s.notice!!
                             s.netUp -> C.green to "Internet"
                             s.nearbyUp -> C.amber to "Nearby"
                             else -> C.red to "No link"
                         }
                         Dot(col); Spacer(Modifier.width(8.dp)); Label(text, color = C.text, size = 11.sp)
                     }
-                    if (g != null) PttKey(s.transmitting, s.talker != null, Modifier.fillMaxWidth(), { app.core.pttDown() }, { app.core.pttUp() })
-                    else Btn("Open PTT Radio", Modifier.fillMaxWidth(), primary = true) { startActivity(Intent(this@QuickTalkActivity, MainActivity::class.java)); finish() }
+                    if (g == null) Btn("Open PTT Radio", Modifier.fillMaxWidth(), primary = true) { startActivity(Intent(this@QuickTalkActivity, MainActivity::class.java)); finish() }
+                    else PttKey(
+                        s.transmitting, s.talker != null, Modifier.fillMaxWidth(), app.core.level, s.recording,
+                        title = when { closing -> "MIC CLOSED"; s.recording -> "RECORDING"; s.transmitting -> "TRANSMITTING"; s.talker != null -> "RECEIVING"; else -> "TAP TO TALK" },
+                        hint = when {
+                            closing -> "No tap within 5 s"
+                            armedUntil > 0 && s.transmitting -> "Tap now to keep talking · $left"
+                            s.transmitting -> "Tap to stop"
+                            s.talker != null -> "Channel busy"
+                            else -> "Tap to talk · hold for push-to-talk"
+                        },
+                        onDown = {
+                            downAt = System.currentTimeMillis()
+                            wasTx = app.core.state.value.transmitting
+                            wasArmed = armedUntil > 0
+                            armedUntil = 0
+                            closing = false
+                            if (!wasTx) app.core.pttDown()
+                        },
+                        onUp = {
+                            val held = System.currentTimeMillis() - downAt >= HOLD_MS
+                            when {
+                                !wasTx -> if (held) app.core.pttUp()          // held from silence: classic push-to-talk
+                                wasArmed -> if (held) app.core.pttUp()        // this tap confirmed the widget's transmission
+                                else -> app.core.pttUp()                      // tap while talking: stop
+                            }
+                        })
+                    Label(if (g != null) "Tap outside to close" else "", Modifier.align(Alignment.CenterHorizontally), color = C.faint, size = 10.sp)
                 }
             }
         }
     }
 
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); tune(intent) }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); handle(intent) }
 
-    private fun tune(i: Intent?) { i?.getStringExtra("gid")?.let { app.core.tuneGroup(it) } }
+    private fun handle(i: Intent?) {
+        val gid = i?.getStringExtra("gid")
+        if (gid != null) app.core.tuneGroup(gid)
+        if (i?.getBooleanExtra("start", false) == true && !app.core.state.value.transmitting) {
+            closing = false
+            app.core.pttDown()
+            armedUntil = System.currentTimeMillis() + CONFIRM_MS
+        }
+        i?.removeExtra("start")
+    }
 
     override fun onResume() { super.onResume(); app.onScreen.value = true; RadioService.start(this, mic = true) }
     override fun onPause() { app.core.pttUp(); app.onScreen.value = false; super.onPause() }

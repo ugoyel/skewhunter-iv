@@ -15,7 +15,7 @@
         android:layout_height="wrap_content"
         android:fontFamily="monospace"
         android:letterSpacing="0.12"
-        android:text="PTT"
+        android:text="◉ PTT"
         android:textColor="#FFB020"
         android:textSize="17sp"
         android:textStyle="bold" />

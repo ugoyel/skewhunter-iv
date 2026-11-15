@@ -149,8 +149,9 @@ data class Invite(val group: Group, val fromId: String, val fromName: String)
 data class Lock(val ch: Int, val by: String, val allow: Set<String>)
 data class Pres(val ch: Int, val at: Long)
 /** [image] holds a JPEG for picture messages. A [text] of the form "geo:lat,lon,accuracy" is a shared location. */
+/** [pending] = waiting for a link (no timer yet). [voiceMs] > 0 marks a voice message sent or heard after a delay. */
 data class TextMsg(val id: Long, val fromId: String, val from: String, val text: String, val at: Long, val expires: Long, val mine: Boolean,
-                   val image: ByteArray? = null) {
+                   val image: ByteArray? = null, val pending: Boolean = false, val voiceMs: Long = 0) {
     /** latitude, longitude, accuracy in metres - or null when this is not a location message. */
     val geo: Triple<Double, Double, Int>? get() {
         if (!text.startsWith("geo:")) return null
@@ -185,6 +186,8 @@ data class RadioState(
     val hd: Boolean = true,
     val hdOk: Boolean = false,
     val hdNow: Boolean = false,
+    /** Talking with no link: the voice is kept in memory and sent when a link is back. */
+    val recording: Boolean = false,
 ) {
     val group: Group? get() = groups.firstOrNull { it.id == tunedGroup }
     fun lockOf(gid: String?, ch: Int): Lock? = locks[gid]?.firstOrNull { it.ch == ch }
@@ -196,6 +199,8 @@ data class RadioState(
 sealed class Event {
     data class InviteReceived(val invite: Invite) : Event()
     data class Summoned(val gid: String, val groupName: String, val ch: Int, val by: String, val autoTuned: Boolean) : Event()
+    /** Someone else's text, picture, location or delayed voice message arrived. */
+    data class Message(val from: String) : Event()
 }
 
 fun chName(ch: Int) = if (ch == 0) "MAIN" else "CH " + ch.toString().padStart(2, '0')

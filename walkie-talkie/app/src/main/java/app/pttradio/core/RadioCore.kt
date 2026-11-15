@@ -55,6 +55,17 @@ class RadioCore(
     private val inviteSentAt = HashMap<String, Long>()
     private val enc = Adpcm.State()
     private var txSeq = 0
+
+    /** Live microphone or playback loudness 0..1, for the talk key animation. */
+    val level = MutableStateFlow(0f)
+
+    /** Messages waiting for a link. Kept in memory only; [created] is when the user sent them. */
+    private class Out(val msgId: Long, val gid: String, val ch: Int, val text: String, val image: ByteArray?, val pcm: List<ShortArray>?, val created: Long)
+    private val outbox = ArrayDeque<Out>()
+    private var txClip: ArrayList<ShortArray>? = null          // voice recorded while there is no link
+    private var clipTask: java.util.concurrent.ScheduledFuture<*>? = null
+    private var rxFrames = 0
+    private var rxDelayed = false
     private var txOpus = false
     private val opCaps = HashMap<String, Boolean>()            // "gid/uid" -> that phone can decode low-data voice
     private var txStart = 0L
@@ -298,7 +309,7 @@ class RadioCore(
         }
         rxSeq = -1
         incoming.clear()
-        update { copy(tunedGroup = gid, tunedCh = ch, messages = emptyList(), talker = null, talkerId = null) }
+        update { copy(tunedGroup = gid, tunedCh = ch, messages = outbox.filter { it.gid == gid && it.ch == ch }.map { pendingMsg(it) }, talker = null, talkerId = null) }
         kv.put("tunedGroup", gid); kv.put("tunedCh", ch.toString())
         setMyPresence()
         publishLocks()
@@ -383,22 +394,27 @@ class RadioCore(
         if (gid != null && gid != s.tunedGroup && s.groups.any { it.id == gid }) tuneNow(gid, 0)
         val g = s.group
         if (g == null || s.transmitting) return@run
-        if (transports.none { it.isUp }) { notice("NO LINK"); return@run }
         if (channelKey(g, s.tunedCh) == null) { notice("${chName(s.tunedCh)} LOCKED"); return@run }
-        if (s.talkerId != null && clock() - lastRxAt < 800) { notice("CHANNEL BUSY"); return@run }
+        // No link (or an earlier recording still going out): record now, send when possible.
+        val offline = transports.none { it.isUp } || clipTask != null
+        if (!offline && s.talkerId != null && clock() - lastRxAt < 800) { notice("CHANNEL BUSY"); return@run }
+        txClip = if (offline) ArrayList() else null
         enc.pred = 0; enc.index = 0
         // Low-data voice only when every phone listening on this channel has said it can decode it.
         val others = s.occupants(g.id, s.tunedCh).filter { it != s.me?.id }
-        txOpus = s.hd && s.hdOk && opus != null && others.isNotEmpty() && others.all { opCaps["${g.id}/$it"] == true }
+        txOpus = !offline && s.hd && s.hdOk && opus != null && others.isNotEmpty() && others.all { opCaps["${g.id}/$it"] == true }
         if (txOpus) opus!!.resetEnc()
         txStart = clock()
         if (!audio.startCapture { pcm -> run { txFrame(pcm) } }) { notice("MIC UNAVAILABLE"); return@run }
-        update { copy(transmitting = true, talker = null, talkerId = null, hdNow = txOpus) }
+        update { copy(transmitting = true, recording = offline, talker = null, talkerId = null, hdNow = txOpus) }
+        if (offline) notice("NO LINK · RECORDING")
     }
 
     private fun txFrame(pcm: ShortArray) {
         val g = s.group
         if (!s.transmitting || g == null) return
+        level.value = levelOf(pcm)
+        txClip?.let { if (it.size < MAX_TX / 60) it.add(pcm); return }
         val key = channelKey(g, s.tunedCh) ?: return
         var flags = 0
         var a: ByteArray? = null
@@ -410,7 +426,21 @@ class RadioCore(
         }
         if (a == null) a = Adpcm.encode(pcm, enc)
         val seq = txSeq++ and 0xffff
-        sendSealed(T_AUDIO, g.id, s.tunedCh, key, byteArrayOf((seq shr 8).toByte(), seq.toByte(), flags.toByte()) + a, chanTopic(g.id, s.tunedCh))
+        if (!sendSealed(T_AUDIO, g.id, s.tunedCh, key, byteArrayOf((seq shr 8).toByte(), seq.toByte(), flags.toByte()) + a, chanTopic(g.id, s.tunedCh))) {
+            // the link dropped mid-sentence: keep the rest and send it once a link is back
+            txClip = arrayListOf(pcm)
+            update { copy(recording = true, hdNow = false) }
+            notice("LINK LOST · RECORDING")
+        }
+    }
+
+    private fun levelOf(pcm: ShortArray): Float {
+        if (pcm.isEmpty()) return 0f
+        var sum = 0.0
+        for (v in pcm) sum += v.toDouble() * v
+        val rms = Math.sqrt(sum / pcm.size)
+        if (rms < 1) return 0f
+        return ((20 * Math.log10(rms / 32768.0) + 55) / 50).toFloat().coerceIn(0f, 1f)
     }
 
     fun pttUp() = run { pttUpNow() }
@@ -418,23 +448,108 @@ class RadioCore(
     private fun pttUpNow() {
         if (!s.transmitting) return
         audio.stopCapture()
-        update { copy(transmitting = false, hdNow = false) }
+        level.value = 0f
+        val clip = txClip
+        txClip = null
+        update { copy(transmitting = false, hdNow = false, recording = false) }
         val g = s.group ?: return
+        if (clip != null) {
+            if (clip.size >= 4) queue(Out(Crypto.randomId(), g.id, s.tunedCh, "", null, clip, clock()))
+            return
+        }
         val key = channelKey(g, s.tunedCh) ?: return
         val seq = txSeq++ and 0xffff
         sendSealed(T_AUDIO, g.id, s.tunedCh, key, byteArrayOf((seq shr 8).toByte(), seq.toByte(), 1), chanTopic(g.id, s.tunedCh))
     }
 
     fun sendText(text: String) = run {
-        val me = s.me ?: return@run
-        val g = s.group ?: return@run
         val t = text.trim().take(500)
-        if (t.isEmpty()) return@run
-        val key = channelKey(g, s.tunedCh)
-        if (key == null) { notice("${chName(s.tunedCh)} LOCKED"); return@run }
-        if (!sendSealed(T_TEXT, g.id, s.tunedCh, key, t.toByteArray(), chanTopic(g.id, s.tunedCh))) { notice("NO LINK"); return@run }
-        addMessage(me.id, me.name, t, true)
+        if (t.isNotEmpty()) post(t, null)
     }
+
+    /** Sends now when a link is up, otherwise keeps the message and sends it as soon as one is. */
+    private fun post(text: String, image: ByteArray?) {
+        val me = s.me ?: return
+        val g = s.group ?: return
+        if (channelKey(g, s.tunedCh) == null) { notice("${chName(s.tunedCh)} LOCKED"); return }
+        val o = Out(Crypto.randomId(), g.id, s.tunedCh, text, image, null, clock())
+        if (outbox.isEmpty() && deliver(g, o)) { addMessage(me.id, me.name, text, true, image, id = o.msgId); return }
+        queue(o)
+    }
+
+    private fun queue(o: Out) {
+        outbox.addLast(o)
+        if (s.tunedGroup == o.gid && s.tunedCh == o.ch) update { copy(messages = (messages + pendingMsg(o)).takeLast(100)) }
+        notice(if (o.pcm != null) "VOICE QUEUED" else "NO LINK · QUEUED")
+        flush()
+    }
+
+    private fun pendingMsg(o: Out) = TextMsg(o.msgId, s.me?.id ?: "", s.me?.name ?: "", o.text, o.created, Long.MAX_VALUE, true, o.image,
+        pending = true, voiceMs = (o.pcm?.size ?: 0) * 60L)
+
+    private fun deliver(g: Group, o: Out): Boolean {
+        val key = channelKey(g, o.ch) ?: return false
+        if (transports.none { it.isUp }) return false
+        val topic = chanTopic(g.id, o.ch)
+        val img = o.image ?: return sendSealed(T_TEXT, g.id, o.ch, key, o.text.toByteArray(), topic)
+        val total = (img.size + IMG_CHUNK - 1) / IMG_CHUNK
+        val id = java.nio.ByteBuffer.allocate(8).putLong(Crypto.randomId()).array()
+        for (i in 0 until total) {
+            val part = img.copyOfRange(i * IMG_CHUNK, minOf(img.size, (i + 1) * IMG_CHUNK))
+            if (!sendSealed(T_IMG, g.id, o.ch, key, id + byteArrayOf(i.toByte(), total.toByte()) + part, topic)) return false
+        }
+        return true
+    }
+
+    /** The message left the phone now: its time and its delete timer start from this moment. */
+    private fun markSent(o: Out) {
+        val now = clock()
+        update { copy(messages = messages.map { if (it.id == o.msgId) it.copy(pending = false, at = now, expires = now + ttlSec * 1000L) else it }) }
+    }
+
+    /** Sends what is waiting, oldest first, while a link is up. */
+    private fun flush() {
+        while (outbox.isNotEmpty() && clipTask == null && !s.transmitting) {
+            if (transports.none { it.isUp }) return
+            val o = outbox.first()
+            val g = s.groups.firstOrNull { it.id == o.gid }
+            if (g == null || channelKey(g, o.ch) == null) {
+                outbox.removeFirst()
+                update { copy(messages = messages.filter { it.id != o.msgId }) }
+                notice("QUEUED MESSAGE DROPPED")
+                continue
+            }
+            val pcm = o.pcm
+            if (pcm != null) {
+                if (s.tunedGroup == o.gid && s.tunedCh == o.ch && s.talkerId != null && clock() - lastRxAt < 800) return // wait for a free channel
+                startClip(g, o, pcm)
+                return
+            }
+            if (!deliver(g, o)) return
+            outbox.removeFirst()
+            markSent(o)
+        }
+    }
+
+    /** Plays a recorded voice message out in real time, marked as delayed, so it sounds like a normal call. */
+    private fun startClip(g: Group, o: Out, pcm: List<ShortArray>) {
+        val st = Adpcm.State()
+        var i = 0
+        notice("SENDING QUEUED VOICE")
+        clipTask = exec.scheduleAtFixedRate(Runnable {
+            try {
+                val key = channelKey(g, o.ch)
+                val last = i >= pcm.size
+                val seq = txSeq++ and 0xffff
+                val body = byteArrayOf((seq shr 8).toByte(), seq.toByte(), (if (last) 5 else 4).toByte()) + (if (last) ByteArray(0) else Adpcm.encode(pcm[i], st))
+                if (key == null || !sendSealed(T_AUDIO, g.id, o.ch, key, body, chanTopic(g.id, o.ch))) { endClip(); return@Runnable } // retried later
+                i++
+                if (last) { endClip(); outbox.remove(o); markSent(o); flush() }
+            } catch (e: Exception) { endClip() }
+        }, 0, 60, TimeUnit.MILLISECONDS)
+    }
+
+    private fun endClip() { clipTask?.cancel(false); clipTask = null }
 
     /** Shows a short status line on the radio display. */
     fun note(msg: String) = run { notice(msg) }
@@ -445,18 +560,9 @@ class RadioCore(
 
     /** Sends a (small, already compressed) JPEG to the channel in encrypted pieces. Held in memory only. */
     fun sendImage(jpeg: ByteArray) = run {
-        val me = s.me ?: return@run
-        val g = s.group ?: return@run
-        val key = channelKey(g, s.tunedCh)
-        if (key == null) { notice("${chName(s.tunedCh)} LOCKED"); return@run }
         val total = (jpeg.size + IMG_CHUNK - 1) / IMG_CHUNK
         if (jpeg.isEmpty() || total > IMG_MAX_CHUNKS) { notice("IMAGE TOO LARGE"); return@run }
-        val id = java.nio.ByteBuffer.allocate(8).putLong(Crypto.randomId()).array()
-        for (i in 0 until total) {
-            val part = jpeg.copyOfRange(i * IMG_CHUNK, minOf(jpeg.size, (i + 1) * IMG_CHUNK))
-            if (!sendSealed(T_IMG, g.id, s.tunedCh, key, id + byteArrayOf(i.toByte(), total.toByte()) + part, chanTopic(g.id, s.tunedCh))) { notice("NO LINK"); return@run }
-        }
-        addMessage(me.id, me.name, "", true, jpeg)
+        post("", jpeg)
     }
 
     private class Asm(val parts: Array<ByteArray?>, val at: Long)
@@ -477,9 +583,11 @@ class RadioCore(
         }
     }
 
-    private fun addMessage(fromId: String, from: String, text: String, mine: Boolean, image: ByteArray? = null) {
+    private fun addMessage(fromId: String, from: String, text: String, mine: Boolean, image: ByteArray? = null,
+                           id: Long = Crypto.randomId(), voiceMs: Long = 0) {
         val now = clock()
-        update { copy(messages = (messages + TextMsg(Crypto.randomId(), fromId, from, text, now, now + ttlSec * 1000L, mine, image)).takeLast(100)) }
+        update { copy(messages = (messages + TextMsg(id, fromId, from, text, now, now + ttlSec * 1000L, mine, image, voiceMs = voiceMs)).takeLast(100)) }
+        if (!mine) onEvent?.invoke(Event.Message(from))
     }
 
     // ---------------------------------------------------------------- receiving
@@ -523,14 +631,27 @@ class RadioCore(
         val seq = ((plain[0].toInt() and 0xff) shl 8) or (plain[1].toInt() and 0xff)
         val isOpus = plain[2].toInt() and 2 != 0
         if (isOpus && !s.hdOk) return
-        if (s.talkerId != sender) { rxSeq = -1; if (isOpus) opus?.resetDec(); update { copy(talkerId = sender, talker = nameOf(sender), hdNow = isOpus) } }
+        if (s.talkerId != sender) {
+            rxSeq = -1; rxFrames = 0; rxDelayed = plain[2].toInt() and 4 != 0
+            if (isOpus) opus?.resetDec()
+            update { copy(talkerId = sender, talker = nameOf(sender), hdNow = isOpus) }
+        }
         else if (rxSeq >= 0 && ((seq - rxSeq) and 0xffff) > 0x8000) return // late duplicate
         rxSeq = seq
         lastRxAt = now
         if (plain[2].toInt() and 1 != 0) {
             audio.endOfTalk(s.beep)
+            level.value = 0f
             update { copy(talkerId = null, talker = null, hdNow = false) }
-        } else audio.play(if (isOpus) opus!!.decode(plain, 3, plain.size - 3) else Adpcm.decode(plain, 3, plain.size - 3))
+            // a recording sent after a delay also leaves a line in the log, stamped with when it arrived
+            if (rxDelayed && rxFrames > 0) addMessage(sender, s.nameOf(sender), "", false, voiceMs = rxFrames * 60L)
+            rxFrames = 0
+        } else {
+            val pcm = if (isOpus) opus!!.decode(plain, 3, plain.size - 3) else Adpcm.decode(plain, 3, plain.size - 3)
+            rxFrames++
+            level.value = levelOf(pcm)
+            audio.play(pcm)
+        }
     }
 
     private fun onPresence(p: Packet) {
@@ -630,6 +751,7 @@ class RadioCore(
             resendInvites()
             s.group?.let { sendPresence(it, s.tunedCh) }
         }
+        flush()
     }
 
     // ---------------------------------------------------------------- housekeeping
@@ -638,7 +760,13 @@ class RadioCore(
         val now = clock()
         var st = s
         if (st.messages.any { it.expires <= now }) st = st.copy(messages = st.messages.filter { it.expires > now })
-        if (st.talkerId != null && now - lastRxAt > 1000) { st = st.copy(talkerId = null, talker = null, hdNow = false); audio.endOfTalk(false) }
+        var lateVoice: Pair<String, Long>? = null
+        if (st.talkerId != null && now - lastRxAt > 1000) {
+            if (rxDelayed && rxFrames > 0) lateVoice = st.talkerId!! to rxFrames * 60L
+            rxFrames = 0
+            level.value = 0f
+            st = st.copy(talkerId = null, talker = null, hdNow = false); audio.endOfTalk(false)
+        }
         if (st.notice != null && now - st.noticeAt > 3500) st = st.copy(notice = null)
         val me = st.me?.id
         var lockChange = false
@@ -652,6 +780,8 @@ class RadioCore(
         if (pres != st.presence) st = st.copy(presence = pres)
         state.value = st
         if (lockChange) publishLocks()
+        lateVoice?.let { (id, ms) -> addMessage(id, s.nameOf(id), "", false, voiceMs = ms) }
+        if (outbox.isNotEmpty()) flush()
         if (s.transmitting && now - txStart > MAX_TX) { pttUpNow(); notice("TX TIME LIMIT") }
         val g = s.group
         if (g != null && now - lastPresenceAt > PRESENCE_EVERY) { setMyPresence(); sendPresence(g, s.tunedCh) }

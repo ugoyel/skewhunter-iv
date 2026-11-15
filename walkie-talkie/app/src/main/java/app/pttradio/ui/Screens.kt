@@ -3,6 +3,7 @@ package app.pttradio.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -337,23 +338,36 @@ fun Contacts(s: RadioState, near: NearbyInfo, a: Actions, now: Long, onCreated: 
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun GroupCard(s: RadioState, g: Group, a: Actions, open: (String, Int) -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    if (menu) Sheet(g.name, { menu = false }) {
+        Btn("Add talk widget to home screen", Modifier.fillMaxWidth()) { menu = false; a.addToHome(g.id) }
+        Btn("Delete group", Modifier.fillMaxWidth(), danger = true) { menu = false; confirmDelete = true }
+    }
+    if (confirmDelete) Sheet("Delete ${g.name}?", { confirmDelete = false }) {
+        Body("The group is removed from this phone and the others see that you left. Someone in the group has to invite you again to come back.", color = C.dim, size = 13.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Btn("Keep", Modifier.weight(1f)) { confirmDelete = false }
+            Btn("Delete", Modifier.weight(1f), danger = true) { confirmDelete = false; a.leave(g.id) }
+        }
+    }
     val tuned = s.tunedGroup == g.id
     val pres = s.presence[g.id] ?: emptyMap()
     val active = (pres.values.map { it.ch } + (s.locks[g.id]?.map { it.ch } ?: emptyList()) + 0).distinct().sorted()
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(C.panel).border(1.dp, if (tuned) C.amber else C.line, RoundedCornerShape(8.dp))
-        .clickable { open(g.id, if (tuned) s.tunedCh else 0) }.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        .combinedClickable(onClick = { open(g.id, if (tuned) s.tunedCh else 0) },
+            onLongClick = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); menu = true })
+        .padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Body(g.name, weight = FontWeight.SemiBold, size = 16.sp, maxLines = 1)
                 Label("${g.members.size} members · ${pres.size} on air", size = 10.sp)
             }
             if (tuned) Label("Tuned", color = C.amber, size = 10.sp)
-            Spacer(Modifier.width(10.dp))
-            Label("+ Home", Modifier.clip(RoundedCornerShape(5.dp)).border(1.dp, C.line, RoundedCornerShape(5.dp)).clickable { a.addToHome(g.id) }.padding(horizontal = 8.dp, vertical = 6.dp),
-                color = C.text, size = 10.sp)
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             active.forEach { ch ->
@@ -377,7 +391,7 @@ fun Groups(s: RadioState, a: Actions, toContacts: () -> Unit, open: (String, Int
         Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Label("No groups yet")
             Spacer(Modifier.height(8.dp))
-            Body("Pick people in Contacts to create one.", color = C.faint, size = 13.sp)
+            Body("Pick people in Contacts to create one. Touch and hold a group for more options.", color = C.faint, size = 13.sp)
             Spacer(Modifier.height(16.dp))
             Btn("Open contacts", onClick = toContacts)
         }

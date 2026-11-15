@@ -212,12 +212,25 @@ object Notifier {
         .setSmallIcon(R.drawable.ic_stat_radio).setContentTitle("PTT Radio").setContentText(text)
         .setOngoing(true).setOnlyAlertOnce(true).setContentIntent(open(c, 0)).build()
 
+    /** Vibrates through the alarm channel, which the ringer's silent and vibrate modes do not mute. */
+    fun buzz(c: Context) {
+        try {
+            val v = if (Build.VERSION.SDK_INT >= 31) c.getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator
+                    else c.getSystemService(Vibrator::class.java)
+            if (v == null || !v.hasVibrator()) return
+            val effect = VibrationEffect.createWaveform(longArrayOf(0, 140, 90, 140), -1)
+            if (Build.VERSION.SDK_INT >= 33) v.vibrate(effect, android.os.VibrationAttributes.createForUsage(android.os.VibrationAttributes.USAGE_ALARM))
+            else @Suppress("DEPRECATION") v.vibrate(effect, android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_ALARM).build())
+        } catch (x: Exception) { }
+    }
+
     fun event(c: Context, e: Event) {
         val nm = c.getSystemService(NotificationManager::class.java)
         val b = Notification.Builder(c, ALERT).setSmallIcon(R.drawable.ic_stat_radio).setAutoCancel(true)
         when (e) {
             is Event.InviteReceived -> nm.notify(e.invite.group.id.hashCode(), b.setContentTitle("Join ${e.invite.group.name}?")
                 .setContentText("${e.invite.fromName} added you to a group. Tap to join.").setContentIntent(open(c, e.invite.group.id.hashCode())).build())
+            is Event.Message -> buzz(c)
             is Event.Summoned -> if (!e.autoTuned || !MainActivity.visible) nm.notify(e.gid.hashCode() + 1, b.setContentTitle("${e.by} wants you on ${chName(e.ch)}")
                 .setContentText("${e.groupName} · tap to switch channel").setContentIntent(open(c, e.gid.hashCode() + 1, e.gid, e.ch)).build())
         }

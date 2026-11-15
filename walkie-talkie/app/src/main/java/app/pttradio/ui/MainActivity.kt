@@ -40,7 +40,7 @@ import app.pttradio.net.NearbyTransport
 import kotlinx.coroutines.delay
 
 @Composable
-fun AppRoot(s: RadioState, p: Perms, near: NearbyInfo, login: Boolean, mode: String, server: String, btn: ButtonCfg, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
+fun AppRoot(s: RadioState, p: Perms, near: NearbyInfo, level: kotlinx.coroutines.flow.StateFlow<Float>?, login: Boolean, mode: String, server: String, btn: ButtonCfg, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
     val now by produceState(System.currentTimeMillis()) { while (true) { delay(500); value = System.currentTimeMillis() } }
     Box(Modifier.fillMaxSize().background(C.bg)) {
         when {
@@ -48,7 +48,7 @@ fun AppRoot(s: RadioState, p: Perms, near: NearbyInfo, login: Boolean, mode: Str
             s.me == null -> Welcome(a, login)
             scr == Scr.SETUP -> Setup(p, a) { go(Scr.HOME) }
             scr == Scr.SETTINGS -> SettingsScreen(s, p, mode, server, btn, a) { go(Scr.HOME) }
-            scr == Scr.RADIO && s.group != null -> RadioScreen(s, near, a, now) { go(Scr.HOME) }
+            scr == Scr.RADIO && s.group != null -> RadioScreen(s, near, level, a, now) { go(Scr.HOME) }
             else -> Home(s, p, near, a, now, tab, onTab, go)
         }
     }
@@ -218,7 +218,7 @@ class MainActivity : ComponentActivity(), Actions {
             val near by app.nearby.info.collectAsState()
             LaunchedEffect(s.me?.id) { if (s.me != null) RadioService.start(this@MainActivity) }
             BackHandler(enabled = s.me != null && scr != Scr.HOME) { scr = Scr.HOME }
-            AppRoot(s, perms, near, auth.enabled, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
+            AppRoot(s, perms, near, core.level, auth.enabled, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
             warning?.let { w ->
                 Sheet("Warning", { warning = null }) {
                     Body(w, size = 14.sp)
