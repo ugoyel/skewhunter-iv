@@ -65,7 +65,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PlayArrow
 import kotlinx.coroutines.flow.StateFlow
 import app.pttradio.net.NearbyInfo
 import android.graphics.BitmapFactory
@@ -274,7 +274,7 @@ private fun MessageRow(m: TextMsg, now: Long, a: Actions) {
                 }
                 m.voiceMs > 0 -> Row(Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).background(C.raised).border(1.dp, C.line, RoundedCornerShape(6.dp)).padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Mic, null, Modifier.size(20.dp), tint = if (m.mine) C.amber else C.green)
+                    Icon(Icons.Filled.PlayArrow, null, Modifier.size(20.dp), tint = if (m.mine) C.amber else C.green)
                     Spacer(Modifier.width(8.dp))
                     Column {
                         Text("Voice · ${((m.voiceMs + 500) / 1000).coerceAtLeast(1)} s", color = C.text, fontSize = 14.sp)
