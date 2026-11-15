@@ -294,6 +294,7 @@ class MainActivity : ComponentActivity(), Actions {
     override fun sendText(t: String) { core.sendText(t) }
     override fun setTtl(sec: Int) { core.setTtl(sec) }
     override fun setBeep(on: Boolean) { core.setBeep(on) }
+    override fun setHd(on: Boolean) { core.setHd(on) }
     override fun setMode(m: String) { app.setMode(m) }
     override fun setServer(s: String) { serverUrl = s; app.setServer(s) }
 }

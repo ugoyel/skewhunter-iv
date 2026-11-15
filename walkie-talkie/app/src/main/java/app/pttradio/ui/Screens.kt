@@ -75,6 +75,7 @@ interface Actions {
     fun sendText(t: String)
     fun setTtl(sec: Int)
     fun setBeep(on: Boolean)
+    fun setHd(on: Boolean)
     fun setMode(m: String)
     fun setServer(s: String)
     fun requestPerm(kind: String)
@@ -448,6 +449,14 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: B
                     "nearby" -> "Phone-to-phone only, over Bluetooth and Wi-Fi. No server is used."
                     "both" -> "Internet and nearby together. Lets this phone stay reachable both ways; uses the most battery."
                     else -> "Internet when there is one. Nearby phones are found over Bluetooth and Wi-Fi whenever there is no internet, and also while the app is open."
+                }, color = C.dim, size = 12.sp)
+            }
+            Section("Voice") {
+                Segments(listOf("1" to "Low data HD", "0" to "Standard"), if (s.hd && s.hdOk) "1" else "0", Modifier.fillMaxWidth()) { a.setHd(it == "1") }
+                Body(when {
+                    !s.hdOk -> "This phone cannot use low-data voice, so it stays on Standard (about 64 kbit/s)."
+                    s.hd -> "About 16 kbit/s, a quarter of the data, and steadier on weak links. Used when every phone on the channel supports it; otherwise Standard is used automatically."
+                    else -> "About 64 kbit/s. Works on every phone."
                 }, color = C.dim, size = 12.sp)
             }
             Section("End-of-transmission beep") {

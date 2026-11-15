@@ -25,6 +25,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import androidx.core.content.ContextCompat
 import app.pttradio.audio.AudioEngine
+import app.pttradio.audio.OpusCodec
 import app.pttradio.core.Event
 import app.pttradio.core.KV
 import app.pttradio.core.RadioCore
@@ -70,7 +71,7 @@ class App : Application() {
         core = RadioCore(object : KV {
             override fun get(k: String) = prefs.getString(k, null)
             override fun put(k: String, v: String?) { prefs.edit().putString(k, v).apply() }
-        }, AudioEngine(this))
+        }, AudioEngine(this), opus = OpusCodec())
         val alarms = Alarms(this)
         mqtt = MqttTransport({ servers() }, { alarms }, { alarms.retryIn(it) })
         alarms.onRetry = { mqtt.retryNow() }

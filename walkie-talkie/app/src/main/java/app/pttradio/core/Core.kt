@@ -181,6 +181,10 @@ data class RadioState(
     val ttlSec: Int = 120,
     val beep: Boolean = true,
     val ready: Boolean = false,
+    /** Low-data HD voice: the user's setting, whether this phone supports it, and whether it is in use right now. */
+    val hd: Boolean = true,
+    val hdOk: Boolean = false,
+    val hdNow: Boolean = false,
 ) {
     val group: Group? get() = groups.firstOrNull { it.id == tunedGroup }
     fun lockOf(gid: String?, ch: Int): Lock? = locks[gid]?.firstOrNull { it.ch == ch }
@@ -216,6 +220,17 @@ interface AudioIO {
     fun stopCapture()
     fun play(pcm: ShortArray)
     fun endOfTalk(beep: Boolean)
+}
+
+/** Optional low-data voice codec supplied by the platform (Opus on Android). All calls come from the radio thread. */
+interface VoiceCodec {
+    /** True once the device has proven it can encode and decode. */
+    val ok: Boolean
+    /** A bundle of zero or more packets for one microphone frame, or null on failure. */
+    fun encode(pcm: ShortArray): ByteArray?
+    fun decode(data: ByteArray, off: Int, len: Int): ShortArray
+    fun resetEnc()
+    fun resetDec()
 }
 
 interface TransportListener {

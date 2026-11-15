@@ -35,10 +35,17 @@ class AudioEngine(ctx: Context) : AudioIO {
         if (capturing) return true
         val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (min <= 0) return false
-        val rec = try {
-            AudioRecord(MediaRecorder.AudioSource.MIC, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, frame * 8))
-        } catch (e: Exception) { return false }
-        if (rec.state != AudioRecord.STATE_INITIALIZED) { rec.release(); return false }
+        // The voice-communication source switches on the phone's own noise suppression and gain control;
+        // the plain microphone is the fall-back for phones that refuse it.
+        var found: AudioRecord? = null
+        for (src in intArrayOf(MediaRecorder.AudioSource.VOICE_COMMUNICATION, MediaRecorder.AudioSource.MIC)) {
+            val r = try {
+                AudioRecord(src, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, frame * 8))
+            } catch (e: Exception) { null }
+            if (r != null && r.state == AudioRecord.STATE_INITIALIZED) { found = r; break }
+            r?.release()
+        }
+        val rec = found ?: return false
         try {
             if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(rec.audioSessionId)?.enabled = true
             if (AutomaticGainControl.isAvailable()) AutomaticGainControl.create(rec.audioSessionId)?.enabled = true
@@ -47,6 +54,7 @@ class AudioEngine(ctx: Context) : AudioIO {
         capturing = true
         thread(isDaemon = true, name = "ptt-rec") {
             val buf = ShortArray(frame)
+            var x1 = 0.0; var y1 = 0.0
             try {
                 while (capturing) {
                     var n = 0
@@ -55,7 +63,17 @@ class AudioEngine(ctx: Context) : AudioIO {
                         if (r <= 0) { capturing = false; break }
                         n += r
                     }
-                    if (n == frame) onFrame(buf.copyOf())
+                    if (n == frame) {
+                        // remove hum and wind rumble below ~100 Hz, which only wastes bits and masks speech
+                        val out = ShortArray(frame)
+                        for (k in 0 until frame) {
+                            val x = buf[k].toDouble()
+                            val y = x - x1 + 0.96 * y1
+                            x1 = x; y1 = y
+                            out[k] = y.coerceIn(-32768.0, 32767.0).toInt().toShort()
+                        }
+                        onFrame(out)
+                    }
                 }
             } finally {
                 try { rec.stop() } catch (e: Exception) { }
@@ -103,7 +121,7 @@ class AudioEngine(ctx: Context) : AudioIO {
                 val t = track ?: newTrack().also { track = it }
                 // Tiny jitter buffer: wait for a second frame before starting so playback does not stutter.
                 var waited = 0
-                while (queue.isEmpty() && waited < 120) { Thread.sleep(20); waited += 20 }
+                while (queue.isEmpty() && waited < 180) { Thread.sleep(20); waited += 20 }
                 t.play()
                 while (cur != null) {
                     t.write(cur, 0, cur.size)

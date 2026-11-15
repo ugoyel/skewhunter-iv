@@ -158,6 +158,7 @@ private fun Lcd(s: RadioState, near: NearbyInfo, now: Long) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Dot(stColor, 8.dp); Spacer(Modifier.width(8.dp))
             Text(stText, color = stColor, fontFamily = Mono, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            if (s.hdNow) { Spacer(Modifier.width(10.dp)); Label("HD · low data", color = C.amber, size = 10.sp) }
         }
         Spacer(Modifier.height(6.dp))
         Body(occ.joinToString(" · ") { s.nameOf(it) }.ifEmpty { "—" } + (lock?.let { "   locked by ${s.nameOf(it.by)}" } ?: ""), color = C.faint, size = 12.sp, maxLines = 1)

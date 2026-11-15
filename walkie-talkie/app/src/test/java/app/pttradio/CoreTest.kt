@@ -248,6 +248,50 @@ class CoreTest {
         await("too large") { a.s.notice == "IMAGE TOO LARGE" }
     }
 
+    /** Stand-in codec: one "packet" holding the raw samples. */
+    class FakeOpus(override val ok: Boolean = true) : VoiceCodec {
+        var encoded = 0; var decoded = 0
+        override fun encode(pcm: ShortArray): ByteArray { encoded++; return byteArrayOf(1) + ByteArray(pcm.size) { (pcm[it].toInt() shr 8).toByte() } }
+        override fun decode(data: ByteArray, off: Int, len: Int): ShortArray { decoded++; return ShortArray(len - 1) { (data[off + 1 + it].toInt() shl 8).toShort() } }
+        override fun resetEnc() {}
+        override fun resetDec() {}
+    }
+
+    @Test fun lowDataVoiceOnlyWhenEveryListenerSupportsIt() {
+        val bus = Bus()
+        fun node(name: String, codec: VoiceCodec?): Triple<RadioCore, FakeAudio, MemKV> {
+            val kv = MemKV(); val au = FakeAudio()
+            val c = RadioCore(kv, au, opus = codec)
+            c.start(); c.attach(BusTransport(bus)); c.setName(name)
+            await("id") { c.state.value.me != null }
+            return Triple(c, au, kv)
+        }
+        val oa = FakeOpus(); val ob = FakeOpus()
+        val (a, aa, _) = node("Alpha", oa); val (b, ba, _) = node("Bravo", ob); val (c, ca, _) = node("Charlie", null)
+        await("dir") { a.state.value.users.size == 2 }
+        val bid = b.state.value.me!!.id; val cid = c.state.value.me!!.id
+        a.createGroup("HD", listOf(bid, cid))
+        await("invite b") { b.state.value.invites.size == 1 }
+        b.acceptInvite(b.state.value.invites[0].group.id)
+        val gid = a.state.value.groups[0].id
+        await("b present") { a.state.value.occupants(gid, 0).size == 2 }
+        fun talk(n: Int) {
+            Thread.sleep(150); a.pttDown(); await("tx") { a.state.value.transmitting }
+            repeat(n) { aa.onFrame!!(tone()) }; a.pttUp(); await("end") { !a.state.value.transmitting }
+        }
+        talk(3)
+        await("b hears hd") { ba.played.size == 3 }
+        assertEquals(3, oa.encoded); assertEquals(3, ob.decoded)
+        // a phone without the codec joins: everyone drops back to the standard codec
+        await("invite c") { c.state.value.invites.size == 1 }
+        c.acceptInvite(gid)
+        await("c present") { a.state.value.occupants(gid, 0).size == 3 }
+        talk(2)
+        await("c hears") { ca.played.size == 2 && ba.played.size == 5 }
+        assertEquals(3, oa.encoded); assertEquals(3, ob.decoded)
+        assertEquals(960, ca.played[0].size)
+    }
+
     @Test fun stateSurvivesRestartButMessagesDoNot() {
         val (a, b, _) = trio()
         a.core.sendText("secret")

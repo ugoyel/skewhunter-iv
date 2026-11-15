@@ -18,6 +18,7 @@ class RadioCore(
     private val audio: AudioIO,
     private val clock: () -> Long = System::currentTimeMillis,
     private val exec: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "radio").apply { isDaemon = true } },
+    private val opus: VoiceCodec? = null,
 ) : TransportListener {
 
     companion object {
@@ -54,6 +55,8 @@ class RadioCore(
     private val inviteSentAt = HashMap<String, Long>()
     private val enc = Adpcm.State()
     private var txSeq = 0
+    private var txOpus = false
+    private val opCaps = HashMap<String, Boolean>()            // "gid/uid" -> that phone can decode low-data voice
     private var txStart = 0L
     private var rxSeq = -1
     private var lastRxAt = 0L
@@ -88,6 +91,8 @@ class RadioCore(
             ready = true,
             ttlSec = (kv.get("ttl")?.toIntOrNull() ?: MAX_TTL_SEC).coerceIn(5, MAX_TTL_SEC),
             beep = kv.get("beep") != "0",
+            hd = kv.get("hd") != "0",
+            hdOk = try { opus?.ok == true } catch (e: Throwable) { false },
         )
         kv.get("me")?.let {
             val o = JSONObject(it)
@@ -140,6 +145,10 @@ class RadioCore(
     }
 
     fun setTtl(sec: Int) = run { val v = sec.coerceIn(5, MAX_TTL_SEC); kv.put("ttl", v.toString()); update { copy(ttlSec = v) } }
+    fun setHd(on: Boolean) = run {
+        kv.put("hd", if (on) "1" else "0"); update { copy(hd = on) }
+        s.group?.let { sendPresence(it, s.tunedCh) }
+    }
     fun setBeep(on: Boolean) = run { kv.put("beep", if (on) "1" else "0"); update { copy(beep = on) } }
 
     // ---------------------------------------------------------------- sending
@@ -309,7 +318,7 @@ class RadioCore(
         lastPresenceAt = clock()
         val locks = JSONArray()
         if (ch >= 0) lockMap[g.id]?.get(me.id)?.forEach { l -> locks.put(JSONObject().put("ch", l.ch).put("allow", JSONArray(l.allow.toList()))) }
-        sendSealed(T_PRES, g.id, 0, unb64(g.key), JSONObject().put("ch", ch).put("locks", locks).toString().toByteArray(), groupTopic(g.id))
+        sendSealed(T_PRES, g.id, 0, unb64(g.key), JSONObject().put("ch", ch).put("locks", locks).put("op", if (s.hd && s.hdOk) 1 else 0).toString().toByteArray(), groupTopic(g.id))
     }
 
     fun lockChannel() = run {
@@ -375,18 +384,30 @@ class RadioCore(
         if (channelKey(g, s.tunedCh) == null) { notice("${chName(s.tunedCh)} LOCKED"); return@run }
         if (s.talkerId != null && clock() - lastRxAt < 800) { notice("CHANNEL BUSY"); return@run }
         enc.pred = 0; enc.index = 0
+        // Low-data voice only when every phone listening on this channel has said it can decode it.
+        val others = s.occupants(g.id, s.tunedCh).filter { it != s.me?.id }
+        txOpus = s.hd && s.hdOk && opus != null && others.isNotEmpty() && others.all { opCaps["${g.id}/$it"] == true }
+        if (txOpus) opus!!.resetEnc()
         txStart = clock()
         if (!audio.startCapture { pcm -> run { txFrame(pcm) } }) { notice("MIC UNAVAILABLE"); return@run }
-        update { copy(transmitting = true, talker = null, talkerId = null) }
+        update { copy(transmitting = true, talker = null, talkerId = null, hdNow = txOpus) }
     }
 
     private fun txFrame(pcm: ShortArray) {
         val g = s.group
         if (!s.transmitting || g == null) return
         val key = channelKey(g, s.tunedCh) ?: return
-        val a = Adpcm.encode(pcm, enc)
+        var flags = 0
+        var a: ByteArray? = null
+        if (txOpus) {
+            a = opus!!.encode(pcm)
+            if (a == null) { txOpus = false; update { copy(hdNow = false) } } // encoder died: carry on with the standard codec
+            else if (a.isEmpty() || a[0].toInt() == 0) return                 // encoder still buffering
+            else flags = 2
+        }
+        if (a == null) a = Adpcm.encode(pcm, enc)
         val seq = txSeq++ and 0xffff
-        sendSealed(T_AUDIO, g.id, s.tunedCh, key, byteArrayOf((seq shr 8).toByte(), seq.toByte(), 0) + a, chanTopic(g.id, s.tunedCh))
+        sendSealed(T_AUDIO, g.id, s.tunedCh, key, byteArrayOf((seq shr 8).toByte(), seq.toByte(), flags.toByte()) + a, chanTopic(g.id, s.tunedCh))
     }
 
     fun pttUp() = run { pttUpNow() }
@@ -394,7 +415,7 @@ class RadioCore(
     private fun pttUpNow() {
         if (!s.transmitting) return
         audio.stopCapture()
-        update { copy(transmitting = false) }
+        update { copy(transmitting = false, hdNow = false) }
         val g = s.group ?: return
         val key = channelKey(g, s.tunedCh) ?: return
         val seq = txSeq++ and 0xffff
@@ -497,14 +518,16 @@ class RadioCore(
         val now = clock()
         if (s.talkerId != null && s.talkerId != sender && now - lastRxAt < 800) return // someone else holds the channel
         val seq = ((plain[0].toInt() and 0xff) shl 8) or (plain[1].toInt() and 0xff)
-        if (s.talkerId != sender) { rxSeq = -1; update { copy(talkerId = sender, talker = nameOf(sender)) } }
+        val isOpus = plain[2].toInt() and 2 != 0
+        if (isOpus && !s.hdOk) return
+        if (s.talkerId != sender) { rxSeq = -1; if (isOpus) opus?.resetDec(); update { copy(talkerId = sender, talker = nameOf(sender), hdNow = isOpus) } }
         else if (rxSeq >= 0 && ((seq - rxSeq) and 0xffff) > 0x8000) return // late duplicate
         rxSeq = seq
         lastRxAt = now
         if (plain[2].toInt() and 1 != 0) {
             audio.endOfTalk(s.beep)
-            update { copy(talkerId = null, talker = null) }
-        } else audio.play(Adpcm.decode(plain, 3, plain.size - 3))
+            update { copy(talkerId = null, talker = null, hdNow = false) }
+        } else audio.play(if (isOpus) opus!!.decode(plain, 3, plain.size - 3) else Adpcm.decode(plain, 3, plain.size - 3))
     }
 
     private fun onPresence(p: Packet) {
@@ -513,6 +536,7 @@ class RadioCore(
         val o = JSONObject(String(Crypto.open(unb64(g.key), p.body, 0, p.aad()) ?: return))
         val uid = p.sender.hex()
         val ch = o.getInt("ch")
+        opCaps["$gid/$uid"] = o.optInt("op") == 1
         val la = o.optJSONArray("locks")
         val locks = if (ch < 0 || la == null) emptyList() else (0 until la.length()).map { la.getJSONObject(it) }.map { l ->
             val a = l.getJSONArray("allow")
@@ -611,7 +635,7 @@ class RadioCore(
         val now = clock()
         var st = s
         if (st.messages.any { it.expires <= now }) st = st.copy(messages = st.messages.filter { it.expires > now })
-        if (st.talkerId != null && now - lastRxAt > 1000) { st = st.copy(talkerId = null, talker = null); audio.endOfTalk(false) }
+        if (st.talkerId != null && now - lastRxAt > 1000) { st = st.copy(talkerId = null, talker = null, hdNow = false); audio.endOfTalk(false) }
         if (st.notice != null && now - st.noticeAt > 3500) st = st.copy(notice = null)
         val me = st.me?.id
         var lockChange = false
