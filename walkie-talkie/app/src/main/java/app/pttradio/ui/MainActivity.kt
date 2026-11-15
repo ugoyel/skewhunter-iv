@@ -244,7 +244,7 @@ class MainActivity : ComponentActivity(), Actions {
         }
     }
     override fun stopSos() { app.sos.stop() }
-    override fun setSosAnyone(on: Boolean) { app.prefs.edit().putBoolean("sosAnyone", on).apply(); sosAnyone = on }
+    override fun setSosAnyone(on: Boolean) { app.prefs.edit().putBoolean("sosAnyone", on).apply(); sosOpen = on }
     override fun dismissAlert(key: String) { app.sos.dismiss(key) }
 
     private val field get() = (app.prefs.getString("fieldSsid", null) ?: "PTT-FIELD") to (app.prefs.getString("fieldPass", null) ?: "pttradio-field")
@@ -295,7 +295,7 @@ class MainActivity : ComponentActivity(), Actions {
         catch (e: Exception) { warning = "No maps app is installed to show this position." }
     }
     private var btn by mutableStateOf(ButtonCfg())
-    private var sosAnyone by mutableStateOf(false)
+    private var sosOpen by mutableStateOf(false)
 
     private fun refreshButton(learning: Boolean = false) {
         btn = ButtonCfg(app.pttKey(), learning, app.pttGroup())
@@ -345,7 +345,7 @@ class MainActivity : ComponentActivity(), Actions {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         serverUrl = app.prefs.getString("server", "") ?: ""
-        sosAnyone = app.prefs.getBoolean("sosAnyone", false)
+        sosOpen = app.prefs.getBoolean("sosAnyone", false)
         if (core.state.value.me != null || app.prefs.getString("me", null) != null) {
             if (!app.prefs.getBoolean("setupDone", false)) scr = Scr.SETUP
         }
@@ -358,7 +358,7 @@ class MainActivity : ComponentActivity(), Actions {
             val sending by app.sos.sending.collectAsState()
             LaunchedEffect(s.me?.id) { if (s.me != null) RadioService.start(this@MainActivity) }
             BackHandler(enabled = s.me != null && scr != Scr.HOME) { scr = Scr.HOME }
-            AppRoot(s, perms, near, alerts, sending, field, sosAnyone, core.level, auth.enabled, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
+            AppRoot(s, perms, near, alerts, sending, field, sosOpen, core.level, auth.enabled, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
             warning?.let { w ->
                 Sheet("Warning", { warning = null }) {
                     Body(w, size = 14.sp)
