@@ -227,7 +227,7 @@ class MainActivity : ComponentActivity(), Actions {
     private fun handle(i: Intent?) {
         val gid = i?.getStringExtra("gid")
         if (gid != null) { core.tune(gid, i.getIntExtra("ch", 0).coerceAtLeast(0)); scr = Scr.RADIO }
-        else if (i?.hasExtra("ch") == true) tab = 1
+        else if (i?.hasExtra("ch") == true) tab = 0
         i?.removeExtra("gid"); i?.removeExtra("ch")
     }
 

@@ -231,15 +231,16 @@ fun Home(s: RadioState, p: Perms, near: NearbyInfo, a: Actions, now: Long, tab: 
             WarningBox("Permissions missing. The radio won't work properly. Tap to fix.") { go(Scr.SETUP) }
         }
         Box(Modifier.weight(1f)) {
-            if (tab == 0) Contacts(s, near, a, now) { go(Scr.RADIO) } else Groups(s, a, { onTab(0) }) { gid, ch -> a.tune(gid, ch); go(Scr.RADIO) }
+            // Groups is the first page and the one the app opens on; Contacts is the second.
+            if (tab == 0) Groups(s, a, { onTab(1) }) { gid, ch -> a.tune(gid, ch); go(Scr.RADIO) } else Contacts(s, near, a, now) { go(Scr.RADIO) }
         }
         Row(Modifier.fillMaxWidth().background(C.panel).border(1.dp, C.line)) {
-            listOf("Contacts", "Groups").forEachIndexed { i, t ->
+            listOf("Groups", "Contacts").forEachIndexed { i, t ->
                 Column(Modifier.weight(1f).clickable { onTab(i) }.padding(top = 0.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(Modifier.fillMaxWidth().height(2.dp).background(if (tab == i) C.amber else Color.Transparent))
                     Row(Modifier.height(52.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Label(t, color = if (tab == i) C.amber else C.dim, size = 12.sp)
-                        if (i == 1 && s.invites.isNotEmpty()) Dot(C.red, 7.dp)
+                        if (i == 0 && s.invites.isNotEmpty()) Dot(C.red, 7.dp)
                     }
                 }
             }
