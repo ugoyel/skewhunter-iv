@@ -70,6 +70,7 @@ class Node(bus: Bus, name: String, relays: Boolean = false) {
     val core = RadioCore(kv, audio).also { it.onEvent = { e -> events.add(e) }; it.start(); it.attach(t); it.setName(name) }
     val s get() = core.state.value
     val id get() = s.me!!.id
+    init { await("identity") { s.me != null } }
 }
 
 fun await(what: String, ms: Long = 4000, cond: () -> Boolean) {
