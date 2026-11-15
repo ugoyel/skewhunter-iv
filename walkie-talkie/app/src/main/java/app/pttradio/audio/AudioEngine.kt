@@ -106,35 +106,70 @@ class AudioEngine(ctx: Context) : AudioIO {
         return AudioTrack.Builder()
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
             .setAudioFormat(AudioFormat.Builder().setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
-            .setBufferSizeInBytes(maxOf(min, frame * 8))
+            .setBufferSizeInBytes(maxOf(min, frame * 2 * 10))    // room for 600 ms
             .setTransferMode(AudioTrack.MODE_STREAM)
             .setSessionId(AudioManager.AUDIO_SESSION_ID_GENERATE)
             .build()
     }
 
+    /**
+     * Playback with a jitter buffer. Voice over the internet arrives unevenly (bursts, late packets), so each
+     * transmission starts only once ~240 ms are buffered; if the buffer ever runs dry it is refilled before playing
+     * on, instead of chopping. Latency is capped by skipping audio when a burst piles up.
+     */
     private fun playLoop() {
         var track: AudioTrack? = null
         while (true) {
-            var cur: ShortArray? = try { queue.take() } catch (e: InterruptedException) { return }
+            val first = try { queue.take() } catch (e: InterruptedException) { return }
             try {
                 wake.acquire(20_000)
                 val t = track ?: newTrack().also { track = it }
-                // Tiny jitter buffer: wait for a second frame before starting so playback does not stutter.
-                var waited = 0
-                while (queue.isEmpty() && waited < 180) { Thread.sleep(20); waited += 20 }
+                fill(first)
                 t.play()
-                while (cur != null) {
-                    t.write(cur, 0, cur.size)
+                var drainAt = writeAll(t, System.currentTimeMillis())
+                while (true) {
+                    while (queue.size > MAX_QUEUE) queue.poll()          // a burst piled up: catch up
+                    val f = queue.poll(900, TimeUnit.MILLISECONDS) ?: break // nothing for a while: the talk is over
+                    val now = System.currentTimeMillis()
+                    if (now > drainAt + 20) fill(f) else pending.add(f)     // ran dry: buffer up again before going on
+                    drainAt = writeAll(t, maxOf(now, drainAt))
                     wake.acquire(20_000)
-                    cur = queue.poll(450, TimeUnit.MILLISECONDS)
                 }
                 t.pause(); t.flush()
             } catch (e: Exception) {
                 try { track?.release() } catch (x: Exception) { }
                 track = null
             } finally {
+                pending.clear()
                 if (wake.isHeld) try { wake.release() } catch (e: Exception) { }
             }
         }
+    }
+
+    private val pending = ArrayList<ShortArray>()
+
+    /** Collects up to PREBUFFER frames (or waits at most PREBUFFER_MS) starting with [f]. */
+    private fun fill(f: ShortArray) {
+        pending.add(f)
+        val until = System.currentTimeMillis() + PREBUFFER_MS
+        while (pending.size < PREBUFFER) {
+            val left = until - System.currentTimeMillis()
+            if (left <= 0) break
+            pending.add(queue.poll(left, TimeUnit.MILLISECONDS) ?: break)
+        }
+    }
+
+    /** Writes what is pending; returns when the track will have played all of it. */
+    private fun writeAll(t: AudioTrack, from: Long): Long {
+        var at = from
+        for (p in pending) { t.write(p, 0, p.size); at += p.size * 1000L / rate }
+        pending.clear()
+        return at
+    }
+
+    companion object {
+        const val PREBUFFER = 4          // frames of 60 ms
+        const val PREBUFFER_MS = 300L
+        const val MAX_QUEUE = 12
     }
 }

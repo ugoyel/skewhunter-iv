@@ -1,7 +1,7 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
     <!-- antenna -->
-    <path android:fillColor="#FFB020" android:pathData="M43,24h5v18h-5z" />
+    <path android:fillColor="#21C063" android:pathData="M43,24h5v18h-5z" />
     <!-- body -->
     <path android:fillColor="#E8EAED" android:pathData="M42,40h24a4,4 0,0 1,4 4v36a4,4 0,0 1,-4 4h-24a4,4 0,0 1,-4 -4v-36a4,4 0,0 1,4 -4z" />
     <!-- display -->
@@ -9,5 +9,5 @@
     <!-- speaker grille -->
     <path android:fillColor="#0B0D0F" android:pathData="M44,62h20v2.5h-20zM44,67.5h20v2.5h-20zM44,73h20v2.5h-20z" />
     <!-- side PTT key -->
-    <path android:fillColor="#FFB020" android:pathData="M33,50h4v16h-4z" />
+    <path android:fillColor="#21C063" android:pathData="M33,50h4v16h-4z" />
 </vector>

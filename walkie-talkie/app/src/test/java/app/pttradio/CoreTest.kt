@@ -350,6 +350,27 @@ class CoreTest {
         assertEquals(0, m.audio.played.size)
     }
 
+    @Test fun directChatsAndMessagesFromChatsThatAreNotOpen() {
+        val (a, b, c) = trio()
+        val ops = b.s.group!!.id
+        a.core.openDirect(b.id)
+        await("direct open on a") { a.s.group?.direct == true }
+        await("direct appears on b without asking") { b.s.groups.any { it.direct } }
+        assertEquals(ops, b.s.tunedGroup)                       // b is not pulled away from what it was doing
+        val dm = b.s.groups.first { it.direct }
+        assertEquals("Alpha", b.s.titleOf(dm))
+        Thread.sleep(250)
+        a.core.sendText("psst")
+        await("unread on b") { b.s.unread[dm.id] == 1 && b.s.inbox["${dm.id}/0"]?.any { it.text == "psst" } == true }
+        assertTrue(b.s.messages.none { it.text == "psst" })
+        assertTrue(c.s.groups.none { it.direct })
+        b.core.tune(dm.id, 0)
+        await("opened") { b.s.messages.any { it.text == "psst" } && b.s.unread[dm.id] == null }
+        assertTrue(b.s.recent.any { it.uid == a.id && it.gid == dm.id })
+        a.core.renameGroup(ops, "Team")
+        await("renamed for everyone") { c.s.groups.first { it.id == ops }.name == "Team" }
+    }
+
     @Test fun stateSurvivesRestartButMessagesDoNot() {
         val (a, b, _) = trio()
         a.core.sendText("secret")

@@ -58,10 +58,7 @@ class PttWidget : AppWidgetProvider() {
         if (i.action == ACTION_PINNED) {
             val id = i.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
             val gid = i.getStringExtra("gid")
-            if (id != AppWidgetManager.INVALID_APPWIDGET_ID && gid != null) {
-                prefs(c).edit().putString("w_$id", gid).apply()
-                render(c, AppWidgetManager.getInstance(c), id)
-            }
+            if (id != AppWidgetManager.INVALID_APPWIDGET_ID && gid != null) assign(c, id, gid)
             return
         }
         super.onReceive(c, i)
@@ -75,19 +72,40 @@ class PttWidget : AppWidgetProvider() {
         const val ACTION_PINNED = "app.pttradio.WIDGET_PINNED"
         private fun prefs(c: Context) = c.getSharedPreferences("radio", Context.MODE_PRIVATE)
 
+        /** The chat's name as the person sees it: the group name, or the other person's name for a one-to-one chat. */
         private fun groupName(c: Context, gid: String?): String? {
             if (gid == null) return null
-            (c.applicationContext as App).core.state.value.groups.firstOrNull { it.id == gid }?.let { return it.name }
+            val st = (c.applicationContext as App).core.state.value
+            st.groups.firstOrNull { it.id == gid }?.let { return st.titleOf(it) }
             return try {
+                val me = org.json.JSONObject(prefs(c).getString("me", "{}")).optString("id")
                 val a = JSONArray(prefs(c).getString("groups", "[]"))
-                (0 until a.length()).map { a.getJSONObject(it) }.firstOrNull { it.getString("id") == gid }?.getString("name")
+                val o = (0 until a.length()).map { a.getJSONObject(it) }.firstOrNull { it.getString("id") == gid } ?: return null
+                if (o.optBoolean("direct")) {
+                    val m = o.getJSONArray("members")
+                    (0 until m.length()).map { m.getJSONObject(it) }.firstOrNull { it.getString("id") != me }?.getString("name") ?: o.getString("name")
+                } else o.getString("name")
             } catch (e: Exception) { null }
+        }
+
+        /** Links a widget to a chat and redraws it. */
+        fun assign(c: Context, id: Int, gid: String) {
+            prefs(c).edit().putString("w_$id", gid).apply()
+            render(c, AppWidgetManager.getInstance(c), id)
+        }
+
+        fun isAssigned(c: Context, id: Int) = prefs(c).getString("w_$id", null) != null
+
+        /** Redraw every widget, e.g. after a group was renamed. */
+        fun refreshAll(c: Context) {
+            val m = AppWidgetManager.getInstance(c)
+            m.getAppWidgetIds(ComponentName(c, PttWidget::class.java)).forEach { render(c, m, it) }
         }
 
         fun render(c: Context, m: AppWidgetManager, id: Int) {
             val gid = prefs(c).getString("w_$id", null)
             val v = RemoteViews(c.packageName, R.layout.widget_ptt)
-            v.setTextViewText(R.id.widget_group, groupName(c, gid) ?: "Radio")
+            v.setTextViewText(R.id.widget_group, groupName(c, gid) ?: "Choose chat")
             val open = Intent(c, QuickTalkActivity::class.java).putExtra("gid", gid).putExtra("start", true)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             v.setOnClickPendingIntent(R.id.widget_root, PendingIntent.getActivity(c, id, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
@@ -147,8 +165,9 @@ class QuickTalkActivity : ComponentActivity() {
                     .clickable(remember { MutableInteractionSource() }, null) {}.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text(g?.name ?: "No group", color = C.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                            Label(if (g == null) "Open the app to pick a group" else chName(s.tunedCh), color = C.amber, size = 11.sp)
+                            Text(g?.let { s.titleOf(it) } ?: "No chat", color = C.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                            if (g == null) Label("Open the app to pick a chat", color = C.dim, size = 11.sp)
+                            else if (s.tunedCh != 0) Label("Channel ${s.tunedCh}", color = C.accent, size = 11.sp)
                         }
                         val (col, text) = when {
                             s.recording -> C.amber to "No link"
@@ -163,7 +182,7 @@ class QuickTalkActivity : ComponentActivity() {
                     if (g == null) Btn("Open PTT Radio", Modifier.fillMaxWidth(), primary = true) { startActivity(Intent(this@QuickTalkActivity, MainActivity::class.java)); finish() }
                     else PttKey(
                         s.transmitting, s.talker != null, Modifier.fillMaxWidth(), app.core.level, s.recording,
-                        title = when { closing -> "MIC CLOSED"; s.recording -> "RECORDING"; s.transmitting -> "TRANSMITTING"; s.talker != null -> "RECEIVING"; else -> "TAP TO TALK" },
+                        title = when { closing -> "MIC\nCLOSED"; s.recording -> "RECORDING"; s.transmitting -> "TALKING"; s.talker != null -> "LISTENING"; else -> "TAP\nTO TALK" },
                         hint = when {
                             closing -> "No tap within 5 s"
                             armedUntil > 0 && s.transmitting -> "Tap now to keep talking · $left"
@@ -209,4 +228,40 @@ class QuickTalkActivity : ComponentActivity() {
     override fun onResume() { super.onResume(); app.onScreen.value = true; RadioService.start(this, mic = true) }
     override fun onPause() { app.core.pttUp(); app.onScreen.value = false; super.onPause() }
     override fun onStop() { super.onStop(); finish() }
+}
+
+/**
+ * Shown when a widget is added from the home screen's widget list: asks which group or person the widget is for.
+ * Widgets placed from inside the app already know their chat and skip this.
+ */
+class WidgetConfigActivity : ComponentActivity() {
+    private val app get() = application as App
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val id = intent?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID) ?: AppWidgetManager.INVALID_APPWIDGET_ID
+        setResult(RESULT_CANCELED, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id))
+        if (id == AppWidgetManager.INVALID_APPWIDGET_ID) { finish(); return }
+        if (PttWidget.isAssigned(this, id)) { done(id); return }
+        if (app.prefs.getString("me", null) == null) { startActivity(Intent(this, MainActivity::class.java)); finish(); return }
+        setContent {
+            val s by app.core.state.collectAsState()
+            val near by app.nearby.info.collectAsState()
+            val now by produceState(System.currentTimeMillis()) { while (true) { delay(1000); value = System.currentTimeMillis() } }
+            Column(Modifier.fillMaxSize().background(C.bg)) {
+                Text("Widget for which chat?", Modifier.padding(start = 18.dp, top = 18.dp, bottom = 4.dp), color = C.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text("Tapping the widget starts talking to this group or person.", Modifier.padding(start = 18.dp, bottom = 10.dp), color = C.dim, fontSize = 13.sp)
+                if (s.groups.isEmpty() && onAppNow(s, now).isEmpty())
+                    Text("No chats yet. Open PTT Radio, start a chat, then add the widget again.", Modifier.padding(18.dp), color = C.dim, fontSize = 14.sp)
+                ChatPicker(s, near, now,
+                    onChat = { g -> PttWidget.assign(this@WidgetConfigActivity, id, g.id); done(id) },
+                    onPerson = { u -> app.core.openDirect(u.id, tune = false) { gid -> runOnUiThread { PttWidget.assign(this@WidgetConfigActivity, id, gid); done(id) } } })
+            }
+        }
+    }
+
+    private fun done(id: Int) {
+        setResult(RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id))
+        finish()
+    }
 }

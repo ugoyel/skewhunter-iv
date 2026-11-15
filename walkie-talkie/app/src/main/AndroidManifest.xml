@@ -60,6 +60,16 @@
             android:taskAffinity=""
             android:theme="@style/Theme.Radio.Quick" />
 
+        <activity
+            android:name=".ui.WidgetConfigActivity"
+            android:exported="true"
+            android:label="Choose a chat"
+            android:theme="@style/Theme.Radio">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
         <receiver android:name=".ui.PttWidget" android:exported="true" android:label="@string/widget_label">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />

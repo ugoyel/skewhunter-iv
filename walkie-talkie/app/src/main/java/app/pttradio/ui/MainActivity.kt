@@ -204,6 +204,9 @@ class MainActivity : ComponentActivity(), Actions {
         for (i in tries) try { startActivity(i); return } catch (e: Exception) { }
     }
 
+    override fun openDirect(uid: String) { core.openDirect(uid) }
+    override fun renameGroup(gid: String, name: String) { core.renameGroup(gid, name) }
+
     override fun reconnect() {
         core.note("RECONNECTING")
         app.nearby.restart()

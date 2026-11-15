@@ -37,18 +37,39 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 
+/** Dark, chat-app style palette: near-black background, green accent, red only for transmitting and SOS. */
 object C {
-    val bg = Color(0xFF0B0D0F)
-    val panel = Color(0xFF14171A)
-    val raised = Color(0xFF1C2024)
-    val line = Color(0xFF2A2F35)
-    val text = Color(0xFFE8EAED)
-    val dim = Color(0xFF8A929B)
-    val faint = Color(0xFF596069)
+    val bg = Color(0xFF0C1013)
+    val panel = Color(0xFF161C20)
+    val raised = Color(0xFF20282D)
+    val line = Color(0xFF263036)
+    val text = Color(0xFFE9EDEF)
+    val dim = Color(0xFF8696A0)
+    val faint = Color(0xFF5E6C75)
+    val accent = Color(0xFF21C063)
     val amber = Color(0xFFFFB020)
-    val green = Color(0xFF34D17B)
+    val green = Color(0xFF21C063)
+    val blue = Color(0xFF53BDEB)
     val red = Color(0xFFFF4B3E)
     val lcd = Color(0xFF0E1210)
+    val mine = Color(0xFF134D37)
+    val theirs = Color(0xFF1F2C33)
+}
+
+private val avatarColors = listOf(0xFF2F7D6D, 0xFF6A4FB3, 0xFFB5603B, 0xFF3A6EA5, 0xFF9C4A7A, 0xFF5C8A2E, 0xFFA8842D, 0xFF4A5D8F).map { Color(it) }
+
+fun initials(name: String): String =
+    name.trim().split(Regex("[\\s·_-]+")).filter { it.isNotEmpty() }.take(2).joinToString("") { it.first().uppercase() }.ifEmpty { "?" }
+
+/** Round avatar with initials; [dot] adds a presence dot (green online, blue nearby). */
+@Composable
+fun Avatar(name: String, key: String, size: Dp = 50.dp, dot: Color? = null, group: Boolean = false) {
+    Box(Modifier.size(size)) {
+        Box(Modifier.size(size).clip(CircleShape).background(avatarColors[(key.hashCode() and 0x7fffffff) % avatarColors.size]), contentAlignment = Alignment.Center) {
+            Text(if (group) initials(name).take(1) + "#" else initials(name), color = Color.White, fontSize = (size.value * 0.36f).sp, fontWeight = FontWeight.SemiBold)
+        }
+        if (dot != null) Box(Modifier.align(Alignment.BottomEnd).size(size * 0.28f).clip(CircleShape).background(C.bg).padding(2.dp).clip(CircleShape).background(dot))
+    }
 }
 
 val Mono = FontFamily.Monospace
@@ -65,13 +86,13 @@ fun Body(text: String, modifier: Modifier = Modifier, color: Color = C.text, siz
 fun Btn(text: String, modifier: Modifier = Modifier, primary: Boolean = false, danger: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
     val fg = when { !enabled -> C.faint; primary -> C.bg; danger -> C.red; else -> C.text }
     Box(
-        modifier.clip(RoundedCornerShape(6.dp))
-            .background(if (primary && enabled) C.amber else C.raised)
-            .border(1.dp, if (primary && enabled) C.amber else C.line, RoundedCornerShape(6.dp))
+        modifier.clip(RoundedCornerShape(22.dp))
+            .background(if (primary && enabled) C.accent else C.raised)
+            .border(1.dp, if (primary && enabled) C.accent else C.line, RoundedCornerShape(22.dp))
             .clickable(enabled = enabled, onClick = onClick)
             .heightIn(min = 44.dp).padding(horizontal = 16.dp),
         contentAlignment = Alignment.Center
-    ) { Text(text.uppercase(), color = fg, fontSize = 12.sp, letterSpacing = 1.4.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
+    ) { Text(text, color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1) }
 }
 
 @Composable
@@ -80,13 +101,13 @@ fun Field(value: String, onChange: (String) -> Unit, hint: String, modifier: Mod
         value, onChange, modifier,
         singleLine = true,
         textStyle = TextStyle(color = C.text, fontSize = 15.sp),
-        cursorBrush = SolidColor(C.amber),
+        cursorBrush = SolidColor(C.accent),
         keyboardOptions = KeyboardOptions(
             capitalization = if (caps) KeyboardCapitalization.Characters else KeyboardCapitalization.Sentences,
             imeAction = if (onDone != null) ImeAction.Done else ImeAction.Default),
         keyboardActions = KeyboardActions(onDone = { onDone?.invoke() }),
         decorationBox = { inner ->
-            Box(Modifier.clip(RoundedCornerShape(6.dp)).background(C.panel).border(1.dp, C.line, RoundedCornerShape(6.dp))
+            Box(Modifier.clip(RoundedCornerShape(22.dp)).background(C.panel).border(1.dp, C.line, RoundedCornerShape(22.dp))
                 .heightIn(min = 44.dp).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
                 if (value.isEmpty()) Text(hint, color = C.faint, fontSize = 15.sp, maxLines = 1)
                 inner()
@@ -100,10 +121,10 @@ fun Dot(color: Color, size: Dp = 8.dp) = Box(Modifier.size(size).clip(CircleShap
 
 @Composable
 fun Segments(options: List<Pair<String, String>>, selected: String, modifier: Modifier = Modifier, onSelect: (String) -> Unit) {
-    Row(modifier.clip(RoundedCornerShape(6.dp)).border(1.dp, C.line, RoundedCornerShape(6.dp)).background(C.panel)) {
+    Row(modifier.clip(RoundedCornerShape(22.dp)).border(1.dp, C.line, RoundedCornerShape(22.dp)).background(C.panel)) {
         options.forEach { (key, label) ->
             val on = key == selected
-            Box(Modifier.weight(1f).background(if (on) C.amber else Color.Transparent).clickable { onSelect(key) }.heightIn(min = 40.dp),
+            Box(Modifier.weight(1f).background(if (on) C.accent else Color.Transparent).clickable { onSelect(key) }.heightIn(min = 40.dp),
                 contentAlignment = Alignment.Center) {
                 Text(label.uppercase(), color = if (on) C.bg else C.dim, fontSize = 11.sp, letterSpacing = 1.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             }
@@ -114,9 +135,9 @@ fun Segments(options: List<Pair<String, String>>, selected: String, modifier: Mo
 @Composable
 fun Sheet(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     Dialog(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(C.panel).border(1.dp, C.line, RoundedCornerShape(10.dp)).padding(18.dp),
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(C.panel).border(1.dp, C.line, RoundedCornerShape(16.dp)).padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Label(title, color = C.amber, size = 12.sp)
+            Label(title, color = C.accent, size = 12.sp)
             content()
         }
     }

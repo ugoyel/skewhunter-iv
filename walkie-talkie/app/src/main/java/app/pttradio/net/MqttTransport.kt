@@ -87,6 +87,8 @@ class MqttTransport(
                 keepAliveInterval = 120
                 connectionTimeout = 15
                 maxInflight = 500
+                // send each voice packet the moment it exists instead of letting TCP bunch them up (Nagle)
+                if (uris.all { it.startsWith("ssl://") }) socketFactory = NoDelaySsl()
                 setWill("${RadioCore.P}/u/$uid", profile(false), 1, true)
             }
             c.connect(o, null, object : IMqttActionListener {
@@ -158,4 +160,20 @@ class MqttTransport(
     }
 
     override fun relay(raw: ByteArray, src: String?) {}
+}
+
+/** Default TLS sockets with TCP_NODELAY switched on, so small voice packets are not held back and sent in bursts. */
+private class NoDelaySsl(private val d: javax.net.ssl.SSLSocketFactory = javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory) :
+    javax.net.ssl.SSLSocketFactory() {
+    private fun nd(s: java.net.Socket): java.net.Socket { try { s.tcpNoDelay = true } catch (e: Exception) { }; return s }
+    override fun getDefaultCipherSuites(): Array<String> = d.defaultCipherSuites
+    override fun getSupportedCipherSuites(): Array<String> = d.supportedCipherSuites
+    override fun createSocket(s: java.net.Socket?, host: String?, port: Int, autoClose: Boolean): java.net.Socket {
+        s?.let { nd(it) }; return nd(d.createSocket(s, host, port, autoClose))
+    }
+    override fun createSocket(): java.net.Socket = nd(d.createSocket())
+    override fun createSocket(host: String?, port: Int): java.net.Socket = nd(d.createSocket(host, port))
+    override fun createSocket(host: String?, port: Int, la: java.net.InetAddress?, lp: Int): java.net.Socket = nd(d.createSocket(host, port, la, lp))
+    override fun createSocket(host: java.net.InetAddress?, port: Int): java.net.Socket = nd(d.createSocket(host, port))
+    override fun createSocket(a: java.net.InetAddress?, port: Int, la: java.net.InetAddress?, lp: Int): java.net.Socket = nd(d.createSocket(a, port, la, lp))
 }

@@ -145,7 +145,11 @@ class Packet(val type: Int, val ttl: Int, val msgId: Long, val scope: Long, val 
 /** [via] is the link this phone was last heard on directly: "nearby" (Bluetooth / Wi-Fi Direct) or "lan" (field Wi-Fi). */
 data class User(val id: String, val name: String, val pub: String, val online: Boolean = false, val nearbyAt: Long = 0, val ts: Long = 0, val via: String = "")
 data class Member(val id: String, val name: String, val pub: String, val joined: Boolean)
-data class Group(val id: String, val name: String, val key: String, val owner: String, val members: List<Member>)
+/** [direct] = a one-to-one chat: shown under the other person's name. */
+data class Group(val id: String, val name: String, val key: String, val owner: String, val members: List<Member>, val direct: Boolean = false)
+
+/** Who did what in which chat, and when. Kept without any content: used for the Recent page and to sort chats by use. */
+data class Recent(val uid: String, val gid: String, val kind: String, val at: Long, val mine: Boolean)
 data class Invite(val group: Group, val fromId: String, val fromName: String)
 data class Lock(val ch: Int, val by: String, val allow: Set<String>)
 data class Pres(val ch: Int, val at: Long)
@@ -187,10 +191,22 @@ data class RadioState(
     val hd: Boolean = true,
     val hdOk: Boolean = false,
     val hdNow: Boolean = false,
+    /** Messages of the chats that are not open, by "gid/ch", and how many arrived unseen per chat. Memory only. */
+    val inbox: Map<String, List<TextMsg>> = emptyMap(),
+    val unread: Map<String, Int> = emptyMap(),
+    val recent: List<Recent> = emptyList(),
+    /** Chat the current incoming voice belongs to (it can be a chat that is not open). */
+    val talkGid: String? = null,
     /** Talking with no link: the voice is kept in memory and sent when a link is back. */
     val recording: Boolean = false,
 ) {
     val group: Group? get() = groups.firstOrNull { it.id == tunedGroup }
+    /** A group's name, or for a one-to-one chat the other person's name. */
+    fun titleOf(g: Group): String = if (g.direct) g.members.firstOrNull { it.id != me?.id }?.let { m -> users[m.id]?.name ?: m.name } ?: g.name else g.name
+    fun directWith(uid: String): Group? = groups.firstOrNull { g -> g.direct && g.members.size == 2 && g.members.any { it.id == uid } }
+    fun otherIn(g: Group): String? = if (g.direct) g.members.firstOrNull { it.id != me?.id }?.id else null
+    /** Last time anything happened in this chat (talk, message, opened). */
+    fun lastAt(gid: String): Long = recent.firstOrNull { it.gid == gid }?.at ?: 0
     fun lockOf(gid: String?, ch: Int): Lock? = locks[gid]?.firstOrNull { it.ch == ch }
     fun occupants(gid: String, ch: Int): List<String> = presence[gid]?.filter { it.value.ch == ch }?.keys?.toList() ?: emptyList()
     fun nameOf(id: String): String =
@@ -201,7 +217,9 @@ sealed class Event {
     data class InviteReceived(val invite: Invite) : Event()
     data class Summoned(val gid: String, val groupName: String, val ch: Int, val by: String, val autoTuned: Boolean) : Event()
     /** Someone else's text, picture, location or delayed voice message arrived. */
-    data class Message(val from: String) : Event()
+    data class Message(val from: String, val gid: String = "", val chat: String = "", val text: String = "") : Event()
+    /** Someone started talking in one of this phone's chats. */
+    data class Talk(val gid: String, val chat: String, val from: String) : Event()
 }
 
 fun chName(ch: Int) = if (ch == 0) "MAIN" else "CH " + ch.toString().padStart(2, '0')
@@ -209,11 +227,11 @@ fun chName(ch: Int) = if (ch == 0) "MAIN" else "CH " + ch.toString().padStart(2,
 fun Member.json(): JSONObject = JSONObject().put("id", id).put("name", name).put("pub", pub).put("joined", joined)
 fun memberOf(o: JSONObject) = Member(o.getString("id"), o.getString("name").take(24), o.getString("pub"), o.optBoolean("joined"))
 fun Group.json(): JSONObject = JSONObject().put("id", id).put("name", name).put("key", key).put("owner", owner)
-    .put("members", JSONArray().also { a -> members.forEach { a.put(it.json()) } })
+    .put("members", JSONArray().also { a -> members.forEach { a.put(it.json()) } }).also { if (direct) it.put("direct", true) }
 fun groupOf(o: JSONObject): Group {
     val a = o.getJSONArray("members")
     val g = Group(o.getString("id"), o.getString("name").take(24), o.getString("key"), o.getString("owner"),
-        (0 until a.length()).map { memberOf(a.getJSONObject(it)) })
+        (0 until a.length()).map { memberOf(a.getJSONObject(it)) }, o.optBoolean("direct"))
     require(isId(g.id) && g.members.all { isId(it.id) } && unb64(g.key).size == 32)
     return g
 }

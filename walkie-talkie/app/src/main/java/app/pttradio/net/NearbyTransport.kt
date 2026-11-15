@@ -146,6 +146,8 @@ class NearbyTransport(private val ctx: Context) : Transport {
     private val refresh = object : Runnable { override fun run() { if (running) { watchdog(); publish(); main.postDelayed(this, 2000) } } }
     @Volatile var running = false; private set
     @Volatile private var myId = ""
+    /** Set by the app: true while the phone has internet. */
+    @Volatile var internetUp = false
     @Volatile private var error: String? = null
     private var advertising = false
     private var discovering = false
@@ -286,7 +288,10 @@ class NearbyTransport(private val ctx: Context) : Transport {
 
     private fun request(endpoint: String) {
         if (!running || endpoint in peers || !found.containsKey(endpoint) || pending.putIfAbsent(endpoint, System.currentTimeMillis()) != null) return
-        client.requestConnection(myId, endpoint, lifecycle).addOnFailureListener { e ->
+        // While there is internet, never let the link upgrade switch the phone's Wi-Fi over to a direct hotspot:
+        // that briefly cuts the internet connection, which is heard as dropouts.
+        val opts = com.google.android.gms.nearby.connection.ConnectionOptions.Builder().setDisruptiveUpgrade(!internetUp).build()
+        client.requestConnection(myId, endpoint, lifecycle, opts).addOnFailureListener { e ->
             pending.remove(endpoint)
             when ((e as? ApiException)?.statusCode) {
                 ConnectionsStatusCodes.STATUS_ALREADY_CONNECTED_TO_ENDPOINT -> { peers.add(endpoint); publish(); listener?.onLink(this) }

@@ -38,6 +38,8 @@ import app.pttradio.net.Sos
 import app.pttradio.net.SosAlert
 import app.pttradio.net.SosCodes
 import app.pttradio.ui.MainActivity
+import app.pttradio.ui.PttWidget
+import app.pttradio.ui.QuickTalkActivity
 import org.eclipse.paho.client.mqttv3.MqttPingSender
 import org.eclipse.paho.client.mqttv3.internal.ClientComms
 import kotlinx.coroutines.CoroutineScope
@@ -93,6 +95,9 @@ class App : Application() {
         }, { Notifier.sos(this, it) })
         // emergency alerts are listened for whenever the local radios run
         scope.launch { nearby.info.map { it.running }.distinctUntilChanged().collect { sos.listen(it) } }
+        scope.launch { core.state.map { it.netUp }.distinctUntilChanged().collect { nearby.internetUp = it } }
+        // widgets show chat names: redraw them when groups are renamed, joined or removed
+        scope.launch { core.state.map { st -> st.groups.map { st.titleOf(it) } }.distinctUntilChanged().collect { try { PttWidget.refreshAll(this@App) } catch (e: Exception) { } } }
 
         getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) { mqtt.kick() }
@@ -203,11 +208,16 @@ object Notifier {
     private const val STANDBY = "standby"
     private const val ALERT = "alert"
     private const val SOS = "sos"
+    private const val TALK = "talk"
 
     fun channels(c: Context) {
         val nm = c.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(STANDBY, "Radio standby", NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) })
         nm.createNotificationChannel(NotificationChannel(ALERT, "Invitations and channel calls", NotificationManager.IMPORTANCE_HIGH))
+        // heads-up but silent: the voice itself is already playing, and messages vibrate on their own
+        nm.createNotificationChannel(NotificationChannel(TALK, "Someone talking or messaging you", NotificationManager.IMPORTANCE_HIGH).apply {
+            setSound(null, null); enableVibration(false)
+        })
         nm.createNotificationChannel(NotificationChannel(SOS, "Emergency alerts from nearby phones", NotificationManager.IMPORTANCE_HIGH).apply {
             enableVibration(true); vibrationPattern = longArrayOf(0, 600, 250, 600, 250, 600)
         })
@@ -217,19 +227,29 @@ object Notifier {
         PendingIntent.getActivity(c, req, Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             .putExtra("gid", gid).putExtra("ch", ch), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
+    /** Opens the talk key over whatever is on screen, already talking (tap within 5 s to keep going). */
+    private fun talk(c: Context, req: Int, gid: String?): PendingIntent =
+        PendingIntent.getActivity(c, req, Intent(c, QuickTalkActivity::class.java).putExtra("gid", gid).putExtra("start", true)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+    private fun talkAction(c: Context, req: Int, gid: String?, label: String) =
+        Notification.Action.Builder(android.graphics.drawable.Icon.createWithResource(c, R.drawable.ic_stat_radio), label, talk(c, req, gid)).build()
+
     fun statusLine(s: RadioState): String {
         val link = if (s.netUp) "Internet" else if (s.nearbyUp) "Nearby" else "No link"
         val g = s.group ?: return "Standby · $link"
+        val name = s.titleOf(g) + if (s.tunedCh != 0) " · ${chName(s.tunedCh)}" else ""
         return when {
-            s.transmitting -> "Transmitting · ${g.name} ${chName(s.tunedCh)}"
-            s.talker != null -> "Receiving ${s.talker} · ${g.name} ${chName(s.tunedCh)}"
-            else -> "${g.name} ${chName(s.tunedCh)} · $link"
+            s.transmitting -> "Transmitting · $name"
+            s.talker != null -> "${s.talker} is talking · $name"
+            else -> "$name · $link"
         }
     }
 
-    fun standby(c: Context, text: String): Notification = Notification.Builder(c, STANDBY)
+    fun standby(c: Context, text: String, gid: String? = null): Notification = Notification.Builder(c, STANDBY)
         .setSmallIcon(R.drawable.ic_stat_radio).setContentTitle("PTT Radio").setContentText(text)
-        .setOngoing(true).setOnlyAlertOnce(true).setContentIntent(open(c, 0)).build()
+        .setOngoing(true).setOnlyAlertOnce(true).setContentIntent(open(c, 0))
+        .apply { if (gid != null) addAction(talkAction(c, 2, gid, "Talk")) }.build()
 
     /** Vibrates through the alarm channel, which the ringer's silent and vibrate modes do not mute. */
     fun sos(c: Context, a: SosAlert) {
@@ -261,7 +281,25 @@ object Notifier {
         when (e) {
             is Event.InviteReceived -> nm.notify(e.invite.group.id.hashCode(), b.setContentTitle("Join ${e.invite.group.name}?")
                 .setContentText("${e.invite.fromName} added you to a group. Tap to join.").setContentIntent(open(c, e.invite.group.id.hashCode())).build())
-            is Event.Message -> buzz(c)
+            is Event.Message -> {
+                buzz(c)
+                val st = (c.applicationContext as App).core.state.value
+                if (e.gid.isNotEmpty() && (!MainActivity.visible || e.gid != st.tunedGroup)) {
+                    val title = if (e.chat.isEmpty() || e.chat == e.from) e.from else "${e.from} · ${e.chat}"
+                    nm.notify(e.gid.hashCode() + 13, Notification.Builder(c, TALK).setSmallIcon(R.drawable.ic_stat_radio).setAutoCancel(true)
+                        .setContentTitle(title).setContentText(e.text).setContentIntent(open(c, e.gid.hashCode() + 13, e.gid, 0))
+                        .addAction(talkAction(c, e.gid.hashCode() + 14, e.gid, "Talk back")).build())
+                }
+            }
+            is Event.Talk -> {
+                val st = (c.applicationContext as App).core.state.value
+                if (!MainActivity.visible || e.gid != st.tunedGroup)
+                    nm.notify(e.gid.hashCode() + 11, Notification.Builder(c, TALK).setSmallIcon(R.drawable.ic_stat_radio).setAutoCancel(true)
+                        .setContentTitle("${e.from} is talking").setContentText(if (e.chat == e.from) "Tap Talk back to answer" else e.chat)
+                        .setCategory(Notification.CATEGORY_CALL).setTimeoutAfter(90_000)
+                        .setContentIntent(open(c, e.gid.hashCode() + 11, e.gid, 0))
+                        .addAction(talkAction(c, e.gid.hashCode() + 12, e.gid, "Talk back")).build())
+            }
             is Event.Summoned -> if (!e.autoTuned || !MainActivity.visible) nm.notify(e.gid.hashCode() + 1, b.setContentTitle("${e.by} wants you on ${chName(e.ch)}")
                 .setContentText("${e.groupName} · tap to switch channel").setContentIntent(open(c, e.gid.hashCode() + 1, e.gid, e.ch)).build())
         }
@@ -280,8 +318,8 @@ class RadioService : Service() {
             if (Build.VERSION.SDK_INT >= 29) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK) else startForeground(1, n)
         } catch (e: Exception) { stopSelf(); return }
         scope.launch {
-            app.core.state.map { Notifier.statusLine(it) }.distinctUntilChanged().collectLatest {
-                try { getSystemService(NotificationManager::class.java).notify(1, Notifier.standby(this@RadioService, it)) } catch (e: Exception) { }
+            app.core.state.map { Notifier.statusLine(it) to it.tunedGroup }.distinctUntilChanged().collectLatest { (text, gid) ->
+                try { getSystemService(NotificationManager::class.java).notify(1, Notifier.standby(this@RadioService, text, gid)) } catch (e: Exception) { }
             }
         }
     }

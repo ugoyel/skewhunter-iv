@@ -93,6 +93,9 @@ interface Actions {
     fun reconnect()
     /** Put a 1x1 talk widget for this group on the home screen. */
     fun addToHome(gid: String)
+    /** Open (or start) the one-to-one chat with a person. */
+    fun openDirect(uid: String)
+    fun renameGroup(gid: String, name: String)
     /** Emergency broadcast to every phone with the app nearby, no connection needed. */
     fun sendSos(code: Int)
     fun stopSos()
@@ -140,14 +143,17 @@ fun Welcome(a: Actions, login: Boolean) {
     var error by remember { mutableStateOf<String?>(null) }
     val emailOk = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]{2,}$").matches(email.trim())
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp), verticalArrangement = Arrangement.Center) {
-        Text("PTT RADIO", color = C.amber, fontFamily = Mono, fontSize = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
+        Text("Welcome to PTT Radio", color = C.text, fontSize = 26.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
-        Body("Push-to-talk voice for your groups. Over internet, or straight phone-to-phone when there is none.", color = C.dim)
+        Body("Hold to talk with your people, over internet or straight phone-to-phone when there is none.", color = C.dim)
         Spacer(Modifier.height(28.dp))
         if (!sent) {
-            Label("Your call sign")
-            Spacer(Modifier.height(8.dp))
-            Field(name, { name = it.take(24) }, "Name shown to others", Modifier.fillMaxWidth())
+            Body("What should people call you?", weight = FontWeight.SemiBold)
+            Spacer(Modifier.height(4.dp))
+            Body("Pick a name your team will recognise and that is unlikely to be taken, like \"Rahul K\" or \"Base Camp 2\". You can change it later.",
+                color = C.dim, size = 13.sp)
+            Spacer(Modifier.height(10.dp))
+            Field(name, { name = it.take(24) }, "Your name", Modifier.fillMaxWidth())
             if (login) {
                 Spacer(Modifier.height(14.dp)); Label("E-mail"); Spacer(Modifier.height(8.dp))
                 Field(email, { email = it.trim().take(120) }, "We send a sign-in code here", Modifier.fillMaxWidth())
@@ -163,7 +169,7 @@ fun Welcome(a: Actions, login: Boolean) {
             }
             error?.let { Spacer(Modifier.height(12.dp)); Body(it, color = C.red, size = 13.sp) }
             Spacer(Modifier.height(16.dp))
-            if (!login) Btn("Power on", Modifier.fillMaxWidth(), primary = true, enabled = name.isNotBlank()) { a.setName(name) }
+            if (!login) Btn("Let's go", Modifier.fillMaxWidth(), primary = true, enabled = name.trim().length >= 2) { a.setName(name) }
             else Btn(if (busy) "Sending" else "Send code", Modifier.fillMaxWidth(), primary = true, enabled = !busy && name.isNotBlank() && emailOk && phone.length >= 8) {
                 busy = true; error = null
                 a.requestCode(email.trim(), name.trim(), phone, marketing) { e -> busy = false; error = e; if (e == null) sent = true }
@@ -232,243 +238,6 @@ fun WarningBox(text: String, onClick: (() -> Unit)? = null) {
 }
 
 @Composable
-fun Home(s: RadioState, p: Perms, near: NearbyInfo, alerts: List<SosAlert>, sending: SosSending?, a: Actions, now: Long, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
-    var sosMenu by remember { mutableStateOf(false) }
-    if (sosMenu) Sheet("Emergency message", { sosMenu = false }) {
-        Body("Sent over Bluetooth to every phone with PTT Radio in range, with no connection needed, and passed on by those phones. " +
-            "Long-range Bluetooth is used where the phone supports it. Your GPS position is included. With internet it also goes to your groups.",
-            color = C.dim, size = 12.sp)
-        Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SosCodes.text.forEachIndexed { i, t -> Btn(t, Modifier.fillMaxWidth(), primary = i == 0) { sosMenu = false; a.sendSos(i) } }
-        }
-    }
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("PTT RADIO", color = C.amber, fontFamily = Mono, fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
-                Label(s.me?.name ?: "", size = 10.sp)
-            }
-            Label("SOS", Modifier.padding(end = 8.dp).clip(RoundedCornerShape(20.dp)).background(if (sending != null) C.red else Color(0x33FF4B3E))
-                .border(1.dp, C.red, RoundedCornerShape(20.dp)).clickable { sosMenu = true }.padding(horizontal = 10.dp, vertical = 6.dp),
-                color = if (sending != null) Color.White else C.red, size = 11.sp)
-            LinkPill(s)
-            Icon(Icons.Filled.Refresh, "Reconnect", Modifier.padding(start = 4.dp).clip(RoundedCornerShape(20.dp)).clickable { a.reconnect() }.padding(10.dp).size(22.dp), tint = C.dim)
-            Icon(Icons.Filled.Settings, "Settings", Modifier.clip(RoundedCornerShape(20.dp)).clickable { go(Scr.SETTINGS) }.padding(10.dp).size(22.dp), tint = C.dim)
-        }
-        if (sending != null) {
-            val left = ((sending.until - now) / 1000).coerceAtLeast(0)
-            Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0x33FF4B3E))
-                .border(1.dp, C.red, RoundedCornerShape(8.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Body("Broadcasting: ${SosCodes.of(sending.code)}", weight = FontWeight.SemiBold, size = 14.sp)
-                    Label((if (sending.hasFix) "With position" else "Getting position") + " · ${left / 60}:${(left % 60).toString().padStart(2, '0')} left", size = 10.sp)
-                }
-                Btn("Stop", danger = true) { a.stopSos() }
-            }
-        }
-        alerts.take(3).forEach { al -> AlertCard(al, now, a) }
-        if (!p.allOk) Box(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-            WarningBox("Permissions missing. The radio won't work properly. Tap to fix.") { go(Scr.SETUP) }
-        }
-        Box(Modifier.weight(1f)) {
-            // Groups is the first page and the one the app opens on; Contacts is the second.
-            if (tab == 0) Groups(s, a, { onTab(1) }) { gid, ch -> a.tune(gid, ch); go(Scr.RADIO) } else Contacts(s, near, a, now) { go(Scr.RADIO) }
-        }
-        Row(Modifier.fillMaxWidth().background(C.panel).border(1.dp, C.line)) {
-            listOf("Groups", "Contacts").forEachIndexed { i, t ->
-                Column(Modifier.weight(1f).clickable { onTab(i) }.padding(top = 0.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(Modifier.fillMaxWidth().height(2.dp).background(if (tab == i) C.amber else Color.Transparent))
-                    Row(Modifier.height(52.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Label(t, color = if (tab == i) C.amber else C.dim, size = 12.sp)
-                        if (i == 0 && s.invites.isNotEmpty()) Dot(C.red, 7.dp)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AlertCard(al: SosAlert, now: Long, a: Actions) {
-    val ago = ((now - al.firstAt) / 60_000).let { if (it < 1) "just now" else "$it min ago" }
-    val heard = when { al.hops > 0 -> "passed on by ${al.hops} phone${if (al.hops > 1) "s" else ""}"; al.pct >= 0 -> "signal ${al.pct}%"; else -> "" }
-    Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0x22FF4B3E))
-        .border(1.dp, C.red, RoundedCornerShape(8.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Dot(C.red, 9.dp); Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Body("${al.name}: ${SosCodes.of(al.code)}", weight = FontWeight.SemiBold, size = 14.sp, maxLines = 2)
-                Label(listOf(ago, heard).filter { it.isNotEmpty() }.joinToString(" · "), size = 10.sp)
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (al.lat != null && al.lon != null) Btn("Show on map", Modifier.weight(1f), primary = true) { a.openMap(al.lat, al.lon, al.name) }
-            Btn("Dismiss", Modifier.weight(1f)) { a.dismissAlert(al.key) }
-        }
-    }
-}
-
-@Composable
-fun UserRow(u: User, now: Long, selected: Boolean, link: PeerLink? = null, onClick: () -> Unit) {
-    val near = isNearby(u, now)
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).background(if (selected) C.raised else Color.Transparent).padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        Dot(if (near) C.amber else if (u.online) C.green else C.faint)
-        if (near && u.online) { Spacer(Modifier.width(4.dp)); Dot(C.green) }
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Body(u.name, weight = FontWeight.Medium, maxLines = 1)
-            val how = when { link != null -> if (link.pct >= 0) "${link.tech} ${link.pct}%" else link.tech; u.via == "lan" -> "Field Wi-Fi"; else -> "via another phone" }
-            Label(when { near && u.online -> "Nearby · $how · on internet"; near -> "Nearby · $how"; u.online -> "On internet"; else -> "Off air" },
-                size = 10.sp, color = if (near) C.amber else if (u.online) C.green else C.dim)
-        }
-        Box(Modifier.size(22.dp).clip(RoundedCornerShape(4.dp)).background(if (selected) C.amber else Color.Transparent).border(1.dp, if (selected) C.amber else C.line, RoundedCornerShape(4.dp)),
-            contentAlignment = Alignment.Center) { if (selected) Icon(Icons.Filled.Check, null, Modifier.size(16.dp), tint = C.bg) }
-    }
-}
-
-fun visibleUsers(s: RadioState, now: Long, q: String = ""): List<User> = s.users.values
-    .filter { it.name.isNotBlank() && (it.online || isNearby(it, now)) } // only people who are on the app right now
-    .filter { q.isBlank() || it.name.contains(q.trim(), ignoreCase = true) }
-    .sortedWith(compareByDescending<User> { isNearby(it, now) }.thenByDescending { it.online }.thenBy { it.name.lowercase() })
-
-@Composable
-private fun NearbyBar(s: RadioState, near: NearbyInfo, users: List<User>, now: Long, a: Actions) {
-    val nearN = users.count { isNearby(it, now) }
-    val netN = users.count { it.online }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Dot(C.amber, 7.dp); Label("$nearN nearby", color = C.text, size = 10.sp)
-            Spacer(Modifier.width(8.dp))
-            Dot(C.green, 7.dp); Label("$netN on internet", color = C.text, size = 10.sp)
-            Spacer(Modifier.weight(1f))
-            Label(when {
-                !near.running -> "Nearby radio off"
-                near.linked > 0 -> "${near.linked} phone${if (near.linked > 1) "s" else ""} linked"
-                near.found > 0 -> "Found ${near.found} · linking"
-                else -> "Scanning nearby"
-            }, size = 10.sp)
-        }
-        if (near.running && near.linked == 0 && near.lastFail != null) Label("Last try · ${near.lastFail}", color = C.faint, size = 10.sp)
-        if (near.problem != null && (near.running || !s.netUp)) Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0x22FFB020)).border(1.dp, Color(0x66FFB020), RoundedCornerShape(8.dp)).padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Body(near.detail ?: "The nearby link is not working.", Modifier.weight(1f), size = 13.sp)
-            Btn(if (near.problem == "err") "Retry" else "Fix", primary = true) { a.fixNearby(near.problem) }
-        }
-    }
-}
-
-@Composable
-fun Contacts(s: RadioState, near: NearbyInfo, a: Actions, now: Long, onCreated: () -> Unit) {
-    var q by remember { mutableStateOf("") }
-    var sel by remember { mutableStateOf(setOf<String>()) }
-    var naming by remember { mutableStateOf(false) }
-    val users = visibleUsers(s, now, q)
-    Column(Modifier.fillMaxSize()) {
-        Field(q, { q = it }, "Search people", Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp))
-        NearbyBar(s, near, users, now, a)
-        if (users.isEmpty()) Column(Modifier.weight(1f).fillMaxWidth().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-            Label(if (q.isNotBlank()) "No match" else if (s.netUp || s.nearbyUp) "Nobody else on air right now" else "Searching for a link")
-            Spacer(Modifier.height(8.dp))
-            Body("People appear here while they are on the app. With no internet, keep Bluetooth and Location on and the app open on both phones; phones in range show up as Nearby within about half a minute.", color = C.faint, size = 13.sp)
-        } else LazyColumn(Modifier.weight(1f)) {
-            items(users, key = { it.id }) { u -> UserRow(u, now, u.id in sel, near.peers[u.id]) { sel = if (u.id in sel) sel - u.id else sel + u.id } }
-        }
-        if (sel.isNotEmpty()) Btn("Create group · ${sel.size}", Modifier.fillMaxWidth().padding(16.dp), primary = true) { naming = true }
-    }
-    if (naming) {
-        var name by remember { mutableStateOf("") }
-        val create = { a.createGroup(name, sel.toList()); sel = emptySet(); naming = false; onCreated() }
-        Sheet("New group", { naming = false }) {
-            Body("${sel.size} member${if (sel.size > 1) "s" else ""} will be notified to join.", color = C.dim, size = 13.sp)
-            Field(name, { name = it.take(24) }, "Group name", Modifier.fillMaxWidth(), onDone = { if (name.isNotBlank()) create() })
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Btn("Cancel", Modifier.weight(1f)) { naming = false }
-                Btn("Create", Modifier.weight(1f), primary = true, enabled = name.isNotBlank(), onClick = create)
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
-@Composable
-private fun GroupCard(s: RadioState, g: Group, a: Actions, open: (String, Int) -> Unit) {
-    var menu by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf(false) }
-    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-    if (menu) Sheet(g.name, { menu = false }) {
-        Btn("Add talk widget to home screen", Modifier.fillMaxWidth()) { menu = false; a.addToHome(g.id) }
-        Btn("Delete group", Modifier.fillMaxWidth(), danger = true) { menu = false; confirmDelete = true }
-    }
-    if (confirmDelete) Sheet("Delete ${g.name}?", { confirmDelete = false }) {
-        Body("The group is removed from this phone and the others see that you left. Someone in the group has to invite you again to come back.", color = C.dim, size = 13.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Btn("Keep", Modifier.weight(1f)) { confirmDelete = false }
-            Btn("Delete", Modifier.weight(1f), danger = true) { confirmDelete = false; a.leave(g.id) }
-        }
-    }
-    val tuned = s.tunedGroup == g.id
-    val pres = s.presence[g.id] ?: emptyMap()
-    val active = (pres.values.map { it.ch } + (s.locks[g.id]?.map { it.ch } ?: emptyList()) + 0).distinct().sorted()
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(C.panel).border(1.dp, if (tuned) C.amber else C.line, RoundedCornerShape(8.dp))
-        .combinedClickable(onClick = { open(g.id, if (tuned) s.tunedCh else 0) },
-            onLongClick = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); menu = true })
-        .padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Body(g.name, weight = FontWeight.SemiBold, size = 16.sp, maxLines = 1)
-                Label("${g.members.size} members · ${pres.size} on air", size = 10.sp)
-            }
-            if (tuned) Label("Tuned", color = C.amber, size = 10.sp)
-        }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            active.forEach { ch ->
-                val n = pres.values.count { it.ch == ch }
-                val here = tuned && s.tunedCh == ch
-                Row(Modifier.clip(RoundedCornerShape(5.dp)).background(C.raised).border(1.dp, if (here) C.amber else C.line, RoundedCornerShape(5.dp))
-                    .clickable { open(g.id, ch) }.padding(horizontal = 10.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(chName(ch), color = if (here) C.amber else C.text, fontFamily = Mono, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    if (s.lockOf(g.id, ch) != null) Icon(Icons.Filled.Lock, "Locked", Modifier.size(12.dp), tint = C.amber)
-                    Text("$n", color = C.dim, fontFamily = Mono, fontSize = 12.sp)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun Groups(s: RadioState, a: Actions, toContacts: () -> Unit, open: (String, Int) -> Unit) {
-    if (s.groups.isEmpty() && s.invites.isEmpty()) {
-        Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-            Label("No groups yet")
-            Spacer(Modifier.height(8.dp))
-            Body("Pick people in Contacts to create one. Touch and hold a group for more options.", color = C.faint, size = 13.sp)
-            Spacer(Modifier.height(16.dp))
-            Btn("Open contacts", onClick = toContacts)
-        }
-        return
-    }
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { Spacer(Modifier.height(2.dp)) }
-        items(s.invites, key = { "i" + it.group.id }) { inv ->
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0x1434D17B)).border(1.dp, C.green, RoundedCornerShape(8.dp)).padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Label("Invitation", color = C.green, size = 10.sp)
-                Body("${inv.fromName} added you to ${inv.group.name}", weight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Btn("Decline", Modifier.weight(1f)) { a.decline(inv.group.id) }
-                    Btn("Join", Modifier.weight(1f), primary = true) { a.accept(inv.group.id); open(inv.group.id, 0) }
-                }
-            }
-        }
-        items(s.groups, key = { it.id }) { g -> GroupCard(s, g, a, open) }
-        item { Spacer(Modifier.height(8.dp)) }
-    }
-}
-
-@Composable
 private fun Section(title: String, content: @Composable () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Label(title); content() }
 }
@@ -506,7 +275,7 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: B
                 if (btn.key != 0) {
                     Label("Button talks on", Modifier.padding(top = 6.dp))
                     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).border(1.dp, C.line, RoundedCornerShape(6.dp)).background(C.panel)) {
-                        (listOf("" to "Current channel") + s.groups.map { it.id to it.name }).forEach { (id, name) ->
+                        (listOf("" to "Current chat") + s.groups.map { it.id to s.titleOf(it) }).forEach { (id, name) ->
                             val on = btn.group == id || (id.isEmpty() && s.groups.none { it.id == btn.group })
                             Row(Modifier.fillMaxWidth().clickable { a.setPttGroup(id) }.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Dot(if (on) C.amber else C.line)
