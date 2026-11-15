@@ -181,7 +181,7 @@ class QuickTalkActivity : ComponentActivity() {
                         }
                         Dot(col); Spacer(Modifier.width(8.dp)); Label(text, color = C.text, size = 11.sp)
                     }
-                    if (g == null) Btn("Open PTT Radio", Modifier.fillMaxWidth(), primary = true) { startActivity(Intent(this@QuickTalkActivity, MainActivity::class.java)); finish() }
+                    if (g == null) Btn("Open ZeroBar", Modifier.fillMaxWidth(), primary = true) { startActivity(Intent(this@QuickTalkActivity, MainActivity::class.java)); finish() }
                     else PttKey(
                         s.transmitting, s.talker != null, Modifier.fillMaxWidth(), app.core.level, s.recording,
                         title = when { closing -> "MIC\nCLOSED"; s.recording -> "RECORDING"; s.transmitting -> "TALKING"; s.talker != null -> "LISTENING"; else -> "TAP\nTO TALK" },
@@ -255,7 +255,7 @@ class WidgetConfigActivity : ComponentActivity() {
                 Text("Widget for which chat?", Modifier.padding(start = 18.dp, top = 18.dp, bottom = 4.dp), color = C.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Text("Tapping the widget starts talking to this group or person.", Modifier.padding(start = 18.dp, bottom = 10.dp), color = C.dim, fontSize = 13.sp)
                 if (s.groups.isEmpty() && onAppNow(s, now).isEmpty())
-                    Text("No chats yet. Open PTT Radio, start a chat, then add the widget again.", Modifier.padding(18.dp), color = C.dim, fontSize = 14.sp)
+                    Text("No chats yet. Open ZeroBar, start a chat, then add the widget again.", Modifier.padding(18.dp), color = C.dim, fontSize = 14.sp)
                 ChatPicker(s, near, now,
                     onChat = { g -> PttWidget.assign(this@WidgetConfigActivity, id, g.id); done(id) },
                     onPerson = { u -> app.core.openDirect(u.id, tune = false) { gid -> runOnUiThread { PttWidget.assign(this@WidgetConfigActivity, id, gid); done(id) } } })

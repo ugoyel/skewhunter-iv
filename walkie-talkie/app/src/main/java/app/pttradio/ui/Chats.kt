@@ -141,7 +141,7 @@ fun Home(
                 Text("New group", Modifier.clip(RoundedCornerShape(18.dp)).clickable { naming = true }.padding(horizontal = 10.dp, vertical = 8.dp), color = C.accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             }
         } else Row(Modifier.fillMaxWidth().height(60.dp).padding(start = 18.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("PTT Radio", Modifier.weight(1f), color = C.text, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Text("ZeroBar", Modifier.weight(1f), color = C.text, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             Text("SOS", Modifier.clip(RoundedCornerShape(16.dp)).background(if (sending != null) C.red else Color(0x26FF4B3E)).clickable { sosMenu = true }
                 .padding(horizontal = 12.dp, vertical = 6.dp), color = if (sending != null) Color.White else C.red, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(10.dp))
@@ -227,7 +227,7 @@ fun Home(
 
     // ---------------------------------------------------------------- sheets
     if (sosMenu) Sheet("Emergency message", { sosMenu = false }) {
-        Body("Sent over Bluetooth to phones with PTT Radio in range, with no connection needed, and passed on by those phones. " +
+        Body("Sent over Bluetooth to phones with ZeroBar in range, with no connection needed, and passed on by those phones. " +
             "Shown to your contacts only, unless you allow anyone in Settings. Your GPS position is included. With internet it also goes to your groups.",
             color = C.dim, size = 13.sp)
         Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -240,7 +240,7 @@ fun Home(
             Spacer(Modifier.width(14.dp))
             Body("New group", weight = FontWeight.SemiBold)
         }
-        Label("On PTT Radio now", Modifier.padding(top = 4.dp))
+        Label("On ZeroBar now", Modifier.padding(top = 4.dp))
         val people = onAppNow(s, now)
         if (people.isEmpty()) Body("Nobody else is on the app right now.", color = C.dim, size = 13.sp)
         Column(Modifier.heightIn(max = 340.dp).verticalScroll(rememberScrollState())) {
@@ -420,7 +420,7 @@ private fun ChatList(
             }
         }
         if (people.isNotEmpty()) {
-            item { Text("On PTT Radio now", Modifier.padding(start = 18.dp, top = 14.dp, bottom = 4.dp), color = C.dim, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
+            item { Text("On ZeroBar now", Modifier.padding(start = 18.dp, top = 14.dp, bottom = 4.dp), color = C.dim, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
             items(people, key = { "p" + it.id }) { u -> PersonRow(u, s, near, now, u.id in sel, true, { onPerson(u) }, { onPersonLong(u) }) }
         }
         item { Spacer(Modifier.height(90.dp)) }
@@ -501,7 +501,7 @@ fun ChatPicker(s: RadioState, near: NearbyInfo, now: Long, onChat: (Group) -> Un
         }
         val people = onAppNow(s, now).filter { it.id !in withChat }
         if (people.isNotEmpty()) {
-            item { Text("On PTT Radio now", Modifier.padding(start = 18.dp, top = 14.dp, bottom = 4.dp), color = C.dim, fontSize = 13.sp) }
+            item { Text("On ZeroBar now", Modifier.padding(start = 18.dp, top = 14.dp, bottom = 4.dp), color = C.dim, fontSize = 13.sp) }
             items(people, key = { "p" + it.id }) { u -> PersonRow(u, s, near, now, false, false, { onPerson(u) }, {}) }
         }
     }

@@ -9,7 +9,8 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "app.pttradio"
+        // The Play Store ID: permanent once the first version is uploaded
+        applicationId = "app.zerobar.ptt"
         minSdk = 26
         // Google Play requires new apps to target Android 16 (API 36)
         targetSdk = 36

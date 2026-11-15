@@ -40,7 +40,7 @@ object SosCodes {
         "Stay where you are",
         "Follow me, moving on",
         "Low battery",
-        "Open PTT Radio, let's connect",
+        "Open ZeroBar, let's connect",
     )
     fun of(code: Int) = text.getOrElse(code) { "Alert" }
 }

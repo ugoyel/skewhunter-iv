@@ -247,7 +247,7 @@ object Notifier {
     }
 
     fun standby(c: Context, text: String, gid: String? = null): Notification = Notification.Builder(c, STANDBY)
-        .setSmallIcon(R.drawable.ic_stat_radio).setContentTitle("PTT Radio").setContentText(text)
+        .setSmallIcon(R.drawable.ic_stat_radio).setContentTitle("ZeroBar").setContentText(text)
         .setOngoing(true).setOnlyAlertOnce(true).setContentIntent(open(c, 0))
         .apply { if (gid != null) addAction(talkAction(c, 2, gid, "Talk")) }.build()
 

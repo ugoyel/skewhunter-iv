@@ -1,4 +1,4 @@
-# Publishing to Google Play (internal testing)
+# Publishing ZeroBar to Google Play (internal testing)
 
 Everything Play Console asks for, ready to paste. Files in this folder:
 
@@ -14,8 +14,8 @@ Everything Play Console asks for, ready to paste. Files in this folder:
 1. Create a developer account at <https://play.google.com/console/signup> (one-time fee of US $25, identity check).
 2. **Create app** → name, default language, *App*, *Free* → accept the declarations.
 
-The package name inside the bundle is `app.pttradio`. It becomes permanent with the first upload; the name shown in
-the store can be changed at any time.
+App name: **ZeroBar**. The package name inside the bundle is `app.zerobar.ptt`. It becomes permanent with the first
+upload; the name shown in the store can be changed at any time. Developer contact e-mail: ugoyel@gmail.com.
 
 ## 2. Internal testing (no review wait, up to 100 testers)
 
@@ -30,8 +30,8 @@ Personal developer accounts created after November 2023 must also run a closed t
 
 ## 3. App content (Policy → App content)
 
-- **Privacy policy:** put `privacy-policy.md` on a public page (Google Sites, GitHub Pages, your website), fill in
-  the contact e-mail, and paste the URL.
+- **Privacy policy:** put `privacy-policy.md` on a public page (Google Sites, GitHub Pages, your website) and paste
+  the URL.
 - **Ads:** No ads.
 - **App access:** All functionality is available without special access (no login).
 - **Content rating:** questionnaire → Communication app; users can interact and share location → typically rated
@@ -54,6 +54,10 @@ Personal developer accounts created after November 2023 must also run a closed t
   without it Android delays or drops incoming calls.
 
 ## 4. Store listing (Grow → Store presence → Main store listing)
+
+**App name (≤ 30 characters)**
+
+> ZeroBar: Offline Walkie Talkie
 
 **Short description (≤ 80 characters)**
 

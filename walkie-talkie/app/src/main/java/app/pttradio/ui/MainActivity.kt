@@ -231,7 +231,7 @@ class MainActivity : ComponentActivity(), Actions {
 
     override fun addToHome(gid: String) {
         val ok = try { PttWidget.pin(this, gid) } catch (e: Exception) { false }
-        if (!ok) warning = "This home screen does not let apps place widgets. Long-press the home screen, choose Widgets, and add PTT Radio from there."
+        if (!ok) warning = "This home screen does not let apps place widgets. Long-press the home screen, choose Widgets, and add ZeroBar from there."
     }
 
     override fun sendSos(code: Int) {
@@ -262,7 +262,7 @@ class MainActivity : ComponentActivity(), Actions {
                 startActivity(Intent(Settings.ACTION_WIFI_ADD_NETWORKS).putParcelableArrayListExtra(Settings.EXTRA_WIFI_NETWORK_LIST, arrayListOf(sug)))
             } else {
                 getSystemService(android.net.wifi.WifiManager::class.java).addNetworkSuggestions(listOf(sug))
-                info = "Saved. Android may show a notification asking to allow networks suggested by PTT Radio: allow it."
+                info = "Saved. Android may show a notification asking to allow networks suggested by ZeroBar: allow it."
             }
         } catch (e: Exception) {
             info = "This phone could not save the network automatically. Open Wi-Fi settings and add \"$ssid\" with the password by hand."

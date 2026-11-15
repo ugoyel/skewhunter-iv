@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">PTT Radio</string>
+    <string name="app_name">ZeroBar</string>
     <string name="widget_desc">Talk key for one group. Tap to start talking, then tap the key within 5 seconds to keep going.</string>
-    <string name="widget_label">PTT Radio group</string>
+    <string name="widget_label">ZeroBar talk button</string>
 </resources>

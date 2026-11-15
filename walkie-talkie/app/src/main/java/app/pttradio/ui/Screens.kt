@@ -146,7 +146,7 @@ fun Welcome(a: Actions, login: Boolean) {
     var error by remember { mutableStateOf<String?>(null) }
     val emailOk = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]{2,}$").matches(email.trim())
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp), verticalArrangement = Arrangement.Center) {
-        Text("Welcome to PTT Radio", color = C.text, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+        Text("Welcome to ZeroBar", color = C.text, fontSize = 26.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Body("Hold to talk with your people, over internet or straight phone-to-phone when there is none.", color = C.dim)
         Spacer(Modifier.height(28.dp))
@@ -274,7 +274,7 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: B
                         Btn("Change") { a.learnKey() }
                     }
                 }
-                Body("Hold the button to talk, release to mute, while PTT Radio is open on screen. Android does not let any app take over the power button; volume keys and programmable side keys work.", color = C.dim, size = 12.sp)
+                Body("Hold the button to talk, release to mute, while ZeroBar is open on screen. Android does not let any app take over the power button; volume keys and programmable side keys work.", color = C.dim, size = 12.sp)
                 if (btn.key != 0) {
                     Label("Button talks on", Modifier.padding(top = 6.dp))
                     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).border(1.dp, C.line, RoundedCornerShape(6.dp)).background(C.panel)) {
@@ -316,7 +316,7 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: B
             }
             Section("Emergency (SOS) messages are shown to") {
                 Segments(listOf("c" to "My contacts", "a" to "Anyone nearby"), if (sosAnyone) "a" else "c", Modifier.fillMaxWidth()) { a.setSosAnyone(it == "a") }
-                Body(if (sosAnyone) "Every phone with PTT Radio in range shows your alert, including strangers who could help."
+                Body(if (sosAnyone) "Every phone with ZeroBar in range shows your alert, including strangers who could help."
                      else "Only people in your groups and chats see your alert. Other phones with the app still pass it on, without showing it, so it can reach a contact further away.",
                     color = C.dim, size = 12.sp)
             }

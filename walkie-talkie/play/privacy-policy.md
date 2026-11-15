@@ -1,8 +1,8 @@
-# Privacy Policy
+# ZeroBar Privacy Policy
 
 _Last updated: 16 November 2026_
 
-This policy explains what the app ("the app", "we") does with information when you use it. The app is a
+This policy explains what ZeroBar ("the app", "we") does with information when you use it. The app is a
 push-to-talk voice and messaging tool that works over the internet and directly between nearby phones.
 
 ## What stays on your phone
@@ -64,4 +64,4 @@ The app is not directed at children under 13.
 
 ## Contact
 
-Questions or requests: **[your contact e-mail]**
+Questions or requests: **ugoyel@gmail.com**

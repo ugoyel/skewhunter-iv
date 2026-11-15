@@ -1,4 +1,4 @@
-# PTT Radio
+# ZeroBar
 
 A push-to-talk walkie-talkie for Android. Audio only, no calls, nothing recorded.
 
@@ -47,7 +47,7 @@ cd walkie-talkie
 ./gradlew :app:assembleRelease     # app/build/outputs/apk/release/app-release.apk
 ```
 
-Every push that touches this folder also builds the APK in GitHub Actions (workflow **PTT Radio APK**, artifact
+Every push that touches this folder also builds the APK in GitHub Actions (workflow **ZeroBar APK**, artifact
 `ptt-radio-apk`). Builds are signed with the fixed key in
 `app/sideload.keystore`, so a newer APK installs over an older one. (APKs built before that key existed must be
 uninstalled once.)
