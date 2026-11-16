@@ -140,12 +140,11 @@ fun TopBar(title: String, onBack: (() -> Unit)? = null, actions: @Composable () 
 }
 
 /**
- * Sign-up, one question per screen: mobile number (code by Telegram) with e-mail as the alternative,
- * then the name people will see. [verified] turns true when the e-mail link brings the person back.
+ * Sign-up, one question per screen: e-mail (sign-in link), then the name people will see. [verified] turns true when the e-mail link brings the person back.
  */
 @Composable
 fun Welcome(a: Actions, login: Boolean, verified: Boolean) {
-    var step by remember { mutableStateOf(if (login) "phone" else "name") }
+    var step by remember { mutableStateOf(if (login) "email" else "name") }
     var phone by remember { mutableStateOf("+91") }
     var email by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
@@ -215,7 +214,6 @@ fun Welcome(a: Actions, login: Boolean, verified: Boolean) {
                     busy = true; error = null
                     a.requestCode(email.trim(), "", "", marketing) { e -> busy = false; if (e == null) go("emailSent") else error = e }
                 }
-                link("Use mobile number instead") { go("phone") }
             }
             "emailSent" -> {
                 Body("Check your e-mail", weight = FontWeight.SemiBold)
