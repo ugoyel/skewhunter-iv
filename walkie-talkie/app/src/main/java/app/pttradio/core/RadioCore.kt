@@ -74,7 +74,7 @@ class RadioCore(
      * (nearby or field Wi-Fi only), 0 = not known. It picks the voice bit rate and how many 60 ms frames go in one
      * packet: fewer, larger packets ride out poor networks and rate-limited relays much better.
      */
-    @Volatile var linkTier = 0
+    @Volatile private var linkTier = 0
     private var bundle = 1
     private val txBuf = ArrayList<ShortArray>()
     private val opCaps = HashMap<String, Boolean>()            // "gid/uid" -> that phone can decode low-data voice
