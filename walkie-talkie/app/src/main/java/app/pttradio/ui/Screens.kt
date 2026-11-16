@@ -348,16 +348,6 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: B
                 }
                 saved?.let { Body(it, color = C.dim, size = 12.sp) }
                 Body("Kept with your account for support; never shown to other users.", color = C.dim, size = 12.sp)
-                var out by remember { mutableStateOf(false) }
-                Btn("Sign out", Modifier.fillMaxWidth().padding(top = 8.dp), danger = true) { out = true }
-                if (out) Sheet("Sign out?", { out = false }) {
-                    Body("Your name, keys, chats and settings are removed from this phone. You can sign in again with your e-mail, " +
-                        "but people will have to add you to their groups again.", color = C.dim, size = 13.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Btn("Cancel", Modifier.weight(1f)) { out = false }
-                        Btn("Sign out", Modifier.weight(1f), danger = true) { out = false; a.signOut() }
-                    }
-                }
             }
             Section("Privacy") { PrivacyNote() }
             Section("Talk button") {
@@ -448,7 +438,19 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: B
                 }
                 Body("A free public MQTT relay passes encrypted packets between phones. Everyone in a group must use the same server. Leave empty for the default.", color = C.dim, size = 12.sp)
             }
-            Section("Permissions") { PermList(p, a) }
+            // permissions are managed in Android's app settings; only anything still missing is shown here
+            if (!p.allOk) Section("Permissions needed") { PermList(p, a) }
+            var out by remember { mutableStateOf(false) }
+            Btn("Sign out", Modifier.fillMaxWidth().padding(top = 8.dp), danger = true) { out = true }
+            if (out) Sheet("Sign out?", { out = false }) {
+                Body("Your name, keys, chats and settings are removed from this phone. You can sign in again with your e-mail, " +
+                    "but people will have to add you to their groups again.", color = C.dim, size = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Btn("Cancel", Modifier.weight(1f)) { out = false }
+                    Btn("Sign out", Modifier.weight(1f), danger = true) { out = false; a.signOut() }
+                }
+            }
+
             Spacer(Modifier.height(8.dp))
         }
     }

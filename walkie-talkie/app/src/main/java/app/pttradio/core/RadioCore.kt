@@ -540,9 +540,10 @@ class RadioCore(
         sendSealed(T_AUDIO, g.id, s.tunedCh, key, byteArrayOf((seq shr 8).toByte(), seq.toByte(), 1), chanTopic(g.id, s.tunedCh))
     }
 
-    fun sendText(text: String) = run {
+    /** [to] = chat id and channel to send to; by default the chat that is open now. */
+    fun sendText(text: String, to: Pair<String, Int>? = null) = run {
         val t = text.trim().take(500)
-        if (t.isNotEmpty()) post(t, null)
+        if (t.isNotEmpty()) post(t, null, to)
     }
 
     /** Emergency: the text (and position) to the main room of every group, now or as soon as a link is back. */
@@ -557,13 +558,15 @@ class RadioCore(
     }
 
     /** Sends now when a link is up, otherwise keeps the message and sends it as soon as one is. */
-    private fun post(text: String, image: ByteArray?) {
+    private fun post(text: String, image: ByteArray?, to: Pair<String, Int>? = null) {
         val me = s.me ?: return
-        val g = s.group ?: return
-        if (channelKey(g, s.tunedCh) == null) { notice("${chName(s.tunedCh)} LOCKED"); return }
-        val o = Out(Crypto.randomId(), g.id, s.tunedCh, text, image, null, clock())
+        // a photo and its location text must both go to the chat they were made in, even if another chat is open by now
+        val g = (if (to != null) s.groups.firstOrNull { it.id == to.first } else s.group) ?: return
+        val ch = to?.second ?: s.tunedCh
+        if (channelKey(g, ch) == null) { notice("${chName(ch)} LOCKED"); return }
+        val o = Out(Crypto.randomId(), g.id, ch, text, image, null, clock())
         record(s.otherIn(g) ?: me.id, g.id, kindOf(text, image, 0), true)
-        if (outbox.isEmpty() && deliver(g, o)) { addMessage(me.id, me.name, text, true, image, id = o.msgId); return }
+        if (outbox.isEmpty() && deliver(g, o)) { addMessage(me.id, me.name, text, true, image, id = o.msgId, gid = g.id, ch = ch); return }
         queue(o)
     }
 
@@ -668,10 +671,10 @@ class RadioCore(
         sendText("geo:" + String.format(java.util.Locale.US, "%.6f,%.6f,%d", lat, lon, accuracyM))
 
     /** Sends a (small, already compressed) JPEG to the channel in encrypted pieces. Held in memory only. */
-    fun sendImage(jpeg: ByteArray) = run {
+    fun sendImage(jpeg: ByteArray, to: Pair<String, Int>? = null) = run {
         val total = (jpeg.size + IMG_CHUNK - 1) / IMG_CHUNK
         if (jpeg.isEmpty() || total > IMG_MAX_CHUNKS) { notice("IMAGE TOO LARGE"); return@run }
-        post("", jpeg)
+        post("", jpeg, to)
     }
 
     private class Asm(val parts: Array<ByteArray?>, val at: Long)

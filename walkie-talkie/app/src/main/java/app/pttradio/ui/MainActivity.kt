@@ -143,11 +143,16 @@ class MainActivity : ComponentActivity(), Actions {
             try {
                 val (dim, bytes) = quality()
                 val src = if (Build.VERSION.SDK_INT >= 28) android.graphics.ImageDecoder.createSource(contentResolver, uri) else null
-                core.sendImage(jpeg(decode(src, uri, null, dim), bytes))
+                core.sendImage(jpeg(decode(src, uri, null, dim), bytes), pickTarget)
             } catch (e: Exception) { core.note("COULD NOT READ PICTURE") }
         }
     }
-    override fun pickImage() { try { imageReq.launch("image/*") } catch (e: Exception) { } }
+    /** The chat a picture or photo was started from: it goes there even if another chat is open when it is ready. */
+    private var pickTarget: Pair<String, Int>? = null
+    private var shotTarget: Pair<String, Int>? = null
+    private fun openChat() = core.state.value.let { st -> st.tunedGroup?.let { it to st.tunedCh } }
+
+    override fun pickImage() { pickTarget = openChat(); try { imageReq.launch("image/*") } catch (e: Exception) { } }
 
     // ---- camera: the photo (SD) plus a text with address, coordinates, time and a map link ----
     private var shot: java.io.File? = null
@@ -155,17 +160,18 @@ class MainActivity : ComponentActivity(), Actions {
 
     private val cameraReq = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         val f = shot
+        val to = shotTarget
         shot = null
         if (!ok || f == null) { f?.delete(); return@registerForActivityResult }
         kotlin.concurrent.thread(isDaemon = true) {
             try {
                 val src = if (Build.VERSION.SDK_INT >= 28) android.graphics.ImageDecoder.createSource(f) else null
-                core.sendImage(jpeg(decode(src, null, f, 960), 170_000))
+                core.sendImage(jpeg(decode(src, null, f, 960), 170_000), to)
             } catch (e: Exception) { core.note("COULD NOT READ PHOTO") }
             finally { f.delete() }        // the photo is not kept on the phone
             val takenAt = System.currentTimeMillis()
             val recent = lastFix?.takeIf { System.currentTimeMillis() - it.time < 120_000 }
-            if (recent != null) stamp(recent, takenAt) else runOnUiThread { fix { l -> kotlin.concurrent.thread(isDaemon = true) { stamp(l, takenAt) } } }
+            if (recent != null) stamp(recent, takenAt, to) else runOnUiThread { fix { l -> kotlin.concurrent.thread(isDaemon = true) { stamp(l, takenAt, to) } } }
         }
     }
 
@@ -174,6 +180,7 @@ class MainActivity : ComponentActivity(), Actions {
             val dir = java.io.File(cacheDir, "cam").apply { mkdirs() }
             val f = java.io.File(dir, "shot.jpg")
             shot = f
+            shotTarget = openChat()
             cameraReq.launch(androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", f))
             // find the position while the camera is open, so the stamp is ready when the photo is
             fix { l -> if (l != null) lastFix = l }
@@ -181,14 +188,14 @@ class MainActivity : ComponentActivity(), Actions {
     }
 
     /** The text that goes with a photo: address (when it can be looked up), coordinates, date and time, map link. */
-    private fun stamp(l: android.location.Location?, at: Long) {
+    private fun stamp(l: android.location.Location?, at: Long, to: Pair<String, Int>?) {
         val time = java.text.SimpleDateFormat("dd-MM-yyyy, HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(at))
-        if (l == null) { core.sendText("📷 $time\nLocation unavailable"); return }
+        if (l == null) { core.sendText("📷 $time\nLocation unavailable", to); return }
         val lat = String.format(java.util.Locale.US, "%.6f", l.latitude)
         val lon = String.format(java.util.Locale.US, "%.6f", l.longitude)
         val address = address(l.latitude, l.longitude)
         val acc = if (l.hasAccuracy()) " (±${l.accuracy.toInt().coerceAtLeast(1)} m)" else ""
-        core.sendText(listOfNotNull(address?.let { "📍 $it" }, "$lat,$lon$acc", time, "https://maps.google.com/?q=$lat,$lon").joinToString("\n"))
+        core.sendText(listOfNotNull(address?.let { "📍 $it" }, "$lat,$lon$acc", time, "https://maps.google.com/?q=$lat,$lon").joinToString("\n"), to)
     }
 
     /** Street address from the phone's geocoder; usually needs internet, so it is simply left out when offline. */
