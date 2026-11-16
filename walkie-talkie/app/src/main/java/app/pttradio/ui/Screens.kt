@@ -180,9 +180,12 @@ fun Welcome(a: Actions, login: Boolean) {
                 a.requestCode(email.trim(), name.trim(), phone, marketing) { e -> busy = false; error = e; if (e == null) sent = true }
             }
         } else {
-            Label("Code sent to $email")
-            Spacer(Modifier.height(8.dp))
-            Field(code, { v -> code = v.filter { it.isDigit() }.take(8) }, "Enter the code", Modifier.fillMaxWidth())
+            Body("Check your e-mail", weight = FontWeight.SemiBold)
+            Spacer(Modifier.height(4.dp))
+            Body("We sent a sign-in link to $email. Open the e-mail on this phone and tap the link: ZeroBar opens and you are in. " +
+                "If the e-mail shows a code instead, enter it below.", color = C.dim, size = 13.sp)
+            Spacer(Modifier.height(10.dp))
+            Field(code, { v -> code = v.filter { it.isDigit() }.take(8) }, "Code (if the e-mail has one)", Modifier.fillMaxWidth())
             error?.let { Spacer(Modifier.height(12.dp)); Body(it, color = C.red, size = 13.sp) }
             Spacer(Modifier.height(16.dp))
             Btn(if (busy) "Checking" else "Power on", Modifier.fillMaxWidth(), primary = true, enabled = !busy && code.length >= 6) {

@@ -76,8 +76,21 @@ class MainActivity : ComponentActivity(), Actions {
     private var askedBattery = false
     private val auth by lazy { Auth(BuildConfig.LOGIN_URL, BuildConfig.LOGIN_KEY) }
 
-    override fun requestCode(email: String, name: String, phone: String, marketing: Boolean, done: (String?) -> Unit) =
+    override fun requestCode(email: String, name: String, phone: String, marketing: Boolean, done: (String?) -> Unit) {
+        app.prefs.edit().putString("pendingName", name).apply()   // used when the e-mail link brings the person back
         auth.requestCode(email, name, phone, marketing) { e -> runOnUiThread { done(e) } }
+    }
+
+    /** The sign-in e-mail's link opened the app: check it and finish setting up. */
+    private fun signInLink(uri: Uri) {
+        val frag = (uri.fragment ?: uri.query ?: "").split("&").mapNotNull { p -> p.split("=", limit = 2).takeIf { it.size == 2 }?.let { it[0] to Uri.decode(it[1]) } }.toMap()
+        frag["error_description"]?.let { warning = "Sign-in failed: ${it.replace('+', ' ')}. Ask for a new link."; return }
+        val token = frag["access_token"] ?: return
+        auth.checkSession(token) { e -> runOnUiThread {
+            if (e != null) warning = e
+            else app.prefs.getString("pendingName", null)?.let { if (core.state.value.me == null) setName(it) }
+        } }
+    }
     override fun verifyCode(email: String, code: String, done: (String?) -> Unit) =
         auth.verify(email, code) { e -> runOnUiThread { done(e) } }
 
@@ -390,6 +403,7 @@ class MainActivity : ComponentActivity(), Actions {
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); handle(intent) }
 
     private fun handle(i: Intent?) {
+        i?.data?.takeIf { it.scheme == "zerobar" }?.let { signInLink(it); i.data = null; return }
         val gid = i?.getStringExtra("gid")
         if (gid != null) { core.tune(gid, i.getIntExtra("ch", 0).coerceAtLeast(0)); scr = Scr.RADIO }
         else if (i?.hasExtra("ch") == true) tab = 0
