@@ -301,7 +301,7 @@ fun RadioScreen(s: RadioState, near: NearbyInfo, level: StateFlow<Float>?, a: Ac
     val talkingHere = s.talker != null && s.talkGid == g.id
     val subtitle = when {
         s.recording -> "Recording · sends when connected"
-        s.transmitting -> "You are talking"
+        s.transmitting -> "You are talking" + if (s.txQuality.isNotEmpty()) " · ${s.txQuality}" else ""
         talkingHere -> "${s.talker} is talking…"
         s.talker != null -> "${s.talker} is talking in ${s.groups.firstOrNull { it.id == s.talkGid }?.let { s.titleOf(it) } ?: "another chat"}"
         s.notice != null -> s.notice.lowercase().replaceFirstChar { it.uppercase() }

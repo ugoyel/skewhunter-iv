@@ -25,12 +25,15 @@ class OpusCodec : VoiceCodec {
     private var encPts = 0L
     private var decPts = 0L
     private val info = MediaCodec.BufferInfo()
+    private var bitrate = 16000
+
+    override fun setBitrate(bps: Int) { if (bps != bitrate) { bitrate = bps; releaseEnc() } }
 
     override val ok: Boolean by lazy { selfTest() }
 
     private fun newEnc(): MediaCodec {
         val f = MediaFormat.createAudioFormat(mime, 16000, 1)
-        f.setInteger(MediaFormat.KEY_BIT_RATE, 16000)
+        f.setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
         f.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 8192)
         return MediaCodec.createEncoderByType(mime).apply { configure(f, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE); start() }
     }

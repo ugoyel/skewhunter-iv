@@ -205,11 +205,23 @@ class NearbyTransport(private val ctx: Context) : Transport {
         }
     }
 
+    /** The app wants the nearby link (no internet, or the app is open). It only runs while Bluetooth is on. */
+    @Volatile private var wanted = false
+    /** Set by the app: true while it is on screen. Scanning is continuous then, and in short bursts otherwise. */
+    @Volatile var foreground = false
+    private var discUntil = 0L
+    private var nextDisc = 0L
+
     fun start() = main.post {
+        wanted = true
         if (myId.isEmpty()) return@post
         if (!hasPermissions(ctx)) { publish(); return@post }
+        // Never switch Bluetooth on behind the user's back: Nearby would do that if started while it is off.
+        if (!bluetoothOn()) { if (running) halt(); publish(); return@post }
+        val now = System.currentTimeMillis()
+        if (!running) { discUntil = now + 20_000; nextDisc = now + 60_000 }
         running = true
-        if (lookingSince == 0L || peers.isEmpty()) lookingSince = System.currentTimeMillis()
+        if (lookingSince == 0L || peers.isEmpty()) lookingSince = now
         error = null
         try {
             if (!advertising) {
@@ -217,15 +229,25 @@ class NearbyTransport(private val ctx: Context) : Transport {
                 client.startAdvertising(myId, serviceId, lifecycle, AdvertisingOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build())
                     .addOnFailureListener { e -> describe(e).let { if (it.isNotEmpty()) { advertising = false; error = it } }; publish() }
             }
-            if (!discovering) {
-                discovering = true
-                client.startDiscovery(serviceId, discovery, DiscoveryOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build())
-                    .addOnFailureListener { e -> describe(e).let { if (it.isNotEmpty()) { discovering = false; error = it } }; publish() }
-            }
+            discover(true)
         } catch (e: Exception) { advertising = false; discovering = false; error = describe(e) }
-        beacon.start(myId)
+        if (foreground) beacon.start(myId)
         main.removeCallbacks(refresh); main.postDelayed(refresh, 2000)
         publish()
+    }
+
+    /** Discovery is the battery-hungry part: it is switched on and off by the duty cycle in [watchdog]. */
+    private fun discover(on: Boolean) {
+        if (on && !discovering) {
+            discovering = true
+            try {
+                client.startDiscovery(serviceId, discovery, DiscoveryOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build())
+                    .addOnFailureListener { e -> describe(e).let { if (it.isNotEmpty()) { discovering = false; error = it } }; publish() }
+            } catch (e: Exception) { discovering = false }
+        } else if (!on && discovering) {
+            discovering = false
+            try { client.stopDiscovery() } catch (e: Exception) { }
+        }
     }
 
     /** Scanning that found nobody is restarted, e.g. after Bluetooth or Location was switched on. */
@@ -248,10 +270,10 @@ class NearbyTransport(private val ctx: Context) : Transport {
         listener?.onLink(this)
     }
 
-    fun stop() = main.post { if (!running) publish() else halt() }
+    fun stop() = main.post { wanted = false; if (!running) publish() else halt() }
 
-    /** Drops every link and starts looking again from scratch: manual refresh, or Bluetooth / Wi-Fi was toggled. */
-    fun restart() = main.post { if (running) { halt(); start() } }
+    /** Drops every link and starts looking again from scratch: manual refresh, or Wi-Fi was toggled. */
+    fun restart() = main.post { if (running && bluetoothOn()) { halt(); start() } }
 
     private val restartSoon = Runnable { restart() }
 
@@ -260,11 +282,22 @@ class NearbyTransport(private val ctx: Context) : Transport {
         try {
             androidx.core.content.ContextCompat.registerReceiver(ctx, object : android.content.BroadcastReceiver() {
                 override fun onReceive(c: Context, i: android.content.Intent) {
-                    val st = i.getIntExtra(android.bluetooth.BluetoothAdapter.EXTRA_STATE, i.getIntExtra(android.net.wifi.WifiManager.EXTRA_WIFI_STATE, -1))
-                    val settled = st == android.bluetooth.BluetoothAdapter.STATE_ON || st == android.bluetooth.BluetoothAdapter.STATE_OFF ||
-                        st == android.net.wifi.WifiManager.WIFI_STATE_ENABLED || st == android.net.wifi.WifiManager.WIFI_STATE_DISABLED
                     publish()
-                    if (settled) { main.removeCallbacks(restartSoon); main.postDelayed(restartSoon, 400) }
+                    if (i.action == android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED) {
+                        when (i.getIntExtra(android.bluetooth.BluetoothAdapter.EXTRA_STATE, -1)) {
+                            // the user switched Bluetooth off: let go of the nearby link and leave it off
+                            android.bluetooth.BluetoothAdapter.STATE_TURNING_OFF, android.bluetooth.BluetoothAdapter.STATE_OFF -> {
+                                main.removeCallbacks(restartSoon); if (running) halt()
+                            }
+                            // switched back on: reconnect straight away
+                            android.bluetooth.BluetoothAdapter.STATE_ON -> if (wanted) main.postDelayed({ if (wanted) start() }, 400)
+                        }
+                    } else {
+                        val st = i.getIntExtra(android.net.wifi.WifiManager.EXTRA_WIFI_STATE, -1)
+                        if (running && (st == android.net.wifi.WifiManager.WIFI_STATE_ENABLED || st == android.net.wifi.WifiManager.WIFI_STATE_DISABLED)) {
+                            main.removeCallbacks(restartSoon); main.postDelayed(restartSoon, 400)
+                        }
+                    }
                 }
             }, android.content.IntentFilter().apply {
                 addAction(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED)
@@ -316,9 +349,20 @@ class NearbyTransport(private val ctx: Context) : Transport {
             try { client.disconnectFromEndpoint(e) } catch (x: Exception) { }
             retry(e)
         }
+        if (!running) return
+        if (!bluetoothOn()) { halt(); return }
+        // signal-strength beacon is only needed for what is on screen
+        if (foreground) beacon.start(myId) else beacon.stop()
+        // Discovery: continuous while the app is open and nobody is linked; otherwise 15 s bursts every
+        // 1 minute (nobody linked) or 2 minutes (already linked). Linked phones keep talking in between.
+        if (foreground && peers.isEmpty()) discover(true)
+        else {
+            if (now >= nextDisc) { discUntil = now + 15_000; nextDisc = now + if (peers.isEmpty()) 60_000 else 120_000 }
+            discover(now < discUntil)
+        }
         if (peers.isNotEmpty()) { lookingSince = now; return }
         val limit = if (found.isNotEmpty()) 40_000 else 90_000
-        if (now - lookingSince > limit) restart()
+        if (foreground && now - lookingSince > limit) restart()
     }
 
     private val discovery = object : EndpointDiscoveryCallback() {

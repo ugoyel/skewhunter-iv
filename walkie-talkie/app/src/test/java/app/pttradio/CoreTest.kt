@@ -390,6 +390,19 @@ class CoreTest {
         await("newest wins") { c.s.groups.first { it.id == gid }.name == "Day patrol" }
     }
 
+    @Test fun framesAreBundledOnAWeakLinkAndNothingIsLost() {
+        val (a, b, _) = trio()
+        a.core.setLinkTier(2)                      // weak internet: three 60 ms frames per packet
+        Thread.sleep(150)
+        a.core.pttDown(); await("tx") { a.s.transmitting }
+        assertEquals("Standard voice", a.s.txQuality)
+        repeat(7) { a.audio.onFrame!!(tone()) }
+        a.core.pttUp(); await("end") { !a.s.transmitting }
+        await("all audio arrives") { b.audio.played.sumOf { it.size } == 7 * 960 }
+        assertEquals(3, b.audio.played.size)       // 3 + 3 + the last 1
+        assertEquals("", a.s.txQuality)
+    }
+
     @Test fun stateSurvivesRestartButMessagesDoNot() {
         val (a, b, _) = trio()
         a.core.sendText("secret")

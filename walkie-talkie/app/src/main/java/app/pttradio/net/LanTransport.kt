@@ -54,7 +54,7 @@ class LanTransport(private val ctx: Context) : Transport {
         if (running) return@execute
         running = true
         try {
-            lock = ctx.applicationContext.getSystemService(WifiManager::class.java)?.createMulticastLock("pttradio:lan")?.apply { setReferenceCounted(false); acquire() }
+            lock = ctx.applicationContext.getSystemService(WifiManager::class.java)?.createMulticastLock("pttradio:lan")?.apply { setReferenceCounted(false) }
         } catch (e: Exception) { }
         try {
             val s = DatagramSocket(null).apply { reuseAddress = true; broadcast = true; bind(InetSocketAddress(PORT)) }
@@ -73,7 +73,7 @@ class LanTransport(private val ctx: Context) : Transport {
         rx = null
         senders.values.forEach { try { it.close() } catch (e: Exception) { } }
         senders.clear()
-        try { lock?.release() } catch (e: Exception) { }
+        try { if (lock?.isHeld == true) lock?.release() } catch (e: Exception) { }
         peers.clear()
         changed()
     }
@@ -114,6 +114,8 @@ class LanTransport(private val ctx: Context) : Transport {
         } catch (e: Exception) { }
         mine = own
         targets = t
+        // only keep the Wi-Fi radio listening for broadcasts while there is a Wi-Fi network to listen on
+        try { if (t.isEmpty()) { if (lock?.isHeld == true) lock?.release() } else if (lock?.isHeld == false) lock?.acquire() } catch (e: Exception) { }
         senders.keys.filter { it !in own }.forEach { senders.remove(it)?.close() }
         if (t.isNotEmpty()) broadcast(PING + myId.toByteArray())
         val now = System.currentTimeMillis()

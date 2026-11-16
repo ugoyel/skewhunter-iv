@@ -200,6 +200,15 @@ class Sos(
 
     // ------------------------------------------------------------------ listening
 
+    private var foreground = false
+
+    /** Scanning is lighter while the app is in the background. */
+    fun setForeground(fg: Boolean) = main.post {
+        if (fg == foreground) return@post
+        foreground = fg
+        if (listening) { stopScan(); startScan() }
+    }
+
     fun listen(on: Boolean) = main.post {
         wantListen = on
         if (on) startScan() else stopScan()
@@ -210,7 +219,7 @@ class Sos(
         val a = adapter?.takeIf { it.isEnabled } ?: return
         val sc = a.bluetoothLeScanner ?: return
         val filter = ScanFilter.Builder().setManufacturerData(MFR, byteArrayOf(MAGIC), byteArrayOf(0xFF.toByte())).build()
-        val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_BALANCED).apply {
+        val settings = ScanSettings.Builder().setScanMode(if (foreground) ScanSettings.SCAN_MODE_BALANCED else ScanSettings.SCAN_MODE_LOW_POWER).apply {
             // extended scanning is needed to hear the long-range broadcasts
             if (try { a.isLeExtendedAdvertisingSupported } catch (e: Exception) { false }) { setLegacy(false); setPhy(ScanSettings.PHY_LE_ALL_SUPPORTED) }
         }.build()

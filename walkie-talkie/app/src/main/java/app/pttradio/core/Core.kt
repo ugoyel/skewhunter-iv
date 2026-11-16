@@ -199,6 +199,8 @@ data class RadioState(
     val recent: List<Recent> = emptyList(),
     /** Chat the current incoming voice belongs to (it can be a chat that is not open). */
     val talkGid: String? = null,
+    /** Voice quality of the current transmission, e.g. "HD voice"; empty when not talking. */
+    val txQuality: String = "",
     /** Talking with no link: the voice is kept in memory and sent when a link is back. */
     val recording: Boolean = false,
 ) {
@@ -257,6 +259,8 @@ interface VoiceCodec {
     fun decode(data: ByteArray, off: Int, len: Int): ShortArray
     fun resetEnc()
     fun resetDec()
+    /** Bits per second for the next transmission. */
+    fun setBitrate(bps: Int) {}
 }
 
 interface TransportListener {

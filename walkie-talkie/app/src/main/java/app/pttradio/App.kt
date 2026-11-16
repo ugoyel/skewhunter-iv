@@ -67,6 +67,21 @@ class App : Application() {
     /** auto = internet, plus nearby whenever there is no internet or the app is on screen · net · nearby · both */
     val linkMode = MutableStateFlow("auto")
     private val bump = MutableStateFlow(0)
+    private val netTier = MutableStateFlow(3)
+    lateinit var audio: AudioEngine
+
+    /** 3 = good internet, 2 = slow or weak. Based on Android's bandwidth estimate and the signal strength. */
+    private fun tierOf(c: android.net.NetworkCapabilities): Int {
+        if (!c.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return 1
+        val down = c.linkDownstreamBandwidthKbps
+        val sig = if (android.os.Build.VERSION.SDK_INT >= 29) c.signalStrength else Int.MIN_VALUE
+        val wifi = c.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)
+        val weak = sig != Int.MIN_VALUE && sig < (if (wifi) -78 else -110)
+        return if ((down in 1..1499) || weak) 2 else 3
+    }
+
+    fun setBoost(level: Int) { prefs.edit().putInt("boost", level).apply(); audio.boost = level }
+
     /** True while the app is on screen. */
     val onScreen = MutableStateFlow(false)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -79,7 +94,7 @@ class App : Application() {
         core = RadioCore(object : KV {
             override fun get(k: String) = prefs.getString(k, null)
             override fun put(k: String, v: String?) { prefs.edit().putString(k, v).apply() }
-        }, AudioEngine(this), opus = OpusCodec())
+        }, AudioEngine(this).also { audio = it }, opus = OpusCodec())
         val alarms = Alarms(this)
         mqtt = MqttTransport({ servers() }, { alarms }, { alarms.retryIn(it) })
         alarms.onRetry = { mqtt.retryNow() }
@@ -96,12 +111,18 @@ class App : Application() {
         // emergency alerts are listened for whenever the local radios run
         scope.launch { nearby.info.map { it.running }.distinctUntilChanged().collect { sos.listen(it) } }
         scope.launch { core.state.map { it.netUp }.distinctUntilChanged().collect { nearby.internetUp = it } }
+        scope.launch { onScreen.collect { nearby.foreground = it; sos.setForeground(it) } }
         // widgets show chat names: redraw them when groups are renamed, joined or removed
         scope.launch { core.state.map { st -> st.groups.map { st.titleOf(it) } }.distinctUntilChanged().collect { try { PttWidget.refreshAll(this@App) } catch (e: Exception) { } } }
 
         getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) { mqtt.kick() }
+            override fun onCapabilitiesChanged(network: Network, caps: android.net.NetworkCapabilities) { netTier.value = tierOf(caps) }
+            override fun onLost(network: Network) { netTier.value = 1 }
         })
+        // voice quality follows the connection: HD on good internet, lower bit rates as it gets worse
+        scope.launch { combine(netTier, core.state.map { it.netUp }.distinctUntilChanged()) { t, up -> if (up) t else 1 }.collect { core.setLinkTier(it) } }
+        audio.boost = prefs.getInt("boost", 1)
         // Rugged phones announce their dedicated PTT key with a broadcast instead of a key code.
         ContextCompat.registerReceiver(this, object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { if (i.action in PTT_DOWN) buttonDown() else buttonUp() }

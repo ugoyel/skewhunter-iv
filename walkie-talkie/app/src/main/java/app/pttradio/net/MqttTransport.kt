@@ -148,15 +148,16 @@ class MqttTransport(
             val add = subs - active
             val del = active - subs
             if (del.isNotEmpty()) c.unsubscribe(del.toTypedArray())
-            if (add.isNotEmpty()) c.subscribe(add.toTypedArray(), IntArray(add.size) { if (add.elementAt(it).contains("/c/")) 0 else 1 })
+            if (add.isNotEmpty()) c.subscribe(add.toTypedArray(), IntArray(add.size) { 1 })
             active = subs
         } catch (e: Exception) { }
     }
 
     override fun send(topic: String, raw: ByteArray, retained: Boolean) {
         val c = client ?: return
-        // Voice and text travel at QoS 0 and are never retained: if nobody is listening they are gone.
-        c.publish(topic, raw, if (retained) 1 else 0, retained)
+        // QoS 1: the relay confirms every packet, so nothing is silently dropped on the way. Voice and text are
+        // still never retained: if nobody is listening they are gone.
+        c.publish(topic, raw, 1, retained)
     }
 
     override fun relay(raw: ByteArray, src: String?) {}

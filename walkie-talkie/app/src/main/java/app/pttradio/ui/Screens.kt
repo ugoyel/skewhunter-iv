@@ -81,6 +81,8 @@ interface Actions {
     fun setTtl(sec: Int)
     fun setBeep(on: Boolean)
     fun setHd(on: Boolean)
+    /** Speaker loudness: 0 normal, 1 loud, 2 maximum. */
+    fun setBoost(level: Int)
     fun setMode(m: String)
     fun setServer(s: String)
     fun requestPerm(kind: String)
@@ -246,7 +248,7 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: ButtonCfg, field: Pair<String, String>, sosAnyone: Boolean, a: Actions, onBack: () -> Unit) {
+fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: ButtonCfg, field: Pair<String, String>, sosAnyone: Boolean, boost: Int, a: Actions, onBack: () -> Unit) {
     var fSsid by remember { mutableStateOf(field.first) }
     var fPass by remember { mutableStateOf(field.second) }
     var name by remember { mutableStateOf(s.me?.name ?: "") }
@@ -303,13 +305,19 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: B
                     else -> "Internet when there is one. Nearby phones are found over Bluetooth and Wi-Fi whenever there is no internet, and also while the app is open."
                 }, color = C.dim, size = 12.sp)
             }
-            Section("Voice") {
-                Segments(listOf("1" to "Low data HD", "0" to "Standard"), if (s.hd && s.hdOk) "1" else "0", Modifier.fillMaxWidth()) { a.setHd(it == "1") }
+            Section("Voice quality") {
+                Segments(listOf("1" to "Auto", "0" to "Standard"), if (s.hd && s.hdOk) "1" else "0", Modifier.fillMaxWidth()) { a.setHd(it == "1") }
                 Body(when {
-                    !s.hdOk -> "This phone cannot use low-data voice, so it stays on Standard (about 64 kbit/s)."
-                    s.hd -> "About 16 kbit/s, a quarter of the data, and steadier on weak links. Used when every phone on the channel supports it; otherwise Standard is used automatically."
-                    else -> "About 64 kbit/s. Works on every phone."
+                    !s.hdOk -> "This phone cannot use adaptive voice, so it stays on Standard (about 64 kbit/s)."
+                    s.hd -> "Follows the connection: HD voice on good internet (32 kbit/s), low-data voice on a weak one (16 kbit/s), " +
+                        "data saver without internet (12 kbit/s). Used when every phone on the channel supports it; otherwise Standard."
+                    else -> "About 64 kbit/s, no compression. Works with every version of the app."
                 }, color = C.dim, size = 12.sp)
+            }
+            Section("Speaker loudness") {
+                Segments(listOf("0" to "Normal", "1" to "Loud", "2" to "Maximum"), boost.toString(), Modifier.fillMaxWidth()) { a.setBoost(it.toInt()) }
+                Body("Quiet voices are raised to a loud, even level; background noise is not amplified and loud voices are limited so they do not distort. " +
+                    "Turn the phone's media volume up too.", color = C.dim, size = 12.sp)
             }
             Section("End-of-transmission beep") {
                 Segments(listOf("1" to "On", "0" to "Off"), if (s.beep) "1" else "0", Modifier.width(180.dp)) { a.setBeep(it == "1") }

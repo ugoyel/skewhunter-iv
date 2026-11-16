@@ -46,7 +46,7 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun AppRoot(s: RadioState, p: Perms, near: NearbyInfo, alerts: List<app.pttradio.net.SosAlert>, sending: app.pttradio.net.SosSending?,
-            field: Pair<String, String>, sosAnyone: Boolean, level: kotlinx.coroutines.flow.StateFlow<Float>?, login: Boolean, mode: String, server: String, btn: ButtonCfg, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
+            field: Pair<String, String>, sosAnyone: Boolean, boost: Int, level: kotlinx.coroutines.flow.StateFlow<Float>?, login: Boolean, mode: String, server: String, btn: ButtonCfg, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
     val now by produceState(System.currentTimeMillis()) { while (true) { delay(500); value = System.currentTimeMillis() } }
     // Android 16 draws apps edge to edge: keep content clear of the status bar, navigation bar and keyboard
     Box(Modifier.fillMaxSize().background(C.bg).safeDrawingPadding()) {
@@ -54,7 +54,7 @@ fun AppRoot(s: RadioState, p: Perms, near: NearbyInfo, alerts: List<app.pttradio
             !s.ready -> {}
             s.me == null -> Welcome(a, login)
             scr == Scr.SETUP -> Setup(p, a) { go(Scr.HOME) }
-            scr == Scr.SETTINGS -> SettingsScreen(s, p, mode, server, btn, field, sosAnyone, a) { go(Scr.HOME) }
+            scr == Scr.SETTINGS -> SettingsScreen(s, p, mode, server, btn, field, sosAnyone, boost, a) { go(Scr.HOME) }
             scr == Scr.RADIO && s.group != null -> RadioScreen(s, near, level, a, now) { go(Scr.HOME) }
             else -> Home(s, p, near, alerts, sending, a, now, tab, onTab, go)
         }
@@ -300,6 +300,7 @@ class MainActivity : ComponentActivity(), Actions {
     }
     private var btn by mutableStateOf(ButtonCfg())
     private var sosOpen by mutableStateOf(false)
+    private var boostLevel by mutableStateOf(1)
 
     private fun refreshButton(learning: Boolean = false) {
         btn = ButtonCfg(app.pttKey(), learning, app.pttGroup())
@@ -350,6 +351,7 @@ class MainActivity : ComponentActivity(), Actions {
         super.onCreate(savedInstanceState)
         serverUrl = app.prefs.getString("server", "") ?: ""
         sosOpen = app.prefs.getBoolean("sosAnyone", false)
+        boostLevel = app.prefs.getInt("boost", 1)
         if (core.state.value.me != null || app.prefs.getString("me", null) != null) {
             if (!app.prefs.getBoolean("setupDone", false)) scr = Scr.SETUP
         }
@@ -363,7 +365,7 @@ class MainActivity : ComponentActivity(), Actions {
             val sending by app.sos.sending.collectAsState()
             LaunchedEffect(s.me?.id) { if (s.me != null) RadioService.start(this@MainActivity) }
             BackHandler(enabled = s.me != null && scr != Scr.HOME) { scr = Scr.HOME }
-            AppRoot(s, perms, near, alerts, sending, field, sosOpen, core.level, auth.enabled, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
+            AppRoot(s, perms, near, alerts, sending, field, sosOpen, boostLevel, core.level, auth.enabled, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
             warning?.let { w ->
                 Sheet("Warning", { warning = null }) {
                     Body(w, size = 14.sp)
@@ -458,6 +460,7 @@ class MainActivity : ComponentActivity(), Actions {
     override fun setTtl(sec: Int) { core.setTtl(sec) }
     override fun setBeep(on: Boolean) { core.setBeep(on) }
     override fun setHd(on: Boolean) { core.setHd(on) }
+    override fun setBoost(level: Int) { app.setBoost(level); boostLevel = level }
     override fun setMode(m: String) { app.setMode(m) }
     override fun setServer(s: String) { serverUrl = s; app.setServer(s) }
 }

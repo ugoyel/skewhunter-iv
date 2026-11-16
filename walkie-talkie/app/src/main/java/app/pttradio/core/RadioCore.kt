@@ -69,6 +69,14 @@ class RadioCore(
     private var rxFrames = 0
     private var rxDelayed = false
     private var txOpus = false
+    /**
+     * Link quality, set by the app from the phone's network: 3 = good internet, 2 = weak internet, 1 = no internet
+     * (nearby or field Wi-Fi only), 0 = not known. It picks the voice bit rate and how many 60 ms frames go in one
+     * packet: fewer, larger packets ride out poor networks and rate-limited relays much better.
+     */
+    @Volatile var linkTier = 0
+    private var bundle = 1
+    private val txBuf = ArrayList<ShortArray>()
     private val opCaps = HashMap<String, Boolean>()            // "gid/uid" -> that phone can decode low-data voice
     private var txStart = 0L
     private var rxSeq = -1
@@ -167,6 +175,8 @@ class RadioCore(
         kv.put("hd", if (on) "1" else "0"); update { copy(hd = on) }
         s.group?.let { sendPresence(it, s.tunedCh) }
     }
+    fun setLinkTier(t: Int) { linkTier = t }
+
     fun setBeep(on: Boolean) = run { kv.put("beep", if (on) "1" else "0"); update { copy(beep = on) } }
 
     // ---------------------------------------------------------------- sending
@@ -451,25 +461,41 @@ class RadioCore(
         // Low-data voice only when every phone listening on this channel has said it can decode it.
         val others = s.occupants(g.id, s.tunedCh).filter { it != s.me?.id }
         txOpus = !offline && s.hd && s.hdOk && opus != null && others.isNotEmpty() && others.all { opCaps["${g.id}/$it"] == true }
-        if (txOpus) opus!!.resetEnc()
+        val tier = linkTier
+        bundle = when (tier) { 3 -> 2; 2 -> 3; 1 -> 2; else -> 1 }
+        txBuf.clear()
+        if (txOpus) { opus!!.setBitrate(when (tier) { 3 -> 32_000; 1 -> 12_000; else -> 16_000 }); opus.resetEnc() }
+        val quality = when { offline -> ""; !txOpus -> "Standard voice"; tier == 3 -> "HD voice"; tier == 1 -> "Data saver"; else -> "Low-data voice" }
         txStart = clock()
         if (!audio.startCapture { pcm -> run { txFrame(pcm) } }) { notice("MIC UNAVAILABLE"); return@run }
-        update { copy(transmitting = true, recording = offline, talker = null, talkerId = null, hdNow = txOpus) }
+        update { copy(transmitting = true, recording = offline, talker = null, talkerId = null, hdNow = txOpus, txQuality = quality) }
         if (offline) notice("NO LINK · RECORDING")
         record(s.otherIn(g) ?: s.me!!.id, g.id, "talk", true)
     }
 
     private fun txFrame(pcm: ShortArray) {
-        val g = s.group
-        if (!s.transmitting || g == null) return
+        if (!s.transmitting || s.group == null) return
         level.value = levelOf(pcm)
         txClip?.let { if (it.size < MAX_TX / 60) it.add(pcm); return }
+        txBuf.add(pcm)
+        if (txBuf.size >= bundle) sendBundle()
+    }
+
+    /** Encodes the frames collected so far as one packet and sends it. */
+    private fun sendBundle() {
+        val g = s.group ?: return
+        if (txBuf.isEmpty()) return
+        val frames = ArrayList(txBuf)
+        txBuf.clear()
+        val pcm = if (frames.size == 1) frames[0] else ShortArray(frames.sumOf { it.size }).also { o ->
+            var at = 0; for (f in frames) { f.copyInto(o, at); at += f.size }
+        }
         val key = channelKey(g, s.tunedCh) ?: return
         var flags = 0
         var a: ByteArray? = null
         if (txOpus) {
             a = opus!!.encode(pcm)
-            if (a == null) { txOpus = false; update { copy(hdNow = false) } } // encoder died: carry on with the standard codec
+            if (a == null) { txOpus = false; update { copy(hdNow = false, txQuality = "Standard voice") } } // encoder died: carry on with the standard codec
             else if (a.isEmpty() || a[0].toInt() == 0) return                 // encoder still buffering
             else flags = 2
         }
@@ -477,7 +503,7 @@ class RadioCore(
         val seq = txSeq++ and 0xffff
         if (!sendSealed(T_AUDIO, g.id, s.tunedCh, key, byteArrayOf((seq shr 8).toByte(), seq.toByte(), flags.toByte()) + a, chanTopic(g.id, s.tunedCh))) {
             // the link dropped mid-sentence: keep the rest and send it once a link is back
-            txClip = arrayListOf(pcm)
+            txClip = frames
             update { copy(recording = true, hdNow = false) }
             notice("LINK LOST · RECORDING")
         }
@@ -498,9 +524,11 @@ class RadioCore(
         if (!s.transmitting) return
         audio.stopCapture()
         level.value = 0f
+        // the last few frames that did not fill a whole packet
+        if (txClip == null) sendBundle() else { txClip!!.addAll(txBuf); txBuf.clear() }
         val clip = txClip
         txClip = null
-        update { copy(transmitting = false, hdNow = false, recording = false) }
+        update { copy(transmitting = false, hdNow = false, recording = false, txQuality = "") }
         val g = s.group ?: return
         if (clip != null) {
             if (clip.size >= 4) queue(Out(Crypto.randomId(), g.id, s.tunedCh, "", null, clip, clock()))
