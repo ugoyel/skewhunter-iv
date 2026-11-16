@@ -1,6 +1,7 @@
 package app.pttradio.ui
 
 import android.text.format.DateUtils
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
@@ -121,24 +123,32 @@ fun Home(
     var groupMenu by remember { mutableStateOf<Group?>(null) }
     var renaming by remember { mutableStateOf<Group?>(null) }
     var deleting by remember { mutableStateOf<Group?>(null) }
-    val selecting = picking || sel.isNotEmpty()
+    var selChats by remember { mutableStateOf(setOf<String>()) }   // chats picked with touch-and-hold
+    var deletingMany by remember { mutableStateOf<Set<String>?>(null) }
+    val selecting = picking || sel.isNotEmpty() || selChats.isNotEmpty()
+    // people for a new group: picked people plus the other person of each picked one-to-one chat
+    val people = sel + selChats.mapNotNull { id -> s.groups.firstOrNull { it.id == id }?.let { s.otherIn(it) } }
     val haptic = LocalHapticFeedback.current
-    val clearSel = { sel = emptySet(); picking = false }
+    val clearSel = { sel = emptySet(); selChats = emptySet(); picking = false }
+    // Back leaves the selection instead of leaving the app
+    BackHandler(selecting) { clearSel() }
     fun open(gid: String) { a.tune(gid, if (s.tunedGroup == gid) s.tunedCh else 0); go(Scr.RADIO) }
 
     Column(Modifier.fillMaxSize()) {
         // ---------------------------------------------------------------- top bar
         if (selecting) Row(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Filled.Close, "Cancel", Modifier.clip(CircleShape).clickable { clearSel() }.padding(10.dp).size(22.dp), tint = C.text)
-            Text(if (sel.isEmpty()) "Select people" else "${sel.size} selected", Modifier.weight(1f).padding(start = 8.dp), color = C.text, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
-            val single = sel.singleOrNull()?.let { s.directWith(it) }
-            if (single != null) {
-                Icon(Icons.Filled.Home, "Add to home screen", Modifier.clip(CircleShape).clickable { a.addToHome(single.id); clearSel() }.padding(10.dp).size(22.dp), tint = C.text)
-                Icon(Icons.Filled.Delete, "Delete chat", Modifier.clip(CircleShape).clickable { deleting = single; clearSel() }.padding(10.dp).size(22.dp), tint = C.text)
+            val count = sel.size + selChats.size
+            Text(if (count == 0) "Select people" else "$count selected", Modifier.weight(1f).padding(start = 8.dp), color = C.text, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+            val one = selChats.singleOrNull()?.takeIf { sel.isEmpty() }?.let { id -> s.groups.firstOrNull { it.id == id } }
+            if (one != null) {
+                if (!one.direct) Icon(Icons.Filled.Edit, "Rename group", Modifier.clip(CircleShape).clickable { renaming = one; clearSel() }.padding(10.dp).size(22.dp), tint = C.text)
+                Icon(Icons.Filled.Home, "Add to home screen", Modifier.clip(CircleShape).clickable { a.addToHome(one.id); clearSel() }.padding(10.dp).size(22.dp), tint = C.text)
             }
-            if (sel.isNotEmpty()) {
-                if (s.groups.any { !it.direct }) Text("Add to…", Modifier.clip(RoundedCornerShape(18.dp)).clickable { addTo = true }.padding(horizontal = 10.dp, vertical = 8.dp), color = C.accent, fontSize = 15.sp)
-                Text("New group", Modifier.clip(RoundedCornerShape(18.dp)).clickable { naming = true }.padding(horizontal = 10.dp, vertical = 8.dp), color = C.accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            if (selChats.isNotEmpty()) Icon(Icons.Filled.Delete, "Delete chats", Modifier.clip(CircleShape).clickable { deletingMany = selChats }.padding(10.dp).size(22.dp), tint = C.text)
+            if (people.isNotEmpty() && selChats.none { id -> s.groups.firstOrNull { it.id == id }?.direct == false }) {
+                if (s.groups.any { !it.direct }) Text("Add to…", Modifier.clip(RoundedCornerShape(18.dp)).clickable { addTo = true }.padding(horizontal = 8.dp, vertical = 8.dp), color = C.accent, fontSize = 15.sp)
+                Text("New group", Modifier.clip(RoundedCornerShape(18.dp)).clickable { naming = true }.padding(horizontal = 8.dp, vertical = 8.dp), color = C.accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             }
         } else Row(Modifier.fillMaxWidth().height(60.dp).padding(start = 18.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("ZeroBar", Modifier.weight(1f), color = C.text, fontSize = 24.sp, fontWeight = FontWeight.Bold)
@@ -189,16 +199,19 @@ fun Home(
 
         // ---------------------------------------------------------------- content
         Box(Modifier.weight(1f)) {
-            if (tab == 0 || selecting) ChatList(s, near, now, q.trim(), if (selecting) 2 else filter, sel, selecting,
+            if (tab == 0 || selecting) ChatList(s, near, now, q.trim(), if (picking || (sel.isNotEmpty() && selChats.isEmpty())) 2 else filter, sel, selChats, selecting,
                 onChat = { g ->
                     val other = s.otherIn(g)
-                    if (selecting) { if (other != null) sel = if (other in sel) sel - other else sel + other }
-                    else open(g.id)
+                    when {
+                        selChats.isNotEmpty() -> selChats = if (g.id in selChats) selChats - g.id else selChats + g.id
+                        selecting -> if (other != null) sel = if (other in sel) sel - other else sel + other
+                        else -> open(g.id)
+                    }
                 },
                 onChatLong = { g ->
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    val other = s.otherIn(g)
-                    if (other != null) sel = sel + other else if (!selecting) groupMenu = g
+                    if (picking || (sel.isNotEmpty() && selChats.isEmpty())) s.otherIn(g)?.let { sel = sel + it }
+                    else selChats = selChats + g.id
                 },
                 onPerson = { u -> if (selecting) sel = if (u.id in sel) sel - u.id else sel + u.id else { a.openDirect(u.id); go(Scr.RADIO) } },
                 onPersonLong = { u -> haptic.performHapticFeedback(HapticFeedbackType.LongPress); sel = sel + u.id },
@@ -249,9 +262,9 @@ fun Home(
     }
     if (naming) {
         var name by remember { mutableStateOf("") }
-        val create = { a.createGroup(name, sel.toList()); clearSel(); naming = false; go(Scr.RADIO) }
+        val create = { a.createGroup(name, people.toList()); clearSel(); naming = false; go(Scr.RADIO) }
         Sheet("New group", { naming = false }) {
-            Body(sel.joinToString(", ") { s.nameOf(it) }, color = C.dim, size = 13.sp, maxLines = 3)
+            Body(people.joinToString(", ") { s.nameOf(it) }, color = C.dim, size = 13.sp, maxLines = 3)
             Field(name, { name = it.take(24) }, "Group name", Modifier.fillMaxWidth(), onDone = { if (name.isNotBlank()) create() })
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Btn("Cancel", Modifier.weight(1f)) { naming = false }
@@ -259,10 +272,10 @@ fun Home(
             }
         }
     }
-    if (addTo) Sheet("Add ${sel.size} to…", { addTo = false }) {
+    if (addTo) Sheet("Add ${people.size} to…", { addTo = false }) {
         Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
             s.groups.filter { !it.direct }.sortedByDescending { s.lastAt(it.id) }.forEach { g ->
-                Row(Modifier.fillMaxWidth().clickable { a.addMembers(g.id, sel.toList()); addTo = false; clearSel() }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().clickable { a.addMembers(g.id, people.toList()); addTo = false; clearSel() }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Avatar(g.name, g.id, 40.dp, group = true); Spacer(Modifier.width(12.dp)); Body(g.name, maxLines = 1)
                 }
             }
@@ -283,6 +296,15 @@ fun Home(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Btn("Cancel", Modifier.weight(1f)) { renaming = null }
                 Btn("Save", Modifier.weight(1f), primary = true, enabled = name.isNotBlank()) { a.renameGroup(g.id, name); renaming = null }
+            }
+        }
+    }
+    deletingMany?.let { ids ->
+        Sheet(if (ids.size == 1) "Delete this chat?" else "Delete ${ids.size} chats?", { deletingMany = null }) {
+            Body("They are removed from this phone. For groups, the others see that you left and have to invite you again.", color = C.dim, size = 13.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Btn("Keep", Modifier.weight(1f)) { deletingMany = null }
+                Btn("Delete", Modifier.weight(1f), danger = true) { ids.forEach { a.leave(it) }; deletingMany = null; clearSel() }
             }
         }
     }
@@ -350,7 +372,7 @@ private fun StatusLine(s: RadioState, near: NearbyInfo, now: Long, a: Actions) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChatList(
-    s: RadioState, near: NearbyInfo, now: Long, q: String, filter: Int, sel: Set<String>, selecting: Boolean,
+    s: RadioState, near: NearbyInfo, now: Long, q: String, filter: Int, sel: Set<String>, selChats: Set<String>, selecting: Boolean,
     onChat: (Group) -> Unit, onChatLong: (Group) -> Unit, onPerson: (User) -> Unit, onPersonLong: (User) -> Unit, a: Actions, go: (Scr) -> Unit,
 ) {
     fun hit(name: String) = q.isEmpty() || name.contains(q, ignoreCase = true)
@@ -394,7 +416,7 @@ private fun ChatList(
                 else -> activityText(s, g)
             }
             val unread = s.unread[g.id] ?: 0
-            val selected = other != null && other in sel
+            val selected = g.id in selChats || (other != null && other in sel)
             Row(Modifier.fillMaxWidth().background(if (selected) Color(0x2221C063) else Color.Transparent)
                 .combinedClickable(onClick = { onChat(g) }, onLongClick = { onChatLong(g) }).padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically) {
