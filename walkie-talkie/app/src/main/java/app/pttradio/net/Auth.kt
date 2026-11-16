@@ -57,6 +57,12 @@ class Auth(url: String, private val key: String) {
         post("otp?redirect_to=" + java.net.URLEncoder.encode(redirect, "UTF-8"), JSONObject().put("email", email).put("create_user", true)
             .put("data", JSONObject().put("name", name).put("phone", phone).put("marketing_consent", marketing)), done)
 
+    fun requestPhoneCode(phone: String, marketing: Boolean, done: (String?) -> Unit) =
+        post("otp", JSONObject().put("phone", phone).put("create_user", true).put("data", JSONObject().put("marketing_consent", marketing)), done)
+
+    fun verifyPhone(phone: String, code: String, done: (String?) -> Unit) =
+        post("verify", JSONObject().put("type", "sms").put("phone", phone).put("token", code), done)
+
     fun verify(email: String, code: String, done: (String?) -> Unit) =
         post("verify", JSONObject().put("type", "email").put("email", email).put("token", code), done)
 }

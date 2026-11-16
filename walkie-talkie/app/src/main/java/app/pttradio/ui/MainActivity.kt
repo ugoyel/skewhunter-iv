@@ -45,14 +45,14 @@ import app.pttradio.net.SosCodes
 import kotlinx.coroutines.delay
 
 @Composable
-fun AppRoot(s: RadioState, p: Perms, near: NearbyInfo, alerts: List<app.pttradio.net.SosAlert>, sending: app.pttradio.net.SosSending?,
+fun AppRoot(verified: Boolean, s: RadioState, p: Perms, near: NearbyInfo, alerts: List<app.pttradio.net.SosAlert>, sending: app.pttradio.net.SosSending?,
             field: Pair<String, String>, sosAnyone: Boolean, boost: Int, level: kotlinx.coroutines.flow.StateFlow<Float>?, login: Boolean, mode: String, server: String, btn: ButtonCfg, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
     val now by produceState(System.currentTimeMillis()) { while (true) { delay(500); value = System.currentTimeMillis() } }
     // Android 16 draws apps edge to edge: keep content clear of the status bar, navigation bar and keyboard
     Box(Modifier.fillMaxSize().background(C.bg).safeDrawingPadding()) {
         when {
             !s.ready -> {}
-            s.me == null -> Welcome(a, login)
+            s.me == null -> Welcome(a, login, verified)
             scr == Scr.SETUP -> Setup(p, a) { go(Scr.HOME) }
             scr == Scr.SETTINGS -> SettingsScreen(s, p, mode, server, btn, field, sosAnyone, boost, a) { go(Scr.HOME) }
             scr == Scr.RADIO && s.group != null -> RadioScreen(s, near, level, a, now) { go(Scr.HOME) }
@@ -88,9 +88,17 @@ class MainActivity : ComponentActivity(), Actions {
         val token = frag["access_token"] ?: return
         auth.checkSession(token) { e -> runOnUiThread {
             if (e != null) warning = e
-            else app.prefs.getString("pendingName", null)?.let { if (core.state.value.me == null) setName(it) }
+            else verified = true
         } }
     }
+    /** True once the e-mail link (or a code) has confirmed the sign-up; the name step comes next. */
+    private var verified by mutableStateOf(false)
+
+    override fun requestPhoneCode(phone: String, marketing: Boolean, done: (String?) -> Unit) =
+        auth.requestPhoneCode(phone, marketing) { e -> runOnUiThread { done(e) } }
+    override fun verifyPhoneCode(phone: String, code: String, done: (String?) -> Unit) =
+        auth.verifyPhone(phone, code) { e -> runOnUiThread { done(e) } }
+
     override fun verifyCode(email: String, code: String, done: (String?) -> Unit) =
         auth.verify(email, code) { e -> runOnUiThread { done(e) } }
 
@@ -378,7 +386,7 @@ class MainActivity : ComponentActivity(), Actions {
             val sending by app.sos.sending.collectAsState()
             LaunchedEffect(s.me?.id) { if (s.me != null) RadioService.start(this@MainActivity) }
             BackHandler(enabled = s.me != null && scr != Scr.HOME) { scr = Scr.HOME }
-            AppRoot(s, perms, near, alerts, sending, field, sosOpen, boostLevel, core.level, auth.enabled, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
+            AppRoot(verified, s, perms, near, alerts, sending, field, sosOpen, boostLevel, core.level, auth.enabled, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
             warning?.let { w ->
                 Sheet("Warning", { warning = null }) {
                     Body(w, size = 14.sp)

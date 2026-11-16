@@ -113,6 +113,9 @@ interface Actions {
     /** E-mail code sign-in; callbacks get null on success or a message to show. */
     fun requestCode(email: String, name: String, phone: String, marketing: Boolean, done: (String?) -> Unit)
     fun verifyCode(email: String, code: String, done: (String?) -> Unit)
+    /** Mobile sign-in: the code goes to the person's Telegram. */
+    fun requestPhoneCode(phone: String, marketing: Boolean, done: (String?) -> Unit)
+    fun verifyPhoneCode(phone: String, code: String, done: (String?) -> Unit)
 }
 
 fun isNearby(u: User, now: Long) = now - u.nearbyAt < RadioCore.NEARBY_EXPIRE
@@ -136,64 +139,109 @@ fun TopBar(title: String, onBack: (() -> Unit)? = null, actions: @Composable () 
     }
 }
 
+/**
+ * Sign-up, one question per screen: mobile number (code by Telegram) with e-mail as the alternative,
+ * then the name people will see. [verified] turns true when the e-mail link brings the person back.
+ */
 @Composable
-fun Welcome(a: Actions, login: Boolean) {
-    var name by remember { mutableStateOf("") }
+fun Welcome(a: Actions, login: Boolean, verified: Boolean) {
+    var step by remember { mutableStateOf(if (login) "phone" else "name") }
+    var phone by remember { mutableStateOf("+91") }
     var email by remember { mutableStateOf("") }
-    var phone by remember { mutableStateOf("") }
-    var marketing by remember { mutableStateOf(false) }
     var code by remember { mutableStateOf("") }
-    var sent by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf("") }
+    var marketing by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    if (verified && step == "emailSent") step = "name"
     val emailOk = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]{2,}$").matches(email.trim())
+    val phoneOk = Regex("^\\+[1-9][0-9]{7,14}$").matches(phone)
+    fun go(next: String) { step = next; error = null; code = "" }
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp), verticalArrangement = Arrangement.Center) {
         Text("Welcome to ZeroBar", color = C.text, fontSize = 26.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Body("Hold to talk with your people, over internet or straight phone-to-phone when there is none.", color = C.dim)
         Spacer(Modifier.height(28.dp))
-        if (!sent) {
-            Body("What should people call you?", weight = FontWeight.SemiBold)
-            Spacer(Modifier.height(4.dp))
-            Body("Pick a name your team will recognise and that is unlikely to be taken, like \"Rahul K\" or \"Base Camp 2\". You can change it later.",
-                color = C.dim, size = 13.sp)
-            Spacer(Modifier.height(10.dp))
-            Field(name, { name = it.take(24) }, "Your name", Modifier.fillMaxWidth())
-            if (login) {
-                Spacer(Modifier.height(14.dp)); Label("E-mail"); Spacer(Modifier.height(8.dp))
-                Field(email, { email = it.trim().take(120) }, "We send a sign-in code here", Modifier.fillMaxWidth())
-                Spacer(Modifier.height(14.dp)); Label("Mobile number"); Spacer(Modifier.height(8.dp))
-                Field(phone, { v -> phone = v.filter { it.isDigit() || it == '+' }.take(16) }, "With country code", Modifier.fillMaxWidth())
-                Spacer(Modifier.height(14.dp))
-                Row(Modifier.clickable { marketing = !marketing }, verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(22.dp).clip(RoundedCornerShape(4.dp)).background(if (marketing) C.amber else Color.Transparent).border(1.dp, if (marketing) C.amber else C.line, RoundedCornerShape(4.dp)),
-                        contentAlignment = Alignment.Center) { if (marketing) Icon(Icons.Filled.Check, null, Modifier.size(16.dp), tint = C.bg) }
-                    Spacer(Modifier.width(12.dp))
-                    Body("Send me news and offers by e-mail or SMS. Optional.", Modifier.weight(1f), color = C.dim, size = 13.sp)
+        @Composable fun consent() = Row(Modifier.padding(top = 14.dp).clickable { marketing = !marketing }, verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(22.dp).clip(RoundedCornerShape(4.dp)).background(if (marketing) C.accent else Color.Transparent).border(1.dp, if (marketing) C.accent else C.line, RoundedCornerShape(4.dp)),
+                contentAlignment = Alignment.Center) { if (marketing) Icon(Icons.Filled.Check, null, Modifier.size(16.dp), tint = C.bg) }
+            Spacer(Modifier.width(12.dp))
+            Body("Send me news and offers. Optional.", Modifier.weight(1f), color = C.dim, size = 13.sp)
+        }
+        @Composable fun link(text: String, onClick: () -> Unit) =
+            Text(text, Modifier.padding(top = 18.dp).align(Alignment.CenterHorizontally).clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(8.dp),
+                color = C.accent, fontSize = 15.sp)
+        when (step) {
+            "phone" -> {
+                Body("Your mobile number", weight = FontWeight.SemiBold)
+                Spacer(Modifier.height(4.dp))
+                Body("We send a sign-in code to your Telegram on this number.", color = C.dim, size = 13.sp)
+                Spacer(Modifier.height(10.dp))
+                Field(phone, { v -> phone = ("+" + v.filter { it.isDigit() }).take(16) }, "+91 98765 43210", Modifier.fillMaxWidth())
+                consent()
+                error?.let { Spacer(Modifier.height(12.dp)); Body(it, color = C.red, size = 13.sp) }
+                Spacer(Modifier.height(16.dp))
+                Btn(if (busy) "Sending…" else "Send code", Modifier.fillMaxWidth(), primary = true, enabled = !busy && phoneOk) {
+                    busy = true; error = null
+                    a.requestPhoneCode(phone, marketing) { e -> busy = false; if (e == null) go("phoneCode") else error = e }
                 }
+                link("Sign up with e-mail instead") { go("email") }
             }
-            error?.let { Spacer(Modifier.height(12.dp)); Body(it, color = C.red, size = 13.sp) }
-            Spacer(Modifier.height(16.dp))
-            if (!login) Btn("Let's go", Modifier.fillMaxWidth(), primary = true, enabled = name.trim().length >= 2) { a.setName(name) }
-            else Btn(if (busy) "Sending" else "Send code", Modifier.fillMaxWidth(), primary = true, enabled = !busy && name.isNotBlank() && emailOk && phone.length >= 8) {
-                busy = true; error = null
-                a.requestCode(email.trim(), name.trim(), phone, marketing) { e -> busy = false; error = e; if (e == null) sent = true }
+            "phoneCode" -> {
+                Body("Enter the code", weight = FontWeight.SemiBold)
+                Spacer(Modifier.height(4.dp))
+                Body("Telegram sent a code to $phone.", color = C.dim, size = 13.sp)
+                Spacer(Modifier.height(10.dp))
+                Field(code, { v -> code = v.filter { it.isDigit() }.take(8) }, "6-digit code", Modifier.fillMaxWidth())
+                error?.let { Spacer(Modifier.height(12.dp)); Body(it, color = C.red, size = 13.sp) }
+                Spacer(Modifier.height(16.dp))
+                Btn(if (busy) "Checking…" else "Continue", Modifier.fillMaxWidth(), primary = true, enabled = !busy && code.length >= 4) {
+                    busy = true; error = null
+                    a.verifyPhoneCode(phone, code) { e -> busy = false; if (e == null) go("name") else error = e }
+                }
+                link("Change number") { go("phone") }
             }
-        } else {
-            Body("Check your e-mail", weight = FontWeight.SemiBold)
-            Spacer(Modifier.height(4.dp))
-            Body("We sent a sign-in link to $email. Open the e-mail on this phone and tap the link: ZeroBar opens and you are in. " +
-                "If the e-mail shows a code instead, enter it below.", color = C.dim, size = 13.sp)
-            Spacer(Modifier.height(10.dp))
-            Field(code, { v -> code = v.filter { it.isDigit() }.take(8) }, "Code (if the e-mail has one)", Modifier.fillMaxWidth())
-            error?.let { Spacer(Modifier.height(12.dp)); Body(it, color = C.red, size = 13.sp) }
-            Spacer(Modifier.height(16.dp))
-            Btn(if (busy) "Checking" else "Power on", Modifier.fillMaxWidth(), primary = true, enabled = !busy && code.length >= 6) {
-                busy = true; error = null
-                a.verifyCode(email.trim(), code) { e -> busy = false; error = e; if (e == null) a.setName(name) }
+            "email" -> {
+                Body("Your e-mail", weight = FontWeight.SemiBold)
+                Spacer(Modifier.height(4.dp))
+                Body("We e-mail you a sign-in link.", color = C.dim, size = 13.sp)
+                Spacer(Modifier.height(10.dp))
+                Field(email, { email = it.trim().take(120) }, "you@example.com", Modifier.fillMaxWidth())
+                consent()
+                error?.let { Spacer(Modifier.height(12.dp)); Body(it, color = C.red, size = 13.sp) }
+                Spacer(Modifier.height(16.dp))
+                Btn(if (busy) "Sending…" else "Send link", Modifier.fillMaxWidth(), primary = true, enabled = !busy && emailOk) {
+                    busy = true; error = null
+                    a.requestCode(email.trim(), "", "", marketing) { e -> busy = false; if (e == null) go("emailSent") else error = e }
+                }
+                link("Use mobile number instead") { go("phone") }
             }
-            Spacer(Modifier.height(10.dp))
-            Btn("Change e-mail", Modifier.fillMaxWidth(), enabled = !busy) { sent = false; code = ""; error = null }
+            "emailSent" -> {
+                Body("Check your e-mail", weight = FontWeight.SemiBold)
+                Spacer(Modifier.height(4.dp))
+                Body("We sent a sign-in link to $email. Open the e-mail on this phone and tap the link: ZeroBar opens and continues. " +
+                    "If the e-mail shows a code instead, enter it below.", color = C.dim, size = 13.sp)
+                Spacer(Modifier.height(10.dp))
+                Field(code, { v -> code = v.filter { it.isDigit() }.take(8) }, "Code (if the e-mail has one)", Modifier.fillMaxWidth())
+                error?.let { Spacer(Modifier.height(12.dp)); Body(it, color = C.red, size = 13.sp) }
+                Spacer(Modifier.height(16.dp))
+                Btn(if (busy) "Checking…" else "Continue", Modifier.fillMaxWidth(), primary = true, enabled = !busy && code.length >= 6) {
+                    busy = true; error = null
+                    a.verifyCode(email.trim(), code) { e -> busy = false; if (e == null) go("name") else error = e }
+                }
+                link("Change e-mail") { go("email") }
+            }
+            else -> {
+                Body("What should people call you?", weight = FontWeight.SemiBold)
+                Spacer(Modifier.height(4.dp))
+                Body("Pick a name your team will recognise and that is unlikely to be taken, like \"Rahul K\" or \"Base Camp 2\". You can change it later.",
+                    color = C.dim, size = 13.sp)
+                Spacer(Modifier.height(10.dp))
+                Field(name, { name = it.take(24) }, "Your name", Modifier.fillMaxWidth())
+                Spacer(Modifier.height(16.dp))
+                Btn("Let's go", Modifier.fillMaxWidth(), primary = true, enabled = name.trim().length >= 2) { a.setName(name) }
+            }
         }
     }
 }
