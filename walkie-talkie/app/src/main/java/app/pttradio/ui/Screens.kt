@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -60,6 +61,8 @@ data class Perms(val mic: Boolean = true, val notif: Boolean = true, val nearby:
 }
 
 /** Hardware talk button settings. */
+data class Profile(val email: String = "", val mobile: String = "")
+
 data class ButtonCfg(val key: Int = 0, val learning: Boolean = false, val group: String = "")
 
 enum class Scr { HOME, RADIO, SETTINGS, SETUP }
@@ -83,6 +86,11 @@ interface Actions {
     fun setHd(on: Boolean)
     /** Speaker loudness: 0 normal, 1 loud, 2 maximum. */
     fun setBoost(level: Int)
+    fun pickPhoto()
+    fun removePhoto()
+    /** Saves the mobile number; [done] gets a short status line to show. */
+    fun saveMobile(mobile: String, done: (String) -> Unit)
+    fun signOut()
     fun setMode(m: String)
     fun setServer(s: String)
     fun requestPerm(kind: String)
@@ -210,6 +218,8 @@ fun Welcome(a: Actions, login: Boolean, verified: Boolean) {
                 consent()
                 error?.let { Spacer(Modifier.height(12.dp)); Body(it, color = C.red, size = 13.sp) }
                 Spacer(Modifier.height(16.dp))
+                PrivacyNote()
+                Spacer(Modifier.height(16.dp))
                 Btn(if (busy) "Sending…" else "Send link", Modifier.fillMaxWidth(), primary = true, enabled = !busy && emailOk) {
                     busy = true; error = null
                     a.requestCode(email.trim(), "", "", marketing) { e -> busy = false; if (e == null) go("emailSent") else error = e }
@@ -218,17 +228,13 @@ fun Welcome(a: Actions, login: Boolean, verified: Boolean) {
             "emailSent" -> {
                 Body("Check your e-mail", weight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))
-                Body("We sent a sign-in link to $email. Open the e-mail on this phone and tap the link: ZeroBar opens and continues. " +
-                    "If the e-mail shows a code instead, enter it below.", color = C.dim, size = 13.sp)
-                Spacer(Modifier.height(10.dp))
-                Field(code, { v -> code = v.filter { it.isDigit() }.take(8) }, "Code (if the e-mail has one)", Modifier.fillMaxWidth())
-                error?.let { Spacer(Modifier.height(12.dp)); Body(it, color = C.red, size = 13.sp) }
-                Spacer(Modifier.height(16.dp))
-                Btn(if (busy) "Checking…" else "Continue", Modifier.fillMaxWidth(), primary = true, enabled = !busy && code.length >= 6) {
-                    busy = true; error = null
-                    a.verifyCode(email.trim(), code) { e -> busy = false; if (e == null) go("name") else error = e }
-                }
-                link("Change e-mail") { go("email") }
+                Body("We sent a sign-in link to $email. Open that e-mail on this phone and tap the link. " +
+                    "You will come back here automatically and can pick your name.", color = C.dim, size = 14.sp)
+                Spacer(Modifier.height(6.dp))
+                Body("No e-mail? Check spam, or wait a minute and send it again.", color = C.faint, size = 12.sp)
+                link("Send the link again") { busy = true; a.requestCode(email.trim(), "", "", marketing) { e -> busy = false; error = e } }
+                error?.let { Spacer(Modifier.height(8.dp)); Body(it, color = C.red, size = 13.sp) }
+                link("Use a different e-mail") { go("email") }
             }
             else -> {
                 Body("What should people call you?", weight = FontWeight.SemiBold)
@@ -241,6 +247,17 @@ fun Welcome(a: Actions, login: Boolean, verified: Boolean) {
                 Btn("Let's go", Modifier.fillMaxWidth(), primary = true, enabled = name.trim().length >= 2) { a.setName(name) }
             }
         }
+    }
+}
+
+/** Reassurance shown at sign-up, during setup and in Settings. */
+@Composable
+fun PrivacyNote() {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0x1421C063)).padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Body("🔒 Your privacy", weight = FontWeight.SemiBold, size = 14.sp)
+        Body("• Voice, messages, photos and locations are end-to-end encrypted: only the people in the chat can open them. We cannot read or hear anything.", color = C.dim, size = 12.sp)
+        Body("• Nothing you say or send is stored on any server. Messages delete themselves within 2 minutes, and voice is never recorded.", color = C.dim, size = 12.sp)
+        Body("• No ads, no tracking. Your e-mail is only used to sign you in.", color = C.dim, size = 12.sp)
     }
 }
 
@@ -273,9 +290,10 @@ fun Setup(p: Perms, a: Actions, onDone: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         TopBar("Radio check")
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Body("A walkie-talkie has to be listening all the time. Allow these so calls reach you instantly.", color = C.dim)
+            Body("A walkie-talkie has to be listening all the time. Allow these so calls reach you instantly. Each one says why it is needed.", color = C.dim)
             PermList(p, a)
             if (!p.allOk) WarningBox("Without these the app won't work properly: you can miss calls when the screen is off.")
+            PrivacyNote()
         }
         Btn(if (p.allOk) "Continue" else "Continue anyway", Modifier.fillMaxWidth().padding(16.dp), primary = p.allOk) { a.setupDone(); onDone() }
     }
@@ -297,7 +315,7 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: ButtonCfg, field: Pair<String, String>, sosAnyone: Boolean, boost: Int, a: Actions, onBack: () -> Unit) {
+fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: ButtonCfg, field: Pair<String, String>, sosAnyone: Boolean, boost: Int, profile: Profile, a: Actions, onBack: () -> Unit) {
     var fSsid by remember { mutableStateOf(field.first) }
     var fPass by remember { mutableStateOf(field.second) }
     var name by remember { mutableStateOf(s.me?.name ?: "") }
@@ -305,12 +323,43 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: B
     Column(Modifier.fillMaxSize()) {
         TopBar("Settings", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
-            Section("Call sign") {
+            Section("Profile") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.clip(CircleShape).clickable { a.pickPhoto() }) { Avatar(s.me?.name ?: "", s.me?.id ?: "", 64.dp, pic = s.me?.pic ?: "") }
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(if (s.me?.pic.isNullOrEmpty()) "Add a profile photo" else "Change photo", Modifier.clickable { a.pickPhoto() }, color = C.accent, fontSize = 15.sp)
+                        if (!s.me?.pic.isNullOrEmpty()) Text("Remove photo", Modifier.padding(top = 6.dp).clickable { a.removePhoto() }, color = C.dim, fontSize = 13.sp)
+                    }
+                }
+                Body("Your photo is shown to people on the app.", color = C.dim, size = 12.sp)
+                Label("Name", Modifier.padding(top = 6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Field(name, { name = it.take(24) }, "Name", Modifier.weight(1f))
                     Btn("Save", enabled = name.isNotBlank() && name.trim() != s.me?.name) { a.setName(name) }
                 }
+                if (profile.email.isNotEmpty()) { Label("E-mail", Modifier.padding(top = 6.dp)); Body(profile.email, color = C.dim, size = 14.sp) }
+                Label("Mobile number", Modifier.padding(top = 6.dp))
+                var mobile by remember { mutableStateOf(profile.mobile) }
+                var saved by remember { mutableStateOf<String?>(null) }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Field(mobile, { v -> mobile = v.filter { it.isDigit() || it == '+' }.take(16) }, "e.g. +91 98765 43210", Modifier.weight(1f))
+                    Btn("Save", enabled = mobile != profile.mobile) { a.saveMobile(mobile) { r -> saved = r } }
+                }
+                saved?.let { Body(it, color = C.dim, size = 12.sp) }
+                Body("Kept with your account for support; never shown to other users.", color = C.dim, size = 12.sp)
+                var out by remember { mutableStateOf(false) }
+                Btn("Sign out", Modifier.fillMaxWidth().padding(top = 8.dp), danger = true) { out = true }
+                if (out) Sheet("Sign out?", { out = false }) {
+                    Body("Your name, keys, chats and settings are removed from this phone. You can sign in again with your e-mail, " +
+                        "but people will have to add you to their groups again.", color = C.dim, size = 13.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Btn("Cancel", Modifier.weight(1f)) { out = false }
+                        Btn("Sign out", Modifier.weight(1f), danger = true) { out = false; a.signOut() }
+                    }
+                }
             }
+            Section("Privacy") { PrivacyNote() }
             Section("Talk button") {
                 val vd = android.view.KeyEvent.KEYCODE_VOLUME_DOWN
                 val vu = android.view.KeyEvent.KEYCODE_VOLUME_UP
@@ -394,7 +443,7 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: B
             }
             Section("Relay server") {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Field(srv, { srv = it.trim() }, "Default free relay", Modifier.weight(1f))
+                    Field(srv, { srv = it.trim() }, "e.g. ssl://broker.emqx.io:8883", Modifier.weight(1f))
                     Btn("Apply", enabled = srv != server) { a.setServer(srv) }
                 }
                 Body("A free public MQTT relay passes encrypted packets between phones. Everyone in a group must use the same server. Leave empty for the default.", color = C.dim, size = 12.sp)

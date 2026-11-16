@@ -46,7 +46,7 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun AppRoot(verified: Boolean, s: RadioState, p: Perms, near: NearbyInfo, alerts: List<app.pttradio.net.SosAlert>, sending: app.pttradio.net.SosSending?,
-            field: Pair<String, String>, sosAnyone: Boolean, boost: Int, level: kotlinx.coroutines.flow.StateFlow<Float>?, login: Boolean, mode: String, server: String, btn: ButtonCfg, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
+            field: Pair<String, String>, sosAnyone: Boolean, boost: Int, profile: Profile, level: kotlinx.coroutines.flow.StateFlow<Float>?, login: Boolean, mode: String, server: String, btn: ButtonCfg, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
     val now by produceState(System.currentTimeMillis()) { while (true) { delay(500); value = System.currentTimeMillis() } }
     // Android 16 draws apps edge to edge: keep content clear of the status bar, navigation bar and keyboard
     Box(Modifier.fillMaxSize().background(C.bg).safeDrawingPadding()) {
@@ -54,7 +54,7 @@ fun AppRoot(verified: Boolean, s: RadioState, p: Perms, near: NearbyInfo, alerts
             !s.ready -> {}
             s.me == null -> Welcome(a, login, verified)
             scr == Scr.SETUP -> Setup(p, a) { go(Scr.HOME) }
-            scr == Scr.SETTINGS -> SettingsScreen(s, p, mode, server, btn, field, sosAnyone, boost, a) { go(Scr.HOME) }
+            scr == Scr.SETTINGS -> SettingsScreen(s, p, mode, server, btn, field, sosAnyone, boost, profile, a) { go(Scr.HOME) }
             scr == Scr.RADIO && s.group != null -> RadioScreen(s, near, level, a, now) { go(Scr.HOME) }
             else -> Home(s, p, near, alerts, sending, a, now, tab, onTab, go)
         }
@@ -77,7 +77,7 @@ class MainActivity : ComponentActivity(), Actions {
     private val auth by lazy { Auth(BuildConfig.LOGIN_URL, BuildConfig.LOGIN_KEY) }
 
     override fun requestCode(email: String, name: String, phone: String, marketing: Boolean, done: (String?) -> Unit) {
-        app.prefs.edit().putString("pendingName", name).apply()   // used when the e-mail link brings the person back
+        app.prefs.edit().putString("email", email).apply()
         auth.requestCode(email, name, phone, marketing) { e -> runOnUiThread { done(e) } }
     }
 
@@ -86,6 +86,7 @@ class MainActivity : ComponentActivity(), Actions {
         val frag = (uri.fragment ?: uri.query ?: "").split("&").mapNotNull { p -> p.split("=", limit = 2).takeIf { it.size == 2 }?.let { it[0] to Uri.decode(it[1]) } }.toMap()
         frag["error_description"]?.let { warning = "Sign-in failed: ${it.replace('+', ' ')}. Ask for a new link."; return }
         val token = frag["access_token"] ?: return
+        frag["refresh_token"]?.let { app.prefs.edit().putString("refresh", it).apply() }
         auth.checkSession(token) { e -> runOnUiThread {
             if (e != null) warning = e
             else verified = true
@@ -272,7 +273,9 @@ class MainActivity : ComponentActivity(), Actions {
     override fun setSosAnyone(on: Boolean) { app.prefs.edit().putBoolean("sosAnyone", on).apply(); sosOpen = on }
     override fun dismissAlert(key: String) { app.sos.dismiss(key) }
 
-    private val field get() = (app.prefs.getString("fieldSsid", null) ?: "PTT-FIELD") to (app.prefs.getString("fieldPass", null) ?: "pttradio-field")
+    // Wi-Fi passwords need at least 8 characters, so the default is ZeroBar1
+    private val field get() = (app.prefs.getString("fieldSsid", null) ?: "ZeroBar") to (app.prefs.getString("fieldPass", null) ?: "ZeroBar1")
+    private var profile by mutableStateOf(Profile())
 
     override fun saveFieldWifi(ssid: String, pass: String) {
         app.prefs.edit().putString("fieldSsid", ssid).putString("fieldPass", pass).apply()
@@ -306,6 +309,39 @@ class MainActivity : ComponentActivity(), Actions {
 
     override fun openDirect(uid: String) { core.openDirect(uid) }
     override fun renameGroup(gid: String, name: String) { core.renameGroup(gid, name) }
+
+    // ---- profile ----
+    private val photoReq = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) kotlin.concurrent.thread(isDaemon = true) {
+            try {
+                val src = if (Build.VERSION.SDK_INT >= 28) android.graphics.ImageDecoder.createSource(contentResolver, uri) else null
+                val b = decode(src, uri, null, 400)
+                val side = minOf(b.width, b.height)
+                val sq = android.graphics.Bitmap.createBitmap(b, (b.width - side) / 2, (b.height - side) / 2, side, side)
+                val small = android.graphics.Bitmap.createScaledBitmap(sq, 128, 128, true)
+                core.setPhoto(android.util.Base64.encodeToString(jpeg(small, 12_000), android.util.Base64.NO_WRAP))
+            } catch (e: Exception) { core.note("COULD NOT READ PICTURE") }
+        }
+    }
+    override fun pickPhoto() { try { photoReq.launch("image/*") } catch (e: Exception) { } }
+    override fun removePhoto() { core.setPhoto("") }
+
+    override fun saveMobile(mobile: String, done: (String) -> Unit) {
+        app.prefs.edit().putString("mobile", mobile).apply()
+        profile = profile.copy(mobile = mobile)
+        val refresh = app.prefs.getString("refresh", null)
+        if (refresh == null || !auth.enabled) { done("Saved on this phone."); return }
+        auth.updateData(refresh, org.json.JSONObject().put("phone", mobile)) { e, r ->
+            r?.let { app.prefs.edit().putString("refresh", it).apply() }
+            runOnUiThread { done(e ?: "Saved to your account.") }
+        }
+    }
+
+    override fun signOut() {
+        app.prefs.edit().clear().commit()
+        startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        Runtime.getRuntime().exit(0)   // start again from a clean state
+    }
 
     override fun reconnect() {
         core.note("RECONNECTING")
@@ -372,6 +408,7 @@ class MainActivity : ComponentActivity(), Actions {
         super.onCreate(savedInstanceState)
         serverUrl = app.prefs.getString("server", "") ?: ""
         sosOpen = app.prefs.getBoolean("sosAnyone", false)
+        profile = Profile(app.prefs.getString("email", "") ?: "", app.prefs.getString("mobile", "") ?: "")
         boostLevel = app.prefs.getInt("boost", 1)
         if (core.state.value.me != null || app.prefs.getString("me", null) != null) {
             if (!app.prefs.getBoolean("setupDone", false)) scr = Scr.SETUP
@@ -386,7 +423,7 @@ class MainActivity : ComponentActivity(), Actions {
             val sending by app.sos.sending.collectAsState()
             LaunchedEffect(s.me?.id) { if (s.me != null) RadioService.start(this@MainActivity) }
             BackHandler(enabled = s.me != null && scr != Scr.HOME) { scr = Scr.HOME }
-            AppRoot(verified, s, perms, near, alerts, sending, field, sosOpen, boostLevel, core.level, auth.enabled, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
+            AppRoot(verified, s, perms, near, alerts, sending, field, sosOpen, boostLevel, profile, core.level, auth.enabled, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
             warning?.let { w ->
                 Sheet("Warning", { warning = null }) {
                     Body(w, size = 14.sp)
@@ -464,7 +501,20 @@ class MainActivity : ComponentActivity(), Actions {
     override fun setName(n: String) {
         val first = core.state.value.me == null
         core.setName(n)
-        if (first) scr = Scr.SETUP
+        if (first) { scr = Scr.SETUP; askAll() }
+    }
+
+    private val allReq = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        refreshPerms()
+        app.refreshLinks()
+        if (!perms.battery) requestPerm("battery")
+    }
+
+    /** Every permission at once through Android's own dialogs; the setup screen then explains anything denied. */
+    private fun askAll() {
+        val list = arrayListOf(Manifest.permission.RECORD_AUDIO) + NearbyTransport.permissions()
+        val all = if (Build.VERSION.SDK_INT >= 33) list + Manifest.permission.POST_NOTIFICATIONS else list
+        try { allReq.launch(all.toTypedArray()) } catch (e: Exception) { }
     }
     override fun setupDone() { app.prefs.edit().putBoolean("setupDone", true).apply() }
     override fun createGroup(name: String, ids: List<String>) { core.createGroup(name, ids) }

@@ -35,6 +35,12 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -66,6 +72,22 @@ import app.pttradio.net.SosAlert
 import app.pttradio.net.SosCodes
 import app.pttradio.net.SosSending
 
+fun picOf(s: RadioState, uid: String?): String = uid?.let { s.users[it]?.pic ?: if (it == s.me?.id) s.me.pic else null } ?: ""
+
+/** "last seen today 14:03:22", or how they can be reached right now. */
+fun lastSeen(s: RadioState, near: NearbyInfo, uid: String?, now: Long): String {
+    val u = s.users[uid ?: return ""] ?: return ""
+    if (isNearby(u, now)) return reachText(s, near, uid, now)
+    if (u.online) return "active now"
+    if (u.seenAt <= 0) return ""
+    val t = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(u.seenAt))
+    return "last seen " + when {
+        DateUtils.isToday(u.seenAt) -> "today $t"
+        DateUtils.isToday(u.seenAt + DateUtils.DAY_IN_MILLIS) -> "yesterday $t"
+        else -> java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault()).format(java.util.Date(u.seenAt)) + " $t"
+    }
+}
+
 fun whenText(at: Long): String = when {
     at <= 0 -> ""
     DateUtils.isToday(at) -> java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(at))
@@ -80,7 +102,8 @@ fun onAppNow(s: RadioState, now: Long): List<User> = s.users.values
 
 fun presenceDot(s: RadioState, uid: String?, now: Long): Color? {
     val u = s.users[uid ?: return null] ?: return null
-    return when { isNearby(u, now) -> C.blue; u.online -> C.green; else -> null }
+    // green = reachable now (blue when nearby without internet), grey = offline
+    return when { isNearby(u, now) -> C.blue; u.online -> C.green; else -> C.faint }
 }
 
 /** How a person can be reached right now, e.g. "Nearby · Bluetooth 62%". */
@@ -88,7 +111,7 @@ fun reachText(s: RadioState, near: NearbyInfo, uid: String?, now: Long): String 
     val u = s.users[uid ?: return ""] ?: return ""
     val link = near.peers[u.id]
     val how = when { link != null -> if (link.pct >= 0) "${link.tech} ${link.pct}%" else link.tech; u.via == "lan" -> "Field Wi-Fi"; else -> "via another phone" }
-    return when { isNearby(u, now) && u.online -> "Online · nearby · $how"; isNearby(u, now) -> "Nearby · $how"; u.online -> "Online"; else -> "Offline" }
+    return if (isNearby(u, now)) "Nearby · $how" else ""
 }
 
 private fun preview(m: TextMsg, group: Boolean): String {
@@ -105,7 +128,7 @@ private fun activityText(s: RadioState, g: Group): String {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun Home(
     s: RadioState, p: Perms, near: NearbyInfo, alerts: List<SosAlert>, sending: SosSending?, a: Actions, now: Long,
@@ -155,13 +178,11 @@ fun Home(
             Text("SOS", Modifier.clip(RoundedCornerShape(16.dp)).background(if (sending != null) C.red else Color(0x26FF4B3E)).clickable { sosMenu = true }
                 .padding(horizontal = 12.dp, vertical = 6.dp), color = if (sending != null) Color.White else C.red, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(10.dp))
-            val (lc, lt) = when { s.netUp -> C.green to "Online"; s.nearbyUp -> C.blue to "Nearby"; else -> C.red to "No link" }
-            Row(verticalAlignment = Alignment.CenterVertically) { Dot(lc, 8.dp); Spacer(Modifier.width(5.dp)); Text(lt, color = C.dim, fontSize = 12.sp) }
+            Dot(when { s.netUp -> C.green; s.nearbyUp -> C.blue; else -> C.faint }, 10.dp)
             Box {
                 Icon(Icons.Filled.MoreVert, "Menu", Modifier.padding(start = 4.dp).clip(CircleShape).clickable { menu = true }.padding(10.dp).size(22.dp), tint = C.text)
                 DropdownMenu(menu, { menu = false }, Modifier.background(C.raised)) {
                     DropdownMenuItem({ Text("New group", color = C.text) }, { menu = false; onTab(0); picking = true })
-                    DropdownMenuItem({ Text("Reconnect", color = C.text) }, { menu = false; a.reconnect() })
                     DropdownMenuItem({ Text("Settings", color = C.text) }, { menu = false; go(Scr.SETTINGS) })
                 }
             }
@@ -197,9 +218,7 @@ fun Home(
             Banner(C.amber, "Someone else is also called ${me.name}", "Pick a more unique name so people can tell you apart.", "Change") { go(Scr.SETTINGS) }
         if (!s.netUp && !selecting) StatusLine(s, near, now, a)
 
-        // ---------------------------------------------------------------- content
-        Box(Modifier.weight(1f)) {
-            if (tab == 0 || selecting) ChatList(s, near, now, q.trim(), if (picking || (sel.isNotEmpty() && selChats.isEmpty())) 2 else filter, sel, selChats, selecting,
+        @Composable fun ChatListPage() = ChatList(s, near, now, q.trim(), if (picking || (sel.isNotEmpty() && selChats.isEmpty())) 2 else filter, sel, selChats, selecting,
                 onChat = { g ->
                     val other = s.otherIn(g)
                     when {
@@ -216,8 +235,21 @@ fun Home(
                 onPerson = { u -> if (selecting) sel = if (u.id in sel) sel - u.id else sel + u.id else { a.openDirect(u.id); go(Scr.RADIO) } },
                 onPersonLong = { u -> haptic.performHapticFeedback(HapticFeedbackType.LongPress); sel = sel + u.id },
                 a = a, go = go)
-            else RecentList(s, now, q.trim()) { r ->
-                if (s.groups.any { it.id == r.gid }) open(r.gid) else { a.openDirect(r.uid); go(Scr.RADIO) }
+
+        // ---------------------------------------------------------------- content
+        Box(Modifier.weight(1f)) {
+            val pager = rememberPagerState(initialPage = tab) { 2 }
+            LaunchedEffect(pager.currentPage) { if (pager.currentPage != tab) onTab(pager.currentPage) }
+            LaunchedEffect(tab) { if (pager.currentPage != tab) pager.animateScrollToPage(tab) }
+            var refreshing by remember { mutableStateOf(false) }
+            LaunchedEffect(refreshing) { if (refreshing) { a.reconnect(); delay(1500); refreshing = false } }
+            PullToRefreshBox(refreshing, { refreshing = true }, Modifier.fillMaxSize()) {
+                HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = !selecting) { page ->
+                    if (page == 0 || selecting) ChatListPage()
+                    else RecentList(s, now, q.trim()) { r ->
+                        if (s.groups.any { it.id == r.gid }) open(r.gid) else { a.openDirect(r.uid); go(Scr.RADIO) }
+                    }
+                }
             }
             if (tab == 0 && !selecting) Box(Modifier.align(Alignment.BottomEnd).padding(18.dp).size(58.dp).clip(RoundedCornerShape(18.dp)).background(C.accent)
                 .clickable { newChat = true }, contentAlignment = Alignment.Center) { Icon(Icons.Filled.Add, "New chat or group", Modifier.size(28.dp), tint = C.bg) }
@@ -412,7 +444,7 @@ private fun ChatList(
             val sub = when {
                 talking -> "${s.talker} is talking…"
                 last != null -> preview(last, !g.direct)
-                g.direct -> reachText(s, near, other, now).takeIf { it.isNotEmpty() && it != "Offline" } ?: activityText(s, g)
+                g.direct -> reachText(s, near, other, now).ifEmpty { activityText(s, g) }
                 else -> activityText(s, g)
             }
             val unread = s.unread[g.id] ?: 0
@@ -421,7 +453,7 @@ private fun ChatList(
                 .combinedClickable(onClick = { onChat(g) }, onLongClick = { onChatLong(g) }).padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Box {
-                    Avatar(title, other ?: g.id, dot = presenceDot(s, other, now), group = !g.direct)
+                    Avatar(title, other ?: g.id, dot = presenceDot(s, other, now), group = !g.direct, pic = picOf(s, other))
                     if (selected) Box(Modifier.align(Alignment.BottomEnd).size(20.dp).clip(CircleShape).background(C.accent), contentAlignment = Alignment.Center) {
                         Icon(Icons.Filled.Check, null, Modifier.size(14.dp), tint = C.bg)
                     }
@@ -455,7 +487,7 @@ fun PersonRow(u: User, s: RadioState, near: NearbyInfo, now: Long, selected: Boo
     Row(Modifier.fillMaxWidth().background(if (selected) Color(0x2221C063) else Color.Transparent)
         .combinedClickable(onClick = onClick, onLongClick = onLong).padding(horizontal = 16.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
         Box {
-            Avatar(u.name, u.id, 46.dp, dot = presenceDot(s, u.id, now))
+            Avatar(u.name, u.id, 46.dp, dot = presenceDot(s, u.id, now), pic = u.pic)
             if (selected) Box(Modifier.align(Alignment.BottomEnd).size(20.dp).clip(CircleShape).background(C.accent), contentAlignment = Alignment.Center) {
                 Icon(Icons.Filled.Check, null, Modifier.size(14.dp), tint = C.bg)
             }
@@ -493,7 +525,7 @@ private fun RecentList(s: RadioState, now: Long, q: String, onClick: (app.pttrad
                 else -> if (r.mine) "You sent a message$where" else "Sent a message$where"
             }
             Row(Modifier.fillMaxWidth().clickable { onClick(r) }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Avatar(s.nameOf(r.uid), r.uid, dot = presenceDot(s, r.uid, now))
+                Avatar(s.nameOf(r.uid), r.uid, dot = presenceDot(s, r.uid, now), pic = picOf(s, r.uid))
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(s.nameOf(r.uid), color = C.text, fontSize = 17.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -513,7 +545,7 @@ fun ChatPicker(s: RadioState, near: NearbyInfo, now: Long, onChat: (Group) -> Un
         items(s.groups.sortedByDescending { s.lastAt(it.id) }, key = { it.id }) { g ->
             val other = s.otherIn(g)
             Row(Modifier.fillMaxWidth().clickable { onChat(g) }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Avatar(s.titleOf(g), other ?: g.id, dot = presenceDot(s, other, now), group = !g.direct)
+                Avatar(s.titleOf(g), other ?: g.id, dot = presenceDot(s, other, now), group = !g.direct, pic = picOf(s, other))
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(s.titleOf(g), color = C.text, fontSize = 17.sp, fontWeight = FontWeight.Medium, maxLines = 1)

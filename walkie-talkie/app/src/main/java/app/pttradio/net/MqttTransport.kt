@@ -47,7 +47,15 @@ class MqttTransport(
     private var userName = ""
     private var pub = ""
 
-    private fun profile(on: Boolean) = JSONObject().put("id", id).put("name", userName).put("pub", pub).put("on", on)
+    @Volatile private var pic = ""
+
+    override fun setPicture(b64: String) = exec.execute {
+        if (b64 == pic) return@execute
+        pic = b64
+        if (isUp) try { client?.publish("${RadioCore.P}/u/$id", profile(true), 1, true) } catch (e: Exception) { }
+    }
+
+    private fun profile(on: Boolean) = JSONObject().put("id", id).put("name", userName).put("pub", pub).put("on", on).also { if (pic.isNotEmpty()) it.put("pic", pic) }
         .put("ts", System.currentTimeMillis()).toString().toByteArray()
 
     fun start() = exec.execute { wanted = true; connect() }
@@ -125,7 +133,7 @@ class MqttTransport(
             try {
                 val o = JSONObject(String(data))
                 val uid = o.getString("id")
-                if (topic.endsWith("/$uid")) listener?.onUser(uid, o.getString("name"), o.getString("pub"), o.optBoolean("on"), o.optLong("ts"))
+                if (topic.endsWith("/$uid")) listener?.onUser(uid, o.getString("name"), o.getString("pub"), o.optBoolean("on"), o.optLong("ts"), o.optString("pic"))
             } catch (e: Exception) { }
         } else listener?.onPacket(data, this, null)
     }

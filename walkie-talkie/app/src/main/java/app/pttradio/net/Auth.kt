@@ -63,6 +63,29 @@ class Auth(url: String, private val key: String) {
     fun verifyPhone(phone: String, code: String, done: (String?) -> Unit) =
         post("verify", JSONObject().put("type", "sms").put("phone", phone).put("token", code), done)
 
+    /**
+     * Saves extra profile details on the account (e.g. the mobile number). Uses the long-lived [refresh] token from
+     * sign-in; [done] gets null and the new refresh token on success, or an error message.
+     */
+    fun updateData(refresh: String, data: JSONObject, done: (String?, String?) -> Unit) {
+        thread(isDaemon = true) {
+            try {
+                val c = URL("$base/auth/v1/token?grant_type=refresh_token").openConnection() as HttpURLConnection
+                c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 15_000; c.readTimeout = 15_000
+                c.setRequestProperty("apikey", key); c.setRequestProperty("Content-Type", "application/json")
+                c.outputStream.use { it.write(JSONObject().put("refresh_token", refresh).toString().toByteArray()) }
+                if (c.responseCode !in 200..299) { done("Please sign in again to update this.", null); return@thread }
+                val o = JSONObject(c.inputStream.bufferedReader().readText())
+                val u = URL("$base/auth/v1/user").openConnection() as HttpURLConnection
+                u.requestMethod = "PUT"; u.doOutput = true; u.connectTimeout = 15_000; u.readTimeout = 15_000
+                u.setRequestProperty("apikey", key); u.setRequestProperty("Content-Type", "application/json")
+                u.setRequestProperty("Authorization", "Bearer " + o.getString("access_token"))
+                u.outputStream.use { it.write(JSONObject().put("data", data).toString().toByteArray()) }
+                done(if (u.responseCode in 200..299) null else "Could not save (${u.responseCode}).", o.optString("refresh_token").ifEmpty { refresh })
+            } catch (e: Exception) { done("No connection. Try again with internet.", null) }
+        }
+    }
+
     fun verify(email: String, code: String, done: (String?) -> Unit) =
         post("verify", JSONObject().put("type", "email").put("email", email).put("token", code), done)
 }

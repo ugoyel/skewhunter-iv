@@ -143,7 +143,9 @@ class Packet(val type: Int, val ttl: Int, val msgId: Long, val scope: Long, val 
 }
 
 /** [via] is the link this phone was last heard on directly: "nearby" (Bluetooth / Wi-Fi Direct) or "lan" (field Wi-Fi). */
-data class User(val id: String, val name: String, val pub: String, val online: Boolean = false, val nearbyAt: Long = 0, val ts: Long = 0, val via: String = "")
+/** [pic] = small profile photo (base64 JPEG), [seenAt] = last time this phone saw any sign of them. */
+data class User(val id: String, val name: String, val pub: String, val online: Boolean = false, val nearbyAt: Long = 0, val ts: Long = 0, val via: String = "",
+                val pic: String = "", val seenAt: Long = 0)
 data class Member(val id: String, val name: String, val pub: String, val joined: Boolean)
 /** [direct] = a one-to-one chat: shown under the other person's name. */
 /** [nameAt] = when the name was last changed, so the newest rename wins everywhere. */
@@ -265,7 +267,7 @@ interface VoiceCodec {
 
 interface TransportListener {
     fun onPacket(raw: ByteArray, t: Transport, src: String?)
-    fun onUser(id: String, name: String, pub: String, online: Boolean, ts: Long)
+    fun onUser(id: String, name: String, pub: String, online: Boolean, ts: Long, pic: String = "")
     fun onLink(t: Transport)
 }
 
@@ -276,6 +278,8 @@ interface Transport {
     val isUp: Boolean
     var listener: TransportListener?
     fun setProfile(id: String, name: String, pub: String)
+    /** Profile photo shown to others (base64 JPEG, empty for none). */
+    fun setPicture(b64: String) {}
     fun setSubscriptions(topics: Set<String>)
     /** An empty [raw] with [retained] clears a stored message. */
     fun send(topic: String, raw: ByteArray, retained: Boolean)

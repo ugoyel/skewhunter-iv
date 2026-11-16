@@ -104,7 +104,7 @@ class RadioCore(
     fun attach(t: Transport) {
         t.listener = this
         transports.add(t)
-        run { s.me?.let { t.setProfile(it.id, it.name, it.pub) }; refreshSubs(); onLinkNow(t) }
+        run { s.me?.let { t.setPicture(it.pic); t.setProfile(it.id, it.name, it.pub) }; refreshSubs(); onLinkNow(t) }
     }
 
     private fun load() {
@@ -119,13 +119,14 @@ class RadioCore(
             val o = JSONObject(it)
             priv = o.getString("priv")
             meId = o.getString("id").idLong()
-            st = st.copy(me = User(o.getString("id"), o.getString("name"), o.getString("pub")))
+            st = st.copy(me = User(o.getString("id"), o.getString("name"), o.getString("pub"), pic = kv.get("pic") ?: ""))
         }
         kv.get("groups")?.let { val a = JSONArray(it); st = st.copy(groups = (0 until a.length()).map { i -> groupOf(a.getJSONObject(i)) }) }
         kv.get("users")?.let {
             val a = JSONArray(it)
             st = st.copy(users = (0 until a.length()).map { i -> a.getJSONObject(i) }
-                .associate { o -> o.getString("id") to User(o.getString("id"), o.getString("name"), o.getString("pub"), ts = o.optLong("ts")) })
+                .associate { o -> o.getString("id") to User(o.getString("id"), o.getString("name"), o.getString("pub"), ts = o.optLong("ts"),
+                    pic = o.optString("pic"), seenAt = o.optLong("seen")) })
         }
         kv.get("recent")?.let {
             val a = JSONArray(it)
@@ -135,7 +136,7 @@ class RadioCore(
         val tg = kv.get("tunedGroup")
         if (tg != null && st.groups.any { it.id == tg }) st = st.copy(tunedGroup = tg, tunedCh = (kv.get("tunedCh")?.toIntOrNull() ?: 0).coerceIn(0, MAX_CH))
         state.value = st
-        st.me?.let { me -> transports.forEach { it.setProfile(me.id, me.name, me.pub) } }
+        st.me?.let { me -> transports.forEach { it.setPicture(me.pic); it.setProfile(me.id, me.name, me.pub) } }
         setMyPresence()
         refreshSubs()
     }
@@ -731,7 +732,7 @@ class RadioCore(
         if (!pinned(id, pub)) return
         val old = s.users[id]
         // via: the link it came in on when heard directly, empty when another phone passed it on
-        val u = (old ?: User(id, "", "")).copy(name = o.getString("name").take(24), pub = pub, nearbyAt = clock(), ts = clock(), via = via)
+        val u = (old ?: User(id, "", "")).copy(name = o.getString("name").take(24), pub = pub, nearbyAt = clock(), ts = clock(), via = via, seenAt = clock())
         update { copy(users = users + (id to u)) }
         usersDirty = true
         resendInvites(onlyTo = id)
@@ -785,11 +786,25 @@ class RadioCore(
         }
     }
 
+    /** Any packet from someone is a sign of life for "last seen". */
+    private fun sawAlive(uid: String) {
+        val u = s.users[uid] ?: return
+        if (clock() - u.seenAt > 5000) { update { copy(users = users + (uid to u.copy(seenAt = clock()))) }; usersDirty = true }
+    }
+
+    /** Sets (or clears, with "") this phone's profile photo. */
+    fun setPhoto(b64: String) = run {
+        kv.put("pic", b64.ifEmpty { null })
+        update { copy(me = me?.copy(pic = b64)) }
+        transports.forEach { it.setPicture(b64) }
+    }
+
     private fun onPresence(p: Packet) {
         val gid = p.scope.hex()
         val g = s.groups.firstOrNull { it.id == gid } ?: return
         val o = JSONObject(String(Crypto.open(unb64(g.key), p.body, 0, p.aad()) ?: return))
         val uid = p.sender.hex()
+        sawAlive(uid)
         val ch = o.getInt("ch")
         opCaps["$gid/$uid"] = o.optInt("op") == 1
         val la = o.optJSONArray("locks")
@@ -879,12 +894,14 @@ class RadioCore(
 
     private fun pinned(id: String, pub: String): Boolean = knownPub(id).let { it == null || it == pub }
 
-    override fun onUser(id: String, name: String, pub: String, online: Boolean, ts: Long) = run {
+    override fun onUser(id: String, name: String, pub: String, online: Boolean, ts: Long, pic: String) = run {
         if (!isId(id) || id == s.me?.id || name.isBlank() || pub.isEmpty()) return@run
         if (s.users.size > 5000 && id !in s.users) return@run
         if (!pinned(id, pub)) return@run
         val old = s.users[id]
-        val u = (old ?: User(id, "", "")).copy(name = name.take(24), pub = pub, online = online, ts = ts)
+        // last seen: now while online, or the moment we notice them go offline
+        val seen = if (online || old?.online == true) clock() else maxOf(old?.seenAt ?: 0, ts)
+        val u = (old ?: User(id, "", "")).copy(name = name.take(24), pub = pub, online = online, ts = ts, pic = pic.take(20_000), seenAt = seen)
         if (u == old) return@run
         update { copy(users = users + (id to u)) }
         usersDirty = true
@@ -952,7 +969,7 @@ class RadioCore(
         if (usersDirty && now - usersSavedAt > 10_000) {
             usersDirty = false; usersSavedAt = now
             val a = JSONArray()
-            s.users.values.filter { now - it.ts < STALE_PROFILE }.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name).put("pub", it.pub).put("ts", it.ts)) }
+            s.users.values.filter { now - it.ts < STALE_PROFILE }.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name).put("pub", it.pub).put("ts", it.ts).put("pic", it.pic).put("seen", it.seenAt)) }
             kv.put("users", a.toString())
         }
     }

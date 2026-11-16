@@ -305,7 +305,7 @@ fun RadioScreen(s: RadioState, near: NearbyInfo, level: StateFlow<Float>?, a: Ac
         talkingHere -> "${s.talker} is talking…"
         s.talker != null -> "${s.talker} is talking in ${s.groups.firstOrNull { it.id == s.talkGid }?.let { s.titleOf(it) } ?: "another chat"}"
         s.notice != null -> s.notice.lowercase().replaceFirstChar { it.uppercase() }
-        g.direct -> reachText(s, near, other, now).ifEmpty { "Tap and hold the button to talk" }
+        g.direct -> lastSeen(s, near, other, now)
         else -> listOfNotNull(if (s.tunedCh != 0) chName(s.tunedCh).replace("CH ", "Channel ") else null,
             "${occ.size} of ${g.members.size - 1} here", if (!s.netUp && s.nearbyUp) "nearby link" else if (!s.netUp) "no link" else null).joinToString(" · ")
     }
@@ -315,7 +315,7 @@ fun RadioScreen(s: RadioState, near: NearbyInfo, level: StateFlow<Float>?, a: Ac
         // ---------------------------------------------------------------- header
         Row(Modifier.fillMaxWidth().background(C.panel).height(64.dp).padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Filled.ArrowBack, "Back", Modifier.clip(CircleShape).clickable(onClick = onBack).padding(12.dp).size(22.dp), tint = C.text)
-            Avatar(title, other ?: g.id, 40.dp, dot = presenceDot(s, other, now), group = !g.direct)
+            Avatar(title, other ?: g.id, 40.dp, dot = presenceDot(s, other, now), group = !g.direct, pic = picOf(s, other))
             Column(Modifier.weight(1f).padding(start = 10.dp).clickable(enabled = !g.direct) { showMembers = true }) {
                 Text(title, color = C.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(subtitle, color = subColor, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -407,7 +407,7 @@ fun RadioScreen(s: RadioState, near: NearbyInfo, level: StateFlow<Float>?, a: Ac
                 val me = m.id == s.me?.id
                 val here = p?.ch == s.tunedCh
                 Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Avatar(m.name, m.id, 40.dp, dot = presenceDot(s, m.id, now))
+                    Avatar(m.name, m.id, 40.dp, dot = presenceDot(s, m.id, now), pic = picOf(s, m.id))
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Body(m.name + if (me) " (you)" else "", weight = FontWeight.Medium, maxLines = 1)

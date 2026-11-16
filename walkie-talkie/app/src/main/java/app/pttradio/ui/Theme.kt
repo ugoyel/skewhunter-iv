@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -63,8 +64,16 @@ fun initials(name: String): String =
 
 /** Round avatar with initials; [dot] adds a presence dot (green online, blue nearby). */
 @Composable
-fun Avatar(name: String, key: String, size: Dp = 50.dp, dot: Color? = null, group: Boolean = false) {
+fun Avatar(name: String, key: String, size: Dp = 50.dp, dot: Color? = null, group: Boolean = false, pic: String = "") {
+    val photo = androidx.compose.runtime.remember(pic) {
+        if (pic.isEmpty()) null else try {
+            val b = android.util.Base64.decode(pic, android.util.Base64.DEFAULT)
+            android.graphics.BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap()
+        } catch (e: Exception) { null }
+    }
     Box(Modifier.size(size)) {
+        if (photo != null) androidx.compose.foundation.Image(photo, name, Modifier.size(size).clip(CircleShape), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+        else
         Box(Modifier.size(size).clip(CircleShape).background(avatarColors[(key.hashCode() and 0x7fffffff) % avatarColors.size]), contentAlignment = Alignment.Center) {
             Text(if (group) initials(name).take(1) + "#" else initials(name), color = Color.White, fontSize = (size.value * 0.36f).sp, fontWeight = FontWeight.SemiBold)
         }
