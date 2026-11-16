@@ -431,13 +431,6 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: B
                     "password. Set security to WPA2. When internet is back, turn the hotspot off; the other phones go back to their usual networks on their own.",
                     color = C.dim, size = 12.sp)
             }
-            Section("Relay server") {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Field(srv, { srv = it.trim() }, "e.g. ssl://broker.emqx.io:8883", Modifier.weight(1f))
-                    Btn("Apply", enabled = srv != server) { a.setServer(srv) }
-                }
-                Body("A free public MQTT relay passes encrypted packets between phones. Everyone in a group must use the same server. Leave empty for the default.", color = C.dim, size = 12.sp)
-            }
             // permissions are managed in Android's app settings; only anything still missing is shown here
             if (!p.allOk) Section("Permissions needed") { PermList(p, a) }
             var out by remember { mutableStateOf(false) }
