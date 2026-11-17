@@ -1,6 +1,6 @@
 # ZeroBar Privacy Policy
 
-_Last updated: 16 November 2026_
+_Last updated: 17 November 2026_
 
 This policy explains what ZeroBar ("the app", "we") does with information when you use it. The app is a
 push-to-talk voice and messaging tool that works over the internet and directly between nearby phones.
@@ -12,8 +12,9 @@ push-to-talk voice and messaging tool that works over the internet and directly 
 - A short list of recent activity (who talked or wrote in which chat, and when). It contains no message content.
 - Your settings.
 
-Voice is never recorded or stored. Text messages, pictures and locations are kept only in the phone's memory and
-are deleted automatically after the time you choose (at most 2 minutes). Photos taken with the in-app camera
+Voice, text messages, pictures and locations are kept only in the phone's memory, so that they can be read or
+played again, and are deleted automatically after the time you choose (at most 10 minutes). They are never written to
+the phone's storage or kept on any server. Photos taken with the in-app camera
 button are deleted from the phone as soon as they are sent.
 
 ## What leaves your phone
