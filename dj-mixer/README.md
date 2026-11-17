@@ -37,9 +37,8 @@ It must be served over http(s); the YouTube player does not work from a `file://
 3. Drag the mix slider right: Player 2 rises as Player 1 falls. Released at the far end,
    Player 2 becomes the live one, Player 1 stops, and the slider now points at Player 3.
 
-The video is shown at 160×90 (128×72 on phones) by request. YouTube's rules ask for a
-player of at least 200×200, so change `.screen` in `styles.css` back before submitting
-to a store.
+Each YouTube player is shown at 200×200, the smallest size YouTube's rules allow.
+Players holding your own music files use a smaller waveform view.
 
 ### Search quota
 
