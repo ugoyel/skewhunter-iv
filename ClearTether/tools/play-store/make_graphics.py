@@ -96,8 +96,8 @@ SHOTS = [
     ("1-sharing", "Share mobile data", "with laptops, iPhones & tablets", True),
     ("2-idle", "One switch.", "Private Wi-Fi Direct network", False),
     ("3-client", "Zero setup on Android", "Every app just works", True),
-    ("4-premium", "Unlimited with Premium", "Monthly or yearly. Cancel anytime", False),
-    ("5-guide", "One-tap setup", "for Windows, Mac & iPhone", False),
+    ("4-connect", "Guides for every device", "iPhone, work laptops, Mac & more", False),
+    ("5-why", "Free. No limits.", "Why it beats the built-in hotspot", False),
 ]
 
 

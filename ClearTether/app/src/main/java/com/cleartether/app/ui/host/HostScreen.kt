@@ -24,7 +24,6 @@ import androidx.compose.material.icons.rounded.Router
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Timer
-import androidx.compose.material.icons.rounded.WorkspacePremium
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -37,6 +36,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -56,6 +56,7 @@ import com.cleartether.app.data.HostErrorKind
 import com.cleartether.app.data.HostStartStep
 import com.cleartether.app.data.HostStatus
 import com.cleartether.app.ui.MainUiState
+import com.cleartether.app.ui.help.HelpTab
 import com.cleartether.app.ui.components.Banner
 import com.cleartether.app.ui.components.InfoRow
 import com.cleartether.app.ui.components.MeterRow
@@ -69,27 +70,23 @@ import com.cleartether.app.wifi.WifiDirectManager
 
 data class HostActions(
     val onToggle: () -> Unit,
-    val onUpgrade: () -> Unit,
     val onCopy: (label: String, value: String) -> Unit,
-    val onOpenGuide: () -> Unit,
+    val onOpenHelp: (HelpTab) -> Unit,
     val onOpenWifiSettings: () -> Unit,
     val onOpenAppSettings: () -> Unit,
 )
 
 @Composable
-fun HostScreen(state: MainUiState, nowWallMs: Long, nfcAvailable: Boolean, actions: HostActions) {
+fun HostScreen(state: MainUiState, nfcAvailable: Boolean, actions: HostActions) {
     val host = state.host
     val running = host as? HostStatus.Running
     val busy = host is HostStatus.Starting || host is HostStatus.Stopping
-    val session = state.session
-    val remainingFraction = if (state.premium || running == null) null else
-        (1f - maxOf(session.timeProgress, session.dataProgress)).coerceIn(0f, 1f)
 
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         PowerButton(
             active = running != null,
             busy = busy,
-            remaining = remainingFraction,
+            remaining = null,
             label = stringResource(R.string.host_toggle_label),
             stateLabel = stringResource(if (running != null) R.string.toggle_state_on else R.string.toggle_state_off),
             onClick = actions.onToggle,
@@ -108,33 +105,24 @@ fun HostScreen(state: MainUiState, nowWallMs: Long, nfcAvailable: Boolean, actio
             Spacer(Modifier.height(12.dp))
             val clients = maxOf(running.network.wifiClients, state.devices.count { it.activeConnections > 0 })
             StatusPill(
-                text = if (running.pausedFor != null) stringResource(R.string.pill_paused)
-                else pluralStringResource(R.plurals.pill_devices, clients, WifiDirectManager.bandLabel(running.network.frequencyMhz), clients),
-                color = if (running.pausedFor != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                text = pluralStringResource(R.plurals.pill_devices, clients, WifiDirectManager.bandLabel(running.network.frequencyMhz), clients),
+                color = MaterialTheme.colorScheme.primary,
             )
         }
     }
 
     Spacer(Modifier.height(20.dp))
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        if (host is HostStatus.Error) ErrorBanner(host, nowWallMs, actions)
+        if (host is HostStatus.Error) ErrorBanner(host, actions)
 
         if (running != null) {
-            Banner(
-                visible = running.pausedFor != null,
-                text = stringResource(R.string.banner_paused),
-                container = MaterialTheme.colorScheme.errorContainer,
-                content = MaterialTheme.colorScheme.onErrorContainer,
-            ) {
-                Button(onClick = actions.onUpgrade) { Text(stringResource(R.string.action_upgrade)) }
-            }
             JoinCard(running, nfcAvailable && state.hostSettings?.nfcSharing == true, actions)
-            SessionCard(state, actions.onUpgrade)
+            SessionCard(state)
             DevicesCard(state)
-            SetupCard(running, actions)
+            SetupCard(actions)
         } else {
-            if (!state.premium) FreeTierCard(state, nowWallMs, actions.onUpgrade)
-            HowItWorksCard()
+            ConnectAnyDeviceCard(actions)
+            HowItWorksCard(actions)
         }
     }
 }
@@ -150,7 +138,7 @@ private fun hostHeadline(host: HostStatus): String = when (host) {
             HostStartStep.RECOVERING -> R.string.host_step_recovering
         },
     )
-    is HostStatus.Running -> stringResource(if (host.pausedFor != null) R.string.host_headline_paused else R.string.host_headline_running)
+    is HostStatus.Running -> stringResource(R.string.host_headline_running)
     HostStatus.Stopping -> stringResource(R.string.host_headline_stopping)
     is HostStatus.Error -> stringResource(R.string.host_headline_error)
 }
@@ -215,58 +203,24 @@ private fun JoinCard(running: HostStatus.Running, nfc: Boolean, actions: HostAct
 }
 
 @Composable
-private fun SessionCard(state: MainUiState, onUpgrade: () -> Unit) {
+private fun SessionCard(state: MainUiState) {
     val s = state.session
-    if (state.premium) {
-        Card(
-            Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-        ) {
-            Row(
-                Modifier.fillMaxWidth().background(Brand.premiumGradient).padding(20.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Rounded.AllInclusive, null, tint = Color(0xFF2C1A00), modifier = Modifier.size(32.dp))
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.premium_unlimited), style = MaterialTheme.typography.titleMedium, color = Color(0xFF2C1A00))
-                    Text(
-                        stringResource(R.string.session_used_premium, Format.duration(s.elapsedMs), Format.bytes(s.totalBytes)),
-                        style = MaterialTheme.typography.bodyMedium, color = Color(0xFF4A2F00),
-                    )
-                }
-            }
+    SectionCard(title = stringResource(R.string.card_session_title), icon = Icons.Rounded.Timer) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            Stat(Format.duration(s.elapsedMs), stringResource(R.string.stat_time))
+            Stat(Format.bytes(s.bytesDownloaded), stringResource(R.string.stat_down))
+            Stat(Format.bytes(s.bytesUploaded), stringResource(R.string.stat_up))
         }
-        return
+        Spacer(Modifier.height(10.dp))
+        Text(stringResource(R.string.session_free_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
-    SectionCard(
-        title = stringResource(R.string.card_session_title),
-        icon = Icons.Rounded.Timer,
-        trailing = { FilledTonalButton(onClick = onUpgrade) { Text(stringResource(R.string.action_go_unlimited)) } },
-    ) {
-        MeterRow(
-            label = stringResource(R.string.meter_time_left),
-            value = Format.duration(s.remainingMs),
-            progress = 1f - s.timeProgress,
-            warn = s.remainingMs < 120_000,
-        )
-        if (state.freeTier.hasDataCap) {
-            MeterRow(
-                label = stringResource(R.string.meter_data_left),
-                value = Format.bytes(s.remainingBytes),
-                progress = 1f - s.dataProgress,
-                warn = s.remainingBytes < 10L * 1024 * 1024,
-            )
-        }
-        Text(
-            pluralStringResource(
-                R.plurals.session_free_explainer, state.freeTier.dailyTime.inWholeMinutes.toInt(),
-                state.freeTier.dailyTime.inWholeMinutes,
-            ),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+}
+
+@Composable
+private fun Stat(value: String, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, style = MaterialTheme.typography.titleLarge)
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -303,57 +257,40 @@ private fun DevicesCard(state: MainUiState) {
 }
 
 @Composable
-private fun SetupCard(running: HostStatus.Running, actions: HostActions) {
+private fun SetupCard(actions: HostActions) {
     SectionCard(title = stringResource(R.string.card_setup_title), icon = Icons.Rounded.Laptop) {
-        Text(stringResource(R.string.setup_card_body, running.network.endpoint.pacUrl), style = MaterialTheme.typography.bodyMedium)
+        Text(stringResource(R.string.setup_card_body), style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(12.dp))
-        val pacLabel = stringResource(R.string.label_pac_url)
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(onClick = actions.onOpenGuide) { Text(stringResource(R.string.action_setup_guide)) }
-            OutlinedButton(onClick = { actions.onCopy(pacLabel, running.network.endpoint.pacUrl) }) { Text(stringResource(R.string.action_copy_pac)) }
-        }
+        Button(onClick = { actions.onOpenHelp(HelpTab.CONNECT) }) { Text(stringResource(R.string.action_setup_guide)) }
     }
 }
 
 @Composable
-private fun FreeTierCard(state: MainUiState, nowWallMs: Long, onUpgrade: () -> Unit) {
-    val next = state.session.nextFreeSessionAtWallMs
-    val coolingDown = state.session.limitReached != null && next != null && next > nowWallMs
+private fun ConnectAnyDeviceCard(actions: HostActions) {
     Card(
         Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.WorkspacePremium, null, tint = MaterialTheme.colorScheme.onTertiaryContainer)
+                Icon(Icons.Rounded.Devices, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
                 Spacer(Modifier.width(10.dp))
-                Text(stringResource(R.string.free_card_title), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                Text(stringResource(R.string.connect_card_title), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
             }
             Spacer(Modifier.height(8.dp))
-            Text(
-                if (coolingDown) stringResource(R.string.free_card_cooldown, Format.duration(next - nowWallMs))
-                else stringResource(
-                    R.string.free_card_body,
-                    Format.allowance(state.freeTier.timeMs),
-                    Format.allowance(state.session.remainingMs.coerceAtMost(state.freeTier.timeMs)),
-                ),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onTertiaryContainer,
-            )
+            Text(stringResource(R.string.connect_card_body), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
             Spacer(Modifier.height(12.dp))
-            Button(
-                onClick = onUpgrade,
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary, contentColor = MaterialTheme.colorScheme.onTertiary),
-            ) {
-                Text(stringResource(R.string.action_see_plans))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onClick = { actions.onOpenHelp(HelpTab.CONNECT) }) { Text(stringResource(R.string.action_how_to_connect)) }
+                OutlinedButton(onClick = { actions.onOpenHelp(HelpTab.WHY) }) { Text(stringResource(R.string.action_why_not_hotspot)) }
             }
         }
     }
 }
 
 @Composable
-private fun HowItWorksCard() {
+private fun HowItWorksCard(actions: HostActions) {
     SectionCard(title = stringResource(R.string.how_title), icon = Icons.Rounded.Router) {
         listOf(
             Triple(Icons.Rounded.Router, R.string.how_step1_title, R.string.how_step1_body),
@@ -370,11 +307,12 @@ private fun HowItWorksCard() {
                 }
             }
         }
+        TextButton(onClick = { actions.onOpenHelp(HelpTab.FAQ) }) { Text(stringResource(R.string.action_faq)) }
     }
 }
 
 @Composable
-private fun ErrorBanner(error: HostStatus.Error, nowWallMs: Long, actions: HostActions) {
+private fun ErrorBanner(error: HostStatus.Error, actions: HostActions) {
     val text = when (error.kind) {
         HostErrorKind.WIFI_DIRECT_UNSUPPORTED -> stringResource(R.string.err_unsupported)
         HostErrorKind.WIFI_DISABLED -> stringResource(R.string.err_wifi_off)
@@ -383,16 +321,12 @@ private fun ErrorBanner(error: HostStatus.Error, nowWallMs: Long, actions: HostA
         HostErrorKind.GROUP_FAILED -> stringResource(R.string.err_group_failed)
         HostErrorKind.GROUP_LOST -> stringResource(R.string.err_group_lost)
         HostErrorKind.PORT_IN_USE -> stringResource(R.string.err_port)
-        HostErrorKind.FREE_LIMIT_REACHED -> stringResource(
-            R.string.err_cooldown, Format.duration(((error.retryAtWallMs ?: nowWallMs) - nowWallMs).coerceAtLeast(0)),
-        )
         HostErrorKind.UNKNOWN -> stringResource(R.string.err_unknown, error.detail.orEmpty())
     }
     Banner(true, text, MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer) {
         when (error.kind) {
             HostErrorKind.WIFI_DISABLED -> Button(onClick = actions.onOpenWifiSettings) { Text(stringResource(R.string.action_turn_on_wifi)) }
             HostErrorKind.PERMISSION_MISSING -> Button(onClick = actions.onOpenAppSettings) { Text(stringResource(R.string.action_settings)) }
-            HostErrorKind.FREE_LIMIT_REACHED -> Button(onClick = actions.onUpgrade) { Text(stringResource(R.string.action_upgrade)) }
             else -> Unit
         }
     }

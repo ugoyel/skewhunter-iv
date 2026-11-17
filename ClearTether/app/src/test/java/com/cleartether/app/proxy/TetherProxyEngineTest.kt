@@ -249,7 +249,7 @@ class TetherProxyEngineTest {
         val s = connect(port)
         s.getOutputStream().write("CONNECT 127.0.0.1:${echo.port} HTTP/1.1\r\n\r\n".toByteArray())
         assertTrue(readHead(s.getInputStream()).startsWith("HTTP/1.1 200"))
-        engine.pause("Free session limit reached.")
+        engine.pause("Paused by the host.")
         assertEquals(-1, runCatching { s.getInputStream().read() }.getOrDefault(-1))
 
         val s2 = connect(port)

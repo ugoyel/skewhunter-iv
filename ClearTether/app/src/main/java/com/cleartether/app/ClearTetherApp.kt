@@ -11,6 +11,5 @@ class ClearTetherApp : Application() {
         super.onCreate()
         graph = AppGraph(this)
         Notifications.createChannels(this)
-        graph.billing.connect()
     }
 }

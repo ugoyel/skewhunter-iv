@@ -47,7 +47,7 @@ So ClearTether splits "transparency" into the two places where it *is* achievabl
                 │    ├ SOCKS5 CONNECT / UDP ASSOCIATE, SOCKS4a         ┘                   │
                 │    ├ CaptivePortal: instant OS connectivity-probe answers                │
                 │    └ LocalSite: setup portal, PAC/WPAD, .mobileconfig, scripts, DoH      │
-                │  TetherSessionManager ── free-tier meter (15 min / 100 MB) → paywall     │
+                │  TetherSessionManager ── session time/data meter                       │
                 │  TetherForegroundService (connectedDevice) ── locks, recovery, teardown  │
                 │  NfcShareService (HCE Type 4 tag: WSC credential + URL + AAR)            │
                 └──────────────────────────────────────────────────────────────────────────┘
@@ -70,12 +70,11 @@ So ClearTether splits "transparency" into the two places where it *is* achievabl
 | `core/proxy/CaptivePortal.kt` | Canned success responses for Android/ChromeOS, Apple, Windows NCSI, Firefox, NetworkManager probes |
 | `core/proxy/LocalSite.kt`, `SetupInstructions.kt` | Setup portal with live "proxy active" check, PAC, Apple profile, Windows scripts, `/status.json`, RFC 8484 DoH |
 | `core/net/AddressPolicy.kt` | Client ACL (group subnet only) + destination ACL (no loopback / link-local / multicast / tether subnet, checked after DNS) |
-| `core/session/TetherSessionManager.kt` | Throughput + duration accounting, free-tier enforcement, persistence, limit events |
+| `core/session/TetherSessionManager.kt` | Throughput + duration accounting for the session |
 | `core/tun/*` | IPv4/IPv6 parsing, checksums, `TcpFlow` state machine, reassembly, NewReno recovery, DNS forwarder + cache, SOCKS5 UDP client |
 | `service/TransparentTetherVpnService.kt` | Client-mode VPN: join, probe host capabilities, `Builder` config, stack lifecycle |
-| `service/TetherForegroundService.kt` | Host lifecycle: locks, group supervision and auto-recovery, paywall grace period, ordered teardown |
-| `billing/BillingRepository.kt` | Play Billing 9 lifetime product, verification, acknowledgement, restore, offline cache |
-| `MainActivity.kt` + `ui/*` | Compose UI: one-switch host/client, QR, NFC, session countdown, paywall, setup guide, settings |
+| `service/TetherForegroundService.kt` | Host lifecycle: locks, group supervision and auto-recovery, adaptive band, ordered teardown |
+| `MainActivity.kt` + `ui/*` | Compose UI: one-switch host/client, QR, NFC, session stats, Help (guides, why, FAQ), settings |
 
 ## 3. Network transparency protocol
 
@@ -123,28 +122,18 @@ TCP implementation** through a TUN device with 2% random packet loss in both dir
 algorithm drove the kernel's RTO backoff to 13 s and transfers stalled. With them, 16 MiB
 full-duplex transfers finish byte-exact in about 4 s under loss and about 1 s without.
 
-## 4. Monetisation
+## 4. Free, with no limits
 
-`TetherSessionManager` meters every relayed byte through atomics on the hot path.
+ClearTether is free: no billing library, no limits, no ads. `TetherSessionManager` still
+meters every relayed byte (atomics on the hot path) and the session duration, which feed the
+"This session" card, per-device stats and the notification.
 
-- **Free plan:** **30 minutes of sharing per calendar day** (device time zone), with no data cap
-  by default (`FreeTierPolicy.dailyBytes` can add one). Usage *carries over* when sharing is
-  stopped and restarted, so toggling can't reset it. The allowance refills at local midnight.
-- **Auto-disconnect:** when the allowance runs out, `TetherProxyEngine.pause()` drops traffic on the
-  spot. The service then tears down the Wi-Fi Direct group, so every device disconnects, and
-  posts an "Upgrade" notification. A 1 Hz ticker drives the countdown in the UI and notification.
-- **Paywall triggers:** the limit event (in-app overlay), the notification action "Upgrade"
-  (`EXTRA_SHOW_PAYWALL`), tapping start with no minutes left, and the toolbar/free-plan buttons.
-- **Billing (Play Billing 9):** subscription `cleartether_premium` with base plans `monthly` and
-  `yearly`, plus a free-trial offer. Play returns only the offers a user is eligible for, so trials
-  show for new subscribers only. An optional one-time `cleartether_premium_lifetime` is shown if
-  it exists. The paywall lists the plans with Play's localized prices, the yearly saving, the trial
-  length and the auto-renewal terms; Settings links to Play's subscription center. Purchases are
-  signature-verified with the Play license key (`CLEARTETHER_PLAY_LICENSE_KEY`) and acknowledged.
-  Entitlement is cached in DataStore for offline use and re-checked against Play on every
-  launch, so expiry, cancellation, refunds and revocations are honoured.
-- **Release builds:** ML Kit's QR scanner instantiates its component registrars by reflection. R8
-  full mode dropped their constructors, which crashed the scanner, so `proguard-rules.pro` keeps them.
+Release builds: ML Kit's QR scanner instantiates its component registrars by reflection; R8 full
+mode dropped their constructors (scanner crash), so `proguard-rules.pro` keeps them.
+
+**Band selection:** when the phone is also connected to Wi-Fi as a client (a router, or a car
+for wireless Android Auto), the Wi-Fi Direct group must share that radio channel, so the service
+requests `GROUP_OWNER_BAND_AUTO` and Android picks the channel.
 
 ## 5. Foreground service and lifecycle
 

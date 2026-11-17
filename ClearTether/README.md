@@ -4,11 +4,12 @@
 devices over Wi-Fi Direct. No hotspot plan, no root.**
 
 <p align="center">
-  <img src="docs/screenshots/01-host-idle.png" width="19%" alt="Ready to share" />
-  <img src="docs/screenshots/02-host-sharing-free.png" width="19%" alt="Sharing (free tier)" />
-  <img src="docs/screenshots/03-host-sharing-premium.png" width="19%" alt="Sharing (Premium)" />
-  <img src="docs/screenshots/04-client-connected.png" width="19%" alt="Client mode" />
-  <img src="docs/screenshots/05-paywall.png" width="19%" alt="Premium paywall" />
+  <img src="docs/screenshots/01-host-idle.png" width="16%" alt="Ready to share" />
+  <img src="docs/screenshots/02-host-sharing.png" width="16%" alt="Sharing" />
+  <img src="docs/screenshots/03-client-connected.png" width="16%" alt="Client mode" />
+  <img src="docs/screenshots/04-help-connect.png" width="16%" alt="Connection guides" />
+  <img src="docs/screenshots/05-help-why.png" width="16%" alt="Why ClearTether" />
+  <img src="docs/screenshots/06-help-faq.png" width="16%" alt="FAQ" />
 </p>
 
 ## Features
@@ -26,9 +27,10 @@ devices over Wi-Fi Direct. No hotspot plan, no root.**
   and company security agents keep working.
 - **Captive-portal assist.** OS connectivity checks are answered instantly, so devices show
   "Connected".
-- **Freemium.** Free plan: 30 minutes of sharing per day, then devices disconnect automatically.
-  **Premium** (monthly or yearly subscription via Google Play Billing, free trial on yearly)
-  unlocks unlimited sharing.
+- **Free.** No time limits, no data caps, no ads, no account.
+- **Guides for every device:** iPhone/iPad, personal and work Windows laptops, Mac, Chromebook,
+  Linux, Android with or without NFC, consoles. See [`docs/CONNECTING.md`](docs/CONNECTING.md),
+  also built into the app (**? → Connect / Why / FAQ**) and the setup page.
 
 > **How "transparent" works without root.** A non-rooted phone can't forward other devices'
 > packets, and a `VpnService` only sees the phone's *own* apps. So ClearTether relays traffic
@@ -43,12 +45,11 @@ app/src/main/java/com/cleartether/app/
 ├── core/                 pure Kotlin, JVM-tested
 │   ├── net/              AsyncSocket (NIO.2 + coroutines), CIDR/ACL policy, upstream connector
 │   ├── proxy/            TetherProxyEngine, captive portal, setup site/PAC/profile, SOCKS UDP relay
-│   ├── session/          TetherSessionManager (free-tier metering)
+│   ├── session/          TetherSessionManager (session time/data meter)
 │   ├── tun/              user-space TCP/IP stack for Client mode (packets, TcpFlow, DNS, UDP)
 │   └── share/            Wi-Fi QR, NDEF, Wi-Fi Simple Config, Type 4 tag emulation
 ├── wifi/                 WifiDirectManager, ClientWifiConnector
 ├── service/              TetherForegroundService, TransparentTetherVpnService, NfcShareService
-├── billing/              BillingRepository, PurchaseVerifier
 ├── data/                 DataStore settings, runtime state
 └── ui/                   Jetpack Compose (Material 3) screens
 tools/tun-e2e/            Linux TUN bridge for end-to-end tests against the real kernel TCP stack
@@ -78,8 +79,7 @@ Release signing reads `keystore.properties` (git-ignored) or environment variabl
 - Proxy engine: CONNECT tunnelling (2 MiB, SHA-256 verified), HTTP forwarding and header
   hygiene, captive-portal answers, PAC/profile/portal, DoH endpoint, SOCKS4a/SOCKS5 including UDP
   ASSOCIATE, ACLs, pause/resume, 64 concurrent tunnels.
-- Session manager (virtual time): 30-minute daily allowance, optional data cap, carry-over,
-  midnight reset, mid-session upgrade. Billing plan maths (trial length, yearly savings).
+- Session meter (virtual time): time and data accounting with no limits.
 - Packet codecs, DNS cache/failover/truncation, NFC Type 4 APDU flow, Wi-Fi QR escaping.
 - **Kernel end-to-end** (`KernelTunE2ETest`, runs as root on Linux with `/dev/net/tun`,
   `ip` and `python3`; skipped otherwise): real kernel TCP → TUN → user-space stack → proxy →
@@ -94,11 +94,9 @@ CI: `.github/workflows/cleartether-android.yml` builds, lints, tests and uploads
 
 Everything for the store is in [`docs/play-store/`](docs/play-store):
 [step-by-step guide](docs/play-store/PUBLISHING.md), [listing text](docs/play-store/listing.md),
-[graphics](docs/play-store/graphics) and the [pricing recommendation](docs/play-store/PRICING.md)
-(monthly $2.99 / ₹99, yearly $14.99 / ₹499 with a 3-day trial). After the first manual upload,
+and [graphics](docs/play-store/graphics)
+After the first manual upload,
 `.github/workflows/cleartether-release.yml` builds, signs and uploads releases in one click.
 
-Play Console catalogue: subscription `cleartether_premium` with base plans `monthly` and
-`yearly` (plus an optional one-time `cleartether_premium_lifetime`). Tune the free plan in
-`FreeTierPolicy` (`core/session/TetherSessionManager.kt`). Regenerate store graphics with
+Regenerate store graphics with
 `./gradlew :app:testDebugUnitTest -Pscreenshots --tests '*ScreenshotTest*' && python3 tools/play-store/make_graphics.py`.

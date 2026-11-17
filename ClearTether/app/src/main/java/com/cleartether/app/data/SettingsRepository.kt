@@ -6,13 +6,10 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
-import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.cleartether.app.core.net.AddressPolicy
 import com.cleartether.app.core.proxy.ProxyConfig
-import com.cleartether.app.core.session.QuotaSnapshot
-import com.cleartether.app.core.session.QuotaStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -62,8 +59,8 @@ data class ClientSettings(
     val hasCredentials: Boolean get() = !ssid.isNullOrEmpty()
 }
 
-/** All persisted preferences. Also the [QuotaStore] for the free tier. */
-class SettingsRepository(private val context: Context) : QuotaStore {
+/** All persisted preferences (DataStore). */
+class SettingsRepository(private val context: Context) {
 
     private val store get() = context.dataStore
 
@@ -92,8 +89,6 @@ class SettingsRepository(private val context: Context) : QuotaStore {
         )
     }.distinctUntilChanged()
 
-    val premiumCached: Flow<Boolean> = store.data.map { it[Keys.PREMIUM_CACHED] ?: false }.distinctUntilChanged()
-    val debugPremium: Flow<Boolean> = store.data.map { it[Keys.DEBUG_PREMIUM] ?: false }.distinctUntilChanged()
     val onboardingDone: Flow<Boolean> = store.data.map { it[Keys.ONBOARDING_DONE] ?: false }.distinctUntilChanged()
 
     /** Current host settings, generating and persisting credentials on first use. */
@@ -143,22 +138,7 @@ class SettingsRepository(private val context: Context) : QuotaStore {
         }
     }
 
-    suspend fun setPremiumCached(premium: Boolean) = store.edit { it[Keys.PREMIUM_CACHED] = premium }
-    suspend fun setDebugPremium(premium: Boolean) = store.edit { it[Keys.DEBUG_PREMIUM] = premium }
     suspend fun setOnboardingDone() = store.edit { it[Keys.ONBOARDING_DONE] = true }
-
-    override suspend fun load(): QuotaSnapshot {
-        val p = store.data.first()
-        return QuotaSnapshot(p[Keys.QUOTA_USED_MS] ?: 0, p[Keys.QUOTA_USED_BYTES] ?: 0, p[Keys.QUOTA_LAST_ACTIVE] ?: 0)
-    }
-
-    override suspend fun save(snapshot: QuotaSnapshot) {
-        store.edit {
-            it[Keys.QUOTA_USED_MS] = snapshot.usedMs
-            it[Keys.QUOTA_USED_BYTES] = snapshot.usedBytes
-            it[Keys.QUOTA_LAST_ACTIVE] = snapshot.lastActiveWallMs
-        }
-    }
 
     private object Keys {
         val MODE = stringPreferencesKey("mode")
@@ -173,12 +153,7 @@ class SettingsRepository(private val context: Context) : QuotaStore {
         val CLIENT_HOST = stringPreferencesKey("client_host")
         val CLIENT_PORT = intPreferencesKey("client_port")
         val CLIENT_JOIN_FROM_APP = booleanPreferencesKey("client_join_from_app")
-        val PREMIUM_CACHED = booleanPreferencesKey("premium_cached")
-        val DEBUG_PREMIUM = booleanPreferencesKey("debug_premium")
         val ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
-        val QUOTA_USED_MS = longPreferencesKey("quota_used_ms")
-        val QUOTA_USED_BYTES = longPreferencesKey("quota_used_bytes")
-        val QUOTA_LAST_ACTIVE = longPreferencesKey("quota_last_active")
     }
 
     companion object {

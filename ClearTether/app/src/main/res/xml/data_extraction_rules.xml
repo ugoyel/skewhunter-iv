@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Nothing is backed up or transferred: Wi-Fi credentials are device-specific, the free-tier
-     meter must not be restorable, and Premium is restored from Google Play instead. -->
+     settings are device-specific. -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="root" />

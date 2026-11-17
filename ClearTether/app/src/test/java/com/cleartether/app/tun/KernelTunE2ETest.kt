@@ -53,7 +53,7 @@ class KernelTunE2ETest {
 
     @Before
     fun setUp() {
-        val script = File(System.getProperty("user.dir")).resolve("../tools/tun-e2e/tun_bridge.py").canonicalFile
+        val script = File(System.getProperty("user.dir") ?: ".").resolve("../tools/tun-e2e/tun_bridge.py").canonicalFile
         assumeTrue("TUN e2e needs root + /dev/net/tun", File("/dev/net/tun").exists() && script.exists() &&
             System.getProperty("user.name") == "root" && System.getenv("CT_SKIP_TUN") == null)
         val port = ServerSocket(0).use { it.localPort }

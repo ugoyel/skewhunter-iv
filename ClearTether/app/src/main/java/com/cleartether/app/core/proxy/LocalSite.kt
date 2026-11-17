@@ -167,7 +167,8 @@ class LocalSite(private val info: () -> HostSiteInfo) {
             val e = site.endpoint
             val order = ClientPlatform.entries.sortedBy { if (it == detected) 0 else 1 }
             val sections = order.joinToString("\n") { platform ->
-                val steps = SetupInstructions.steps(platform, e).joinToString("") { step ->
+                val all = SetupInstructions.steps(platform, e)
+                val steps = all.filterNot { it.isTip }.joinToString("") { step ->
                     buildString {
                         append("<li><p>").append(escapeHtml(step.text)).append("</p>")
                         if (step.command != null) {
@@ -181,11 +182,14 @@ class LocalSite(private val info: () -> HostSiteInfo) {
                         append("</li>")
                     }
                 }
+                val tips = all.filter { it.isTip }.joinToString("") { "<li>" + escapeHtml(it.text) + "</li>" }
+                val tipsHtml = if (tips.isEmpty()) "" else "<ul class=\"tips\">$tips</ul>"
                 val open = if (platform == detected || (detected == null && platform == ClientPlatform.WINDOWS)) " open" else ""
-                """<details$open><summary>${escapeHtml(platform.displayName)}${if (platform == detected) " <span class=\"tag\">This device</span>" else ""}</summary><ol>$steps</ol></details>"""
+                val badge = if (platform == detected) " <span class=\"tag\">This device</span>" else ""
+                """<details$open><summary>${escapeHtml(platform.displayName)}$badge</summary><ol>$steps</ol>$tipsHtml</details>"""
             }
             val status = site.statusLine?.let { "<p class=\"muted\">${escapeHtml(it)}</p>" } ?: ""
-            val paused = if (site.paused) "<div class=\"warn\">The free session on the host phone has ended. Open ClearTether on the host to continue.</div>" else ""
+            val paused = if (site.paused) "<div class=\"warn\">Sharing is paused on the host phone. Open ClearTether there to resume.</div>" else ""
             return """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ClearTether setup</title>
@@ -204,6 +208,7 @@ summary{cursor:pointer;font-weight:700;padding:12px 0;font-size:17px}ol{padding-
 .cmd{display:flex;gap:8px;align-items:stretch}.cmd code{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:13px;overflow-x:auto;white-space:pre-wrap;word-break:break-all}
 button,.btn{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:10px 14px;font-weight:600;text-decoration:none;display:inline-block;cursor:pointer}
 .tag{font-size:12px;background:var(--accent);color:#fff;border-radius:999px;padding:2px 8px;margin-left:6px;vertical-align:middle}
+.tips{color:var(--muted);font-size:14px;padding-left:18px;margin-top:0}.tips li{margin-bottom:8px}
 .muted{color:var(--muted)}.ok{color:#12b886;font-weight:700}.bad{color:#f59f00;font-weight:700}
 .warn{background:#fff4e5;color:#7a4b00;border-radius:12px;padding:12px 14px;margin-bottom:14px}
 </style></head><body>

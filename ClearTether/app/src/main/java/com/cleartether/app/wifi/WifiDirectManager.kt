@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import android.net.wifi.p2p.WifiP2pConfig
 import android.net.wifi.p2p.WifiP2pGroup
@@ -89,6 +91,18 @@ class WifiDirectManager(private val context: Context) {
     val isWifiEnabled: Boolean get() = wifiManager?.isWifiEnabled == true
 
     val is5GhzSupported: Boolean get() = wifiManager?.is5GHzBandSupported == true
+
+    /**
+     * True when this phone is also connected to a Wi-Fi network as a client (a router, a hotel
+     * network, or a car's head unit for wireless Android Auto). The group then has to share that
+     * radio channel, so callers should let Android choose the band.
+     */
+    @Suppress("DEPRECATION") // allNetworks is the only snapshot API on API 29-30
+    val isStationConnected: Boolean
+        get() = runCatching {
+            val cm = context.getSystemService(ConnectivityManager::class.java) ?: return false
+            cm.allNetworks.any { cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true }
+        }.getOrDefault(false)
 
     fun hasPermission(): Boolean = requiredPermissions().all {
         ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED

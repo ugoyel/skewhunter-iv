@@ -22,8 +22,6 @@ import com.cleartether.app.core.proxy.LocalSite
 import com.cleartether.app.core.proxy.ProxyConfig
 import com.cleartether.app.core.proxy.TetherEndpoint
 import com.cleartether.app.core.proxy.TetherProxyEngine
-import com.cleartether.app.core.session.LimitReason
-import com.cleartether.app.core.session.SessionEligibility
 import com.cleartether.app.core.share.Type4TagEmulator
 import com.cleartether.app.core.share.WifiCredentials
 import com.cleartether.app.data.HostErrorKind
@@ -31,6 +29,7 @@ import com.cleartether.app.data.HostNetwork
 import com.cleartether.app.data.HostSettings
 import com.cleartether.app.data.HostStartStep
 import com.cleartether.app.data.HostStatus
+import com.cleartether.app.data.WifiBand
 import com.cleartether.app.util.Format
 import com.cleartether.app.wifi.GroupDetails
 import com.cleartether.app.wifi.GroupRequest
@@ -111,30 +110,21 @@ class TetherForegroundService : Service() {
     private suspend fun runTether() {
         val runtime = graph.runtime
         runtime.host.value = HostStatus.Starting(HostStartStep.PREPARING)
-        val premium = graph.billing.currentPremium()
         val settings = graph.settings.hostSettings()
 
-        when (val eligibility = graph.session.eligibility(premium)) {
-            is SessionEligibility.CoolingDown -> return fail(HostErrorKind.FREE_LIMIT_REACHED, retryAt = eligibility.availableAtWallMs)
-            is SessionEligibility.Allowed -> Unit
-        }
         val wd = WifiDirectManager(this).also { wifiDirect = it }
         if (!wd.isSupported) return fail(HostErrorKind.WIFI_DIRECT_UNSUPPORTED)
         if (!wd.hasPermission()) return fail(HostErrorKind.PERMISSION_MISSING)
         if (!wd.isWifiEnabled) return fail(HostErrorKind.WIFI_DISABLED)
 
         acquireLocks()
-        if (!graph.session.start(scope, premium)) return fail(HostErrorKind.FREE_LIMIT_REACHED)
-        graph.session.onLimitReached = { reason ->
-            engine?.pause(limitMessage(reason)) // drop traffic immediately, on the relay thread
-            scope.launch { onLimitReached(reason) }
-        }
+        graph.session.start(scope)
         coroutineScope {
-            val observers = listOf(launch { observePremium() }, launch { statsLoop() })
+            val stats = launch { statsLoop() }
             try {
                 superviseGroups(wd, settings)
             } finally {
-                observers.forEach { it.cancel() }
+                stats.cancel()
             }
         }
     }
@@ -185,7 +175,10 @@ class TetherForegroundService : Service() {
     private suspend fun runGroup(wd: WifiDirectManager, settings: HostSettings): GroupOutcome = coroutineScope {
         val runtime = graph.runtime
         runtime.host.value = HostStatus.Starting(HostStartStep.CREATING_GROUP)
-        val group = wd.createGroup(GroupRequest(settings.networkName, settings.passphrase, settings.band))
+        // When the phone is also on Wi-Fi (a router, or a car for wireless Android Auto), the
+        // Wi-Fi Direct group has to share that radio channel: let Android pick it (AUTO).
+        val band = if (wd.isStationConnected) WifiBand.AUTO else settings.band
+        val group = wd.createGroup(GroupRequest(settings.networkName, settings.passphrase, band))
 
         runtime.host.value = HostStatus.Starting(HostStartStep.STARTING_PROXY)
         val endpoint = TetherEndpoint(group.networkName, group.passphrase, group.ownerAddress.hostAddress!!, settings.port)
@@ -209,7 +202,6 @@ class TetherForegroundService : Service() {
         try {
             withContext(Dispatchers.IO) { proxy.start() }
             engine = proxy
-            if (graph.session.state.value.limitReached != null) proxy.pause(limitMessage(graph.session.state.value.limitReached!!))
 
             runtime.nfcPayload.value = if (settings.nfcSharing) {
                 Type4TagEmulator.hostMessage(WifiCredentials(group.networkName, group.passphrase), endpoint.baseUrl + "/", packageName)
@@ -252,10 +244,8 @@ class TetherForegroundService : Service() {
     }
 
     private fun publishRunning(group: GroupDetails, endpoint: TetherEndpoint) {
-        val paused = graph.session.state.value.limitReached
         graph.runtime.host.value = HostStatus.Running(
             HostNetwork(endpoint, group.frequencyMhz, group.interfaceName, group.clientCount),
-            pausedFor = if (graph.billing.isPremium.value) null else paused,
         )
         updateNotification()
     }
@@ -267,38 +257,8 @@ class TetherForegroundService : Service() {
 
     private fun siteInfo(endpoint: TetherEndpoint): HostSiteInfo {
         val session = graph.session.state.value
-        val status = when {
-            session.premium -> getString(R.string.site_status_premium)
-            session.limitReached != null -> getString(R.string.site_status_ended)
-            else -> getString(R.string.site_status_free, Format.duration(session.remainingMs))
-        }
+        val status = getString(R.string.site_status, Format.duration(session.elapsedMs), Format.bytes(session.totalBytes))
         return HostSiteInfo(endpoint, paused = engine?.isPaused == true, statusLine = status)
-    }
-
-    // ------------------------------------------------------------------ monetisation hooks
-
-    /** Free allowance used up: disconnect every device now and point the user to Premium. */
-    private fun onLimitReached(reason: LimitReason) {
-        if (graph.billing.isPremium.value) return
-        Notifications.limitReached(this, limitMessage(reason))
-        fail(HostErrorKind.FREE_LIMIT_REACHED, retryAt = graph.session.nextResetWallMs())
-    }
-
-    private suspend fun observePremium() {
-        graph.billing.isPremium.collect { premium ->
-            graph.session.setPremium(premium)
-            if (premium && engine?.isPaused == true) {
-                engine?.resume()
-                Notifications.cancelAlert(this)
-                updateRunning { it.copy(pausedFor = null) }
-                updateNotification()
-            }
-        }
-    }
-
-    private fun limitMessage(reason: LimitReason) = when (reason) {
-        LimitReason.TIME -> graph.freeTier.dailyTime.inWholeMinutes.toInt().let { resources.getQuantityString(R.plurals.limit_time_message, it, it) }
-        LimitReason.DATA -> getString(R.string.limit_data_message)
     }
 
     // ------------------------------------------------------------------ stats + notification
@@ -325,28 +285,18 @@ class TetherForegroundService : Service() {
         val devices = graph.runtime.devices.value.count { it.activeConnections > 0 }
         val clients = (status as? HostStatus.Running)?.network?.wifiClients ?: 0
         val deviceCount = maxOf(devices, clients)
-        val used = Format.bytes(session.totalBytes)
-        return when {
-            status is HostStatus.Running && status.pausedFor != null -> getString(R.string.notif_paused_text)
-            session.premium -> resources.getQuantityString(R.plurals.notif_running_premium, deviceCount, deviceCount, used)
-            else -> resources.getQuantityString(R.plurals.notif_running_free, deviceCount, deviceCount, used, Format.duration(session.remainingMs))
-        }
+        return resources.getQuantityString(
+            R.plurals.notif_running, deviceCount, deviceCount, Format.bytes(session.totalBytes), Format.duration(session.elapsedMs),
+        )
     }
 
     private fun updateNotification() {
-        val status = graph.runtime.host.value
-        val session = graph.session.state.value
-        val title = when (status) {
-            is HostStatus.Running -> if (status.pausedFor != null) getString(R.string.notif_paused_title) else getString(R.string.notif_running_title, status.network.endpoint.networkName)
+        val title = when (val status = graph.runtime.host.value) {
+            is HostStatus.Running -> getString(R.string.notif_running_title, status.network.endpoint.networkName)
             is HostStatus.Starting -> getString(R.string.notif_starting_title)
             else -> getString(R.string.app_name)
         }
-        val progress = if (!session.premium && session.active) ((1f - maxOf(session.timeProgress, session.dataProgress)) * 100).toInt() else null
-        val notification = Notifications.host(
-            this, title, notificationText(), progress,
-            upgradeAction = !session.premium,
-        )
-        Notifications.post(this, Notifications.ID_HOST, notification)
+        Notifications.post(this, Notifications.ID_HOST, Notifications.host(this, title, notificationText()))
     }
 
     private fun enterForeground(title: String, text: String) {
@@ -358,9 +308,9 @@ class TetherForegroundService : Service() {
 
     // ------------------------------------------------------------------ teardown
 
-    private fun fail(kind: HostErrorKind, detail: String? = null, retryAt: Long? = null) {
+    private fun fail(kind: HostErrorKind, detail: String? = null) {
         Log.w(TAG, "Tethering stopped: $kind $detail")
-        graph.runtime.host.value = HostStatus.Error(kind, detail, retryAt)
+        graph.runtime.host.value = HostStatus.Error(kind, detail)
         stopTethering(finalStatus = graph.runtime.host.value)
     }
 
@@ -372,7 +322,6 @@ class TetherForegroundService : Service() {
         mainJob = null
         if (finalStatus is HostStatus.Idle) graph.runtime.host.value = HostStatus.Stopping
         teardownJob = scope.launch { withContext(NonCancellable) {
-            graph.session.onLimitReached = null
             graph.session.stop()
             job?.cancel()
             job?.join()

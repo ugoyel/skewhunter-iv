@@ -28,15 +28,8 @@ android {
         minSdk = 29
         targetSdk = 36
         // CI passes -PversionCode=<n> so every Play upload gets a higher code.
-        versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 2
-        versionName = "1.1.0"
-
-        val licenseKey = (project.findProperty("CLEARTETHER_PLAY_LICENSE_KEY") as String?).orEmpty()
-        buildConfigField("String", "PLAY_LICENSE_KEY", "\"$licenseKey\"")
-        // Play Console catalogue: subscription with base plans "monthly" + "yearly", and an
-        // optional one-time "lifetime" product (shown only if it exists in Play Console).
-        buildConfigField("String", "SUBSCRIPTION_PRODUCT_ID", "\"cleartether_premium\"")
-        buildConfigField("String", "LIFETIME_PRODUCT_ID", "\"cleartether_premium_lifetime\"")
+        versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 3
+        versionName = "1.2.0"
     }
 
     signingConfigs {
@@ -129,7 +122,6 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.billing.ktx)
     implementation(libs.zxing.core)
     implementation(libs.play.services.code.scanner)
 

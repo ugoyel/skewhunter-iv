@@ -13,12 +13,11 @@ the websites and services those devices contact. HTTPS traffic stays end-to-end 
 ClearTether never decrypts, inspects or records it. Plain-HTTP requests are forwarded as-is,
 except standard operating-system connectivity checks, which ClearTether answers locally.
 
-**On-device data:** the Wi-Fi network name and password, your settings, and free-tier usage
-counters are stored only on your device. They are excluded from cloud backup and device
+**On-device data:** the Wi-Fi network name and password, and your settings are stored only on
+your device. They are excluded from cloud backup and device
 transfer.
 
-**Purchases:** handled entirely by Google Play. ClearTether receives only a purchase token to
-confirm your Premium license; it never sees payment details.
+**Cost:** ClearTether is free, with no ads and no in-app purchases.
 
 **Permissions:** Nearby Wi-Fi devices (or location on Android 10–12) is required by Android to
 create the Wi-Fi Direct network and is never used to determine your location. VPN permission

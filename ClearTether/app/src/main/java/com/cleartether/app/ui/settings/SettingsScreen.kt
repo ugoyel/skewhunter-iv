@@ -11,17 +11,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BatteryChargingFull
+import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.Bolt
-import androidx.compose.material.icons.rounded.BugReport
+import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Key
-import androidx.compose.material.icons.rounded.ManageAccounts
 import androidx.compose.material.icons.rounded.Nfc
 import androidx.compose.material.icons.rounded.Policy
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Router
 import androidx.compose.material.icons.rounded.Wifi
-import androidx.compose.material.icons.rounded.WorkspacePremium
+import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -52,6 +52,7 @@ import com.cleartether.app.R
 import com.cleartether.app.data.HostSettings
 import com.cleartether.app.data.WifiBand
 import com.cleartether.app.ui.MainUiState
+import com.cleartether.app.ui.help.HelpTab
 
 data class SettingsActions(
     val onBand: (WifiBand) -> Unit,
@@ -62,17 +63,14 @@ data class SettingsActions(
     val onRegenerate: () -> Unit,
     val onPort: (Int) -> Unit,
     val onBatterySettings: () -> Unit,
-    val onUpgrade: () -> Unit,
-    val onRestore: () -> Unit,
-    val onManageSubscription: () -> Unit,
+    val onHelp: (HelpTab) -> Unit,
     val onPrivacy: () -> Unit,
-    val onDebugPremium: (Boolean) -> Unit,
 )
 
 private enum class EditField { NAME, PASSWORD, PORT, BAND }
 
 @Composable
-fun SettingsScreen(state: MainUiState, hostRunning: Boolean, debugPremium: Boolean, actions: SettingsActions) {
+fun SettingsScreen(state: MainUiState, hostRunning: Boolean, actions: SettingsActions) {
     val host = state.hostSettings ?: return
     var editing by rememberSaveable { mutableStateOf<EditField?>(null) }
     val locked = hostRunning
@@ -98,27 +96,14 @@ fun SettingsScreen(state: MainUiState, hostRunning: Boolean, debugPremium: Boole
         Toggle(Icons.Rounded.Policy, stringResource(R.string.settings_captive), stringResource(R.string.settings_captive_hint), host.captivePortalAssist, actions.onCaptive)
         Item(Icons.Rounded.BatteryChargingFull, stringResource(R.string.settings_battery), stringResource(R.string.settings_battery_hint)) { actions.onBatterySettings() }
 
-        Header(stringResource(R.string.settings_premium))
-        if (state.premium) {
-            Item(Icons.Rounded.WorkspacePremium, stringResource(R.string.settings_premium_active), stringResource(R.string.settings_premium_thanks)) {}
-        } else {
-            Item(Icons.Rounded.WorkspacePremium, stringResource(R.string.settings_premium_upgrade), stringResource(R.string.settings_premium_plans)) {
-                actions.onUpgrade()
-            }
-        }
-        if (state.billing.subscribed) {
-            Item(Icons.Rounded.ManageAccounts, stringResource(R.string.settings_manage_sub), stringResource(R.string.settings_manage_sub_hint)) {
-                actions.onManageSubscription()
-            }
-        }
-        Item(Icons.Rounded.Refresh, stringResource(R.string.action_restore), stringResource(R.string.settings_restore_hint)) { actions.onRestore() }
+        Header(stringResource(R.string.settings_help))
+        Item(Icons.Rounded.Devices, stringResource(R.string.help_tab_connect), stringResource(R.string.settings_help_connect_hint)) { actions.onHelp(HelpTab.CONNECT) }
+        Item(Icons.Rounded.WifiTethering, stringResource(R.string.help_tab_why), stringResource(R.string.settings_help_why_hint)) { actions.onHelp(HelpTab.WHY) }
+        Item(Icons.AutoMirrored.Rounded.HelpOutline, stringResource(R.string.help_tab_faq), stringResource(R.string.settings_help_faq_hint)) { actions.onHelp(HelpTab.FAQ) }
 
         Header(stringResource(R.string.settings_about))
         Item(Icons.Rounded.Policy, stringResource(R.string.settings_privacy), stringResource(R.string.settings_privacy_hint)) { actions.onPrivacy() }
         Item(Icons.Rounded.Info, stringResource(R.string.settings_version), BuildConfig.VERSION_NAME) {}
-        if (BuildConfig.DEBUG) {
-            Toggle(Icons.Rounded.BugReport, stringResource(R.string.settings_debug_premium), stringResource(R.string.settings_debug_premium_hint), debugPremium, actions.onDebugPremium)
-        }
     }
 
     when (editing) {

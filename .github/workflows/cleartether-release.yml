@@ -43,11 +43,9 @@ jobs:
           CLEARTETHER_KEYSTORE_PASSWORD: ${{ secrets.CLEARTETHER_KEYSTORE_PASSWORD }}
           CLEARTETHER_KEY_ALIAS: ${{ secrets.CLEARTETHER_KEY_ALIAS }}
           CLEARTETHER_KEY_PASSWORD: ${{ secrets.CLEARTETHER_KEY_PASSWORD }}
-          PLAY_LICENSE_KEY: ${{ secrets.CLEARTETHER_PLAY_LICENSE_KEY }}
         run: |
           ./gradlew :app:testDebugUnitTest :app:bundleRelease \
-            -PversionCode=$((100 + ${{ github.run_number }})) \
-            -PCLEARTETHER_PLAY_LICENSE_KEY="$PLAY_LICENSE_KEY"
+            -PversionCode=$((100 + ${{ github.run_number }}))
 
       - name: Upload to Google Play
         uses: r0adkll/upload-google-play@v1

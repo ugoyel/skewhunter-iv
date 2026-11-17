@@ -20,6 +20,9 @@ CONNECT IN SECONDS
 • Android: tap the phones together (NFC)
 • Windows, Mac & Linux: open the built-in setup page for one-tap configuration
 
+STEP-BY-STEP GUIDES FOR EVERY DEVICE
+iPhone & iPad, Windows and work laptops, Mac, Chromebook, Linux, Android with or without NFC, and consoles.
+
 ZERO SETUP ON ANDROID
 Install ClearTether on the other phone and choose "Use internet". Every app works automatically, with no proxy settings.
 
@@ -29,9 +32,14 @@ HTTPS traffic passes through untouched, so certificates, SSL pinning and company
 PRIVATE BY DESIGN
 No accounts, no ads, no analytics. Traffic goes straight from your phone to the sites your devices visit. ClearTether has no servers in between.
 
-FREE AND PREMIUM
-• Free: 30 minutes of sharing every day
-• Premium: unlimited sharing on every device. Monthly or yearly, with a free trial on the yearly plan. Cancel anytime in Google Play.
+FREE, NO LIMITS
+No time limits, no data caps, no ads, no account.
+
+WHY NOT JUST THE HOTSPOT?
+• Works even when your phone's Hotspot option is missing or turned off
+• Your phone can stay on Wi-Fi, or on wireless Android Auto, while it shares
+• Shares your phone's VPN, and a Wi-Fi network your phone is using
+• Set up once: devices remember the network
 
 GOOD TO KNOW
 • Wi-Fi must be turned on (it doesn't need to be connected to a network).
@@ -44,9 +52,11 @@ GOOD TO KNOW
 - Feature graphic: `feature-graphic.png` (1024×500)
 - Phone screenshots: `phone-1.png` … `phone-5.png` (1080×1920)
 
-**What's new (1.1.0):**
+**What's new (1.2.0):**
 ```
-• New: Premium monthly and yearly plans with a free trial
-• Free plan: 30 minutes of sharing every day
+• ClearTether is now completely free: no limits, no ads
+• New Help: step-by-step guides for iPhone, work laptops, Mac, Chromebook, Android (NFC or QR) and more
+• "Why ClearTether" comparison and FAQ (Android Auto, company VPNs, battery)
+• Works alongside wireless Android Auto and Wi-Fi: matches the channel automatically
 • Fixed: QR scanning closing the app on some phones
 ```

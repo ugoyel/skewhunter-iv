@@ -2,7 +2,6 @@ package com.cleartether.app.data
 
 import com.cleartether.app.core.proxy.ClientStats
 import com.cleartether.app.core.proxy.TetherEndpoint
-import com.cleartether.app.core.session.LimitReason
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /** Why tethering could not start or stopped unexpectedly. */
@@ -14,7 +13,6 @@ enum class HostErrorKind {
     GROUP_FAILED,
     GROUP_LOST,
     PORT_IN_USE,
-    FREE_LIMIT_REACHED,
     UNKNOWN,
 }
 
@@ -31,9 +29,9 @@ data class HostNetwork(
 sealed interface HostStatus {
     data object Idle : HostStatus
     data class Starting(val step: HostStartStep) : HostStatus
-    data class Running(val network: HostNetwork, val pausedFor: LimitReason? = null) : HostStatus
+    data class Running(val network: HostNetwork) : HostStatus
     data object Stopping : HostStatus
-    data class Error(val kind: HostErrorKind, val detail: String? = null, val retryAtWallMs: Long? = null) : HostStatus
+    data class Error(val kind: HostErrorKind, val detail: String? = null) : HostStatus
 }
 
 enum class ClientErrorKind { NOT_CONFIGURED, NETWORK_NOT_FOUND, HOST_UNREACHABLE, VPN_DENIED, VPN_FAILED, UNKNOWN }

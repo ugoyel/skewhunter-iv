@@ -11,8 +11,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.WorkspacePremium
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
@@ -23,16 +23,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.cleartether.app.billing.BillingState
-import com.cleartether.app.billing.PlanPeriod
-import com.cleartether.app.billing.PremiumPlan
 import com.cleartether.app.core.proxy.ClientStats
 import com.cleartether.app.core.proxy.TetherEndpoint
-import com.cleartether.app.core.session.FreeTierPolicy
 import com.cleartether.app.core.session.SessionState
 import com.cleartether.app.data.AppMode
 import com.cleartether.app.data.ClientSettings
@@ -43,15 +39,12 @@ import com.cleartether.app.data.HostSettings
 import com.cleartether.app.data.HostStatus
 import com.cleartether.app.ui.client.ClientActions
 import com.cleartether.app.ui.client.ClientScreen
-import com.cleartether.app.ui.guide.SetupGuideSheet
+import com.cleartether.app.ui.help.HelpScreen
+import com.cleartether.app.ui.help.HelpTab
 import com.cleartether.app.ui.host.HostActions
 import com.cleartether.app.ui.host.HostScreen
-import com.cleartether.app.ui.paywall.PaywallDialog
-import com.cleartether.app.ui.theme.Brand
 import com.cleartether.app.ui.theme.ClearTetherTheme
-import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.captureRoboImage
-import com.github.takahirom.roborazzi.captureScreenRoboImage
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Rule
@@ -71,30 +64,25 @@ class StoreScreenshotTest {
     private val mb = 1024L * 1024
     private val endpoint = TetherEndpoint("DIRECT-CT-ClearTether-4F2A", "k7Qm-x9Tp-R2vw", "192.168.49.1", 8228)
     private val hostSettings = HostSettings("ClearTether-4F2A", "k7Qm-x9Tp-R2vw")
-    private val noopHost = HostActions({}, {}, { _, _ -> }, {}, {}, {})
-    private val plans = BillingState(
-        loaded = true,
-        plans = listOf(
-            PremiumPlan(PlanPeriod.MONTH, "$2.99", 2_990_000, "USD"),
-            PremiumPlan(PlanPeriod.YEAR, "$14.99", 14_990_000, "USD", freeTrialDays = 3),
-        ),
-    )
+    private val noopHost = HostActions({}, { _, _ -> }, {}, {}, {})
 
     @Before
     fun gate() = assumeTrue("set -Pscreenshots to render", System.getProperty("ct.screenshots") == "true")
 
     @Composable
-    private fun AppFrame(mode: AppMode, premium: Boolean, content: @Composable () -> Unit) {
+    private fun AppFrame(mode: AppMode, title: String = "ClearTether", tabs: Boolean = true, content: @Composable () -> Unit) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
                 Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("ClearTether", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                    if (!premium) Icon(Icons.Rounded.WorkspacePremium, null, tint = Brand.GoldDeep, modifier = Modifier.padding(end = 20.dp))
+                    Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    Icon(Icons.AutoMirrored.Rounded.HelpOutline, null, modifier = Modifier.padding(end = 20.dp))
                     Icon(Icons.Rounded.Settings, null)
                 }
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    listOf(AppMode.HOST to "Share internet", AppMode.CLIENT to "Use internet").forEachIndexed { i, (m, label) ->
-                        SegmentedButton(selected = mode == m, onClick = {}, shape = SegmentedButtonDefaults.itemShape(i, 2)) { Text(label) }
+                if (tabs) {
+                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                        listOf(AppMode.HOST to "Share internet", AppMode.CLIENT to "Use internet").forEachIndexed { i, (m, label) ->
+                            SegmentedButton(selected = mode == m, onClick = {}, shape = SegmentedButtonDefaults.itemShape(i, 2)) { Text(label) }
+                        }
                     }
                 }
                 Spacer(Modifier.height(8.dp))
@@ -103,34 +91,27 @@ class StoreScreenshotTest {
         }
     }
 
-    private fun render(name: String, dark: Boolean, mode: AppMode = AppMode.HOST, premium: Boolean = false, content: @Composable () -> Unit) {
-        compose.setContent { ClearTetherTheme(darkTheme = dark) { AppFrame(mode, premium, content) } }
+    private fun render(name: String, dark: Boolean, mode: AppMode = AppMode.HOST, title: String = "ClearTether", tabs: Boolean = true, content: @Composable () -> Unit) {
+        compose.setContent { ClearTetherTheme(darkTheme = dark) { AppFrame(mode, title, tabs, content) } }
         compose.onRoot().captureRoboImage("$dir/$name.png")
     }
 
     private val sharing = MainUiState(
         host = HostStatus.Running(HostNetwork(endpoint, 5180, "p2p-wlan0-0", 3)),
         hostSettings = hostSettings,
-        session = SessionState(
-            active = true, elapsedMs = 6 * 60_000, bytesUploaded = 9 * mb, bytesDownloaded = 47 * mb,
-            remainingMs = 24 * 60_000, remainingBytes = Long.MAX_VALUE, timeLimitMs = 30 * 60_000,
-        ),
+        session = SessionState(active = true, elapsedMs = 2 * 3_600_000L + 14 * 60_000, bytesUploaded = 210 * 1024L * 1024, bytesDownloaded = 1_900 * 1024L * 1024),
         devices = listOf(
             ClientStats("192.168.49.23", 6 * mb, 38 * mb, 14, 0, 0),
             ClientStats("192.168.49.57", 2 * mb, 8 * mb, 4, 0, 0),
         ),
-        billing = plans,
     )
 
     @Test
-    fun s1Sharing() = render("1-sharing", dark = true) { HostScreen(sharing, 0, true, noopHost) }
+    fun s1Sharing() = render("1-sharing", dark = true) { HostScreen(sharing, true, noopHost) }
 
     @Test
     fun s2Idle() = render("2-idle", dark = false) {
-        HostScreen(
-            MainUiState(hostSettings = hostSettings, billing = plans, session = SessionState(remainingMs = 30 * 60_000, timeLimitMs = 30 * 60_000)),
-            0, true, noopHost,
-        )
+        HostScreen(MainUiState(hostSettings = hostSettings), true, noopHost)
     }
 
     @Test
@@ -146,28 +127,9 @@ class StoreScreenshotTest {
         )
     }
 
-    @OptIn(ExperimentalRoborazziApi::class)
     @Test
-    fun s4Premium() {
-        compose.setContent {
-            ClearTetherTheme(darkTheme = false) {
-                AppFrame(AppMode.HOST, false) { HostScreen(sharing, 0, true, noopHost) }
-                PaywallDialog(PaywallReason.UPGRADE, plans, FreeTierPolicy(), null, {}, {}, {})
-            }
-        }
-        captureScreenRoboImage("$dir/4-premium.png")
-    }
+    fun s4Connect() = render("4-connect", dark = false, title = "Help", tabs = false) { HelpScreen(endpoint, HelpTab.CONNECT) { _, _ -> } }
 
-    @OptIn(ExperimentalRoborazziApi::class)
     @Test
-    fun s5Guide() {
-        compose.setContent {
-            ClearTetherTheme(darkTheme = false) {
-                AppFrame(AppMode.HOST, false) { HostScreen(sharing, 0, true, noopHost) }
-                SetupGuideSheet(endpoint, onCopy = { _, _ -> }, onDismiss = {})
-            }
-        }
-        compose.waitForIdle()
-        captureScreenRoboImage("$dir/5-guide.png")
-    }
+    fun s5Why() = render("5-why", dark = false, title = "Help", tabs = false) { HelpScreen(endpoint, HelpTab.WHY) { _, _ -> } }
 }

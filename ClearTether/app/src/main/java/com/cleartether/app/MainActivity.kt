@@ -22,16 +22,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
-import androidx.core.net.toUri
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import com.cleartether.app.billing.BillingRepository
-import com.cleartether.app.billing.PremiumPlan
 import com.cleartether.app.core.share.NdefCodec
 import com.cleartether.app.core.share.WifiCredentials
 import com.cleartether.app.core.share.WifiQr
@@ -43,7 +38,6 @@ import com.cleartether.app.data.HostStatus
 import com.cleartether.app.service.NfcShareService
 import com.cleartether.app.ui.ClearTetherAppUi
 import com.cleartether.app.ui.MainViewModel
-import com.cleartether.app.ui.PaywallReason
 import com.cleartether.app.ui.PlatformActions
 import com.cleartether.app.ui.theme.ClearTetherTheme
 import com.cleartether.app.wifi.WifiDirectManager
@@ -56,7 +50,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Single-activity host for the Compose UI. Everything that needs an Activity lives here:
- * runtime permissions, the Wi-Fi panel, VPN consent, the Play Billing sheet, the QR scanner,
+ * runtime permissions, the Wi-Fi panel, VPN consent, the QR scanner,
  * NFC reader mode (client) and the preferred card-emulation service (host).
  */
 class MainActivity : ComponentActivity(), PlatformActions {
@@ -96,41 +90,17 @@ class MainActivity : ComponentActivity(), PlatformActions {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {
-            val debugPremium by graph.settings.debugPremium.collectAsStateWithLifecycle(initialValue = false)
             ClearTetherTheme {
-                ClearTetherAppUi(viewModel, this, debugPremium)
+                ClearTetherAppUi(viewModel, this)
             }
         }
-        handleIntent(intent)
         observeNfcRoles()
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        handleIntent(intent)
-    }
-
-    override fun onResume() {
-        super.onResume()
-        viewModel.onResume()
     }
 
     override fun onPause() {
         setReaderMode(false)
         setPreferredHce(false)
         super.onPause()
-    }
-
-    private fun handleIntent(intent: Intent?) {
-        if (intent?.getBooleanExtra(EXTRA_SHOW_PAYWALL, false) == true) {
-            val reason = when (graph.session.state.value.limitReached) {
-                com.cleartether.app.core.session.LimitReason.TIME -> PaywallReason.TIME_LIMIT
-                com.cleartether.app.core.session.LimitReason.DATA -> PaywallReason.DATA_LIMIT
-                null -> PaywallReason.UPGRADE
-            }
-            viewModel.showPaywall(reason)
-            intent.removeExtra(EXTRA_SHOW_PAYWALL)
-        }
     }
 
     /** NFC role follows the UI: reader on an idle client, card emulation on a running host. */
@@ -278,14 +248,6 @@ class MainActivity : ComponentActivity(), PlatformActions {
         Toast.makeText(this, R.string.toast_scanner_unavailable, Toast.LENGTH_LONG).show()
     }
 
-    override fun purchase(plan: PremiumPlan) {
-        graph.billing.launchPurchase(this, plan)
-    }
-
-    override fun openManageSubscription() {
-        runCatching { startActivity(Intent(Intent.ACTION_VIEW, BillingRepository.manageSubscriptionUrl(packageName).toUri())) }
-    }
-
     override fun copy(label: String, value: String) {
         val clipboard = getSystemService(ClipboardManager::class.java)
         val clip = ClipData.newPlainText(label, value)
@@ -316,8 +278,4 @@ class MainActivity : ComponentActivity(), PlatformActions {
 
     private fun isGranted(permission: String) =
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
-
-    companion object {
-        const val EXTRA_SHOW_PAYWALL = "com.cleartether.app.extra.SHOW_PAYWALL"
-    }
 }

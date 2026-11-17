@@ -356,8 +356,8 @@ class TetherProxyEngine(
     }
 
     private fun pausedPage(reason: String) = HttpResponse.errorPage(
-        503, "Session limit reached",
-        "$reason Open ClearTether on the host phone to upgrade to Premium for unlimited tethering.",
+        503, "Sharing paused",
+        "$reason Open ClearTether on the host phone to resume sharing.",
     )
 
     private fun upstreamFailurePage(e: Throwable, target: HostPort): HttpResponse {
