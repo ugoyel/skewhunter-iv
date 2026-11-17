@@ -381,7 +381,7 @@ class MainActivity : ComponentActivity(), Actions {
     private var btn by mutableStateOf(ButtonCfg())
     private var sosOpen by mutableStateOf(false)
     private var nearVisible by mutableStateOf(true)
-    private var appLock by mutableStateOf(false)
+    private var lockOn by mutableStateOf(false)
     private var appLocked by mutableStateOf(false)
     private var lockedChats by mutableStateOf(setOf<String>())
     private var settingsPage by mutableStateOf("")
@@ -438,8 +438,8 @@ class MainActivity : ComponentActivity(), Actions {
         serverUrl = app.prefs.getString("server", "") ?: ""
         sosOpen = app.prefs.getBoolean("sosAnyone", false)
         nearVisible = app.prefs.getBoolean("visible", true)
-        appLock = app.prefs.getBoolean("appLock", false)
-        appLocked = appLock
+        lockOn = app.prefs.getBoolean("appLock", false)
+        appLocked = lockOn
         lockedChats = app.prefs.getStringSet("lockedChats", emptySet())?.toSet() ?: emptySet()
         profile = Profile(app.prefs.getString("email", "") ?: "", app.prefs.getString("mobile", "") ?: "")
         boostLevel = app.prefs.getInt("boost", 1)
@@ -456,7 +456,7 @@ class MainActivity : ComponentActivity(), Actions {
             val sending by app.sos.sending.collectAsState()
             LaunchedEffect(s.me?.id) { if (s.me != null) RadioService.start(this@MainActivity) }
             BackHandler(enabled = s.me != null && scr != Scr.HOME) { scr = Scr.HOME }
-            val d = SettingsData(mode, btn, field, sosOpen, boostLevel, profile, nearVisible, appLock, lockedChats)
+            val d = SettingsData(mode, btn, field, sosOpen, boostLevel, profile, nearVisible, lockOn, lockedChats)
             AppRoot(verified, s, perms, near, alerts, sending, d, settingsPage, { settingsPage = it }, core.level, auth.enabled,
                 appLocked, { unlockApp() }, this, scr, tab, { tab = it }) { if (it == Scr.SETTINGS && scr != Scr.SETTINGS) settingsPage = ""; scr = it }
             warning?.let { w ->
@@ -513,7 +513,7 @@ class MainActivity : ComponentActivity(), Actions {
     override fun onStart() {
         super.onStart()
         // away for more than 30 seconds: lock again
-        if (appLock && stoppedAt > 0 && System.currentTimeMillis() - stoppedAt > 30_000) appLocked = true
+        if (lockOn && stoppedAt > 0 && System.currentTimeMillis() - stoppedAt > 30_000) appLocked = true
         if (appLocked) unlockApp()
     }
 
@@ -543,7 +543,7 @@ class MainActivity : ComponentActivity(), Actions {
     override fun setVisible(on: Boolean) { app.prefs.edit().putBoolean("visible", on).apply(); nearVisible = on; app.setVisible(on) }
     override fun setAppLock(on: Boolean) {
         // turning it on or off needs the fingerprint once, so nobody else can change it
-        authenticate(if (on) "Turn on fingerprint lock" else "Turn off fingerprint lock") { app.prefs.edit().putBoolean("appLock", on).apply(); appLock = on }
+        authenticate(if (on) "Turn on fingerprint lock" else "Turn off fingerprint lock") { app.prefs.edit().putBoolean("appLock", on).apply(); lockOn = on }
     }
     override fun lockChats(ids: Set<String>, lock: Boolean) {
         val apply = { lockedChats = if (lock) lockedChats + ids else lockedChats - ids; app.prefs.edit().putStringSet("lockedChats", lockedChats).apply() }
