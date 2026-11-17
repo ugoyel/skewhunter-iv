@@ -219,11 +219,13 @@ private fun Bubble(m: TextMsg, now: Long, group: Boolean, a: Actions) {
                     }
                 }
                 m.voiceMs > 0 -> Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.PlayArrow, null, Modifier.size(22.dp), tint = C.accent)
-                    Spacer(Modifier.width(6.dp))
+                    Box(Modifier.size(36.dp).clip(CircleShape).background(if (m.voice != null) C.accent else C.raised).clickable(enabled = m.voice != null) { a.playVoice(m.id) },
+                        contentAlignment = Alignment.Center) { Icon(Icons.Filled.PlayArrow, "Play", Modifier.size(22.dp), tint = if (m.voice != null) C.bg else C.dim) }
+                    Spacer(Modifier.width(10.dp))
                     Column {
                         Text("Voice · ${((m.voiceMs + 500) / 1000).coerceAtLeast(1)} s", color = C.text, fontSize = 15.sp)
-                        Text(when { m.pending -> "Recorded offline · sends when connected"; m.mine -> "Sent after reconnecting"; else -> "Recorded while offline" }, color = C.dim, fontSize = 12.sp)
+                        Text(when { m.pending -> "Recorded offline · sends when connected"; m.dnd -> "Arrived while on Do not disturb"; m.voice != null -> "Tap to play again"; else -> "Recorded while offline" },
+                            color = C.dim, fontSize = 12.sp)
                     }
                 }
                 else -> Text(linked(m.text), color = C.text, fontSize = 16.sp, lineHeight = 21.sp)
@@ -279,7 +281,7 @@ private val nameColors = listOf(0xFF53BDEB, 0xFFFF9F43, 0xFFA78BFA, 0xFFF472B6, 
 private fun nameColor(id: String) = nameColors[(id.hashCode() and 0x7fffffff) % nameColors.size]
 
 @Composable
-fun RadioScreen(s: RadioState, near: NearbyInfo, level: StateFlow<Float>?, a: Actions, now: Long, onBack: () -> Unit) {
+fun RadioScreen(s: RadioState, near: NearbyInfo, level: StateFlow<Float>?, a: Actions, now: Long, locked: Set<String> = emptySet(), onBack: () -> Unit) {
     val g = s.group ?: return
     val other = s.otherIn(g)
     val title = s.titleOf(g)
@@ -305,7 +307,7 @@ fun RadioScreen(s: RadioState, near: NearbyInfo, level: StateFlow<Float>?, a: Ac
         talkingHere -> "${s.talker} is talking…"
         s.talker != null -> "${s.talker} is talking in ${s.groups.firstOrNull { it.id == s.talkGid }?.let { s.titleOf(it) } ?: "another chat"}"
         s.notice != null -> s.notice.lowercase().replaceFirstChar { it.uppercase() }
-        g.direct -> lastSeen(s, near, other, now)
+        g.direct -> (if (s.users[other]?.status == "dnd") "⛔ Do not disturb · " else "") + lastSeen(s, near, other, now)
         else -> listOfNotNull(if (s.tunedCh != 0) chName(s.tunedCh).replace("CH ", "Channel ") else null,
             "${occ.size} of ${g.members.size - 1} here", if (!s.netUp && s.nearbyUp) "nearby link" else if (!s.netUp) "no link" else null).joinToString(" · ")
     }
@@ -335,6 +337,7 @@ fun RadioScreen(s: RadioState, near: NearbyInfo, level: StateFlow<Float>?, a: Ac
                         DropdownMenuItem({ Text("Channels", color = C.text) }, { menu = false; showCh = true })
                     }
                     DropdownMenuItem({ Text("Add to home screen", color = C.text) }, { menu = false; a.addToHome(g.id) })
+                    DropdownMenuItem({ Text(if (g.id in locked) "Unlock chat" else "Lock chat", color = C.text) }, { menu = false; a.lockChats(setOf(g.id), g.id !in locked) })
                     DropdownMenuItem({ Text(if (g.direct) "Delete chat" else "Leave group", color = C.red) }, { menu = false; confirmLeave = true })
                 }
             }

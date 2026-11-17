@@ -87,6 +87,16 @@ interface Actions {
     /** Speaker loudness: 0 normal, 1 loud, 2 maximum. */
     fun setBoost(level: Int)
     fun pickPhoto()
+    fun setStatus(st: String)
+    /** Whether phones nearby can find this phone over Bluetooth / Wi-Fi. */
+    fun setVisible(on: Boolean)
+    fun setAppLock(on: Boolean)
+    fun lockChats(ids: Set<String>, lock: Boolean)
+    /** Runs [then] once the chat is unlocked (straight away for chats that are not locked). */
+    fun unlockChat(gid: String, then: () -> Unit)
+    fun playVoice(id: Long)
+    fun openSettings(page: String)
+    fun openPolicy()
     fun removePhoto()
     /** Saves the mobile number; [done] gets a short status line to show. */
     fun saveMobile(mobile: String, done: (String) -> Unit)
@@ -256,7 +266,7 @@ fun PrivacyNote() {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0x1421C063)).padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Body("🔒 Your privacy", weight = FontWeight.SemiBold, size = 14.sp)
         Body("• Voice, messages, photos and locations are end-to-end encrypted: only the people in the chat can open them. We cannot read or hear anything.", color = C.dim, size = 12.sp)
-        Body("• Nothing you say or send is stored on any server. Messages delete themselves within 2 minutes, and voice is never recorded.", color = C.dim, size = 12.sp)
+        Body("• Nothing you say or send is stored on any server. Messages and voice messages live only in the phones' memory and delete themselves when the timer you choose runs out (10 minutes at most).", color = C.dim, size = 12.sp)
         Body("• No ads, no tracking. Your e-mail is only used to sign you in.", color = C.dim, size = 12.sp)
     }
 }
@@ -314,43 +324,146 @@ private fun Section(title: String, content: @Composable () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Label(title); content() }
 }
 
+/** Values the settings pages show, collected by the activity. */
+data class SettingsData(
+    val mode: String, val btn: ButtonCfg, val field: Pair<String, String>, val sosAnyone: Boolean, val boost: Int,
+    val profile: Profile, val visible: Boolean, val appLock: Boolean, val locked: Set<String>,
+)
+
+/** One row of the settings list: round icon, title, short description. */
 @Composable
-fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: ButtonCfg, field: Pair<String, String>, sosAnyone: Boolean, boost: Int, profile: Profile, a: Actions, onBack: () -> Unit) {
-    var fSsid by remember { mutableStateOf(field.first) }
-    var fPass by remember { mutableStateOf(field.second) }
+fun SettingRow(icon: String, title: String, sub: String = "", onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(40.dp).clip(CircleShape).background(C.raised), contentAlignment = Alignment.Center) { Text(icon, fontSize = 18.sp) }
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = C.text, fontSize = 16.sp)
+            if (sub.isNotEmpty()) Text(sub, color = C.dim, fontSize = 13.sp, maxLines = 2)
+        }
+    }
+}
+
+/** A title with an on/off switch. */
+@Composable
+fun SwitchRow(title: String, sub: String, on: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onChange(!on) }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = C.text, fontSize = 16.sp)
+            if (sub.isNotEmpty()) Text(sub, color = C.dim, fontSize = 13.sp)
+        }
+        Spacer(Modifier.width(12.dp))
+        androidx.compose.material3.Switch(on, onChange, colors = androidx.compose.material3.SwitchDefaults.colors(
+            checkedThumbColor = C.bg, checkedTrackColor = C.accent, uncheckedThumbColor = C.dim, uncheckedTrackColor = C.raised, uncheckedBorderColor = C.line))
+    }
+}
+
+/**
+ * Settings: a main list (profile card, then sections) where each entry opens its own page.
+ * [page] is "" for the list, or "profile", "account", "privacy", "chats", "voice", "connectivity".
+ */
+@Composable
+fun SettingsScreen(s: RadioState, p: Perms, d: SettingsData, page: String, onPage: (String) -> Unit, a: Actions, onBack: () -> Unit) {
+    val btn = d.btn; val mode = d.mode; val boost = d.boost; val sosAnyone = d.sosAnyone; val profile = d.profile
+    var fSsid by remember { mutableStateOf(d.field.first) }
+    var fPass by remember { mutableStateOf(d.field.second) }
     var name by remember { mutableStateOf(s.me?.name ?: "") }
-    var srv by remember { mutableStateOf(server) }
+    val title = when (page) { "profile" -> "Profile"; "account" -> "Account"; "privacy" -> "Privacy & security"; "chats" -> "Chats & talk button"
+        "voice" -> "Voice & sound"; "connectivity" -> "Connectivity"; else -> "Settings" }
     Column(Modifier.fillMaxSize()) {
-        TopBar("Settings", onBack)
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
-            Section("Profile") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.clip(CircleShape).clickable { a.pickPhoto() }) { Avatar(s.me?.name ?: "", s.me?.id ?: "", 64.dp, pic = s.me?.pic ?: "") }
-                    Spacer(Modifier.width(14.dp))
+        TopBar(title, { if (page.isEmpty()) onBack() else onPage("") })
+        if (page.isEmpty()) {
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                Row(Modifier.fillMaxWidth().clickable { onPage("profile") }.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Avatar(s.me?.name ?: "", s.me?.id ?: "", 64.dp, pic = s.me?.pic ?: "")
+                    Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(if (s.me?.pic.isNullOrEmpty()) "Add a profile photo" else "Change photo", Modifier.clickable { a.pickPhoto() }, color = C.accent, fontSize = 15.sp)
-                        if (!s.me?.pic.isNullOrEmpty()) Text("Remove photo", Modifier.padding(top = 6.dp).clickable { a.removePhoto() }, color = C.dim, fontSize = 13.sp)
+                        Text(s.me?.name ?: "", color = C.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                        Text(if (s.status == "dnd") "⛔ Do not disturb" else "🟢 Available", color = C.dim, fontSize = 14.sp)
                     }
                 }
-                Body("Your photo is shown to people on the app.", color = C.dim, size = 12.sp)
-                Label("Name", Modifier.padding(top = 6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Field(name, { name = it.take(24) }, "Name", Modifier.weight(1f))
-                    Btn("Save", enabled = name.isNotBlank() && name.trim() != s.me?.name) { a.setName(name) }
-                }
-                if (profile.email.isNotEmpty()) { Label("E-mail", Modifier.padding(top = 6.dp)); Body(profile.email, color = C.dim, size = 14.sp) }
-                Label("Mobile number", Modifier.padding(top = 6.dp))
-                var mobile by remember { mutableStateOf(profile.mobile) }
-                var saved by remember { mutableStateOf<String?>(null) }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Field(mobile, { v -> mobile = v.filter { it.isDigit() || it == '+' }.take(16) }, "e.g. +91 98765 43210", Modifier.weight(1f))
-                    Btn("Save", enabled = mobile != profile.mobile) { a.saveMobile(mobile) { r -> saved = r } }
-                }
-                saved?.let { Body(it, color = C.dim, size = 12.sp) }
-                Body("Kept with your account for support; never shown to other users.", color = C.dim, size = 12.sp)
+                Box(Modifier.fillMaxWidth().height(1.dp).background(C.line))
+                SettingRow("👤", "Account", "E-mail, mobile number, sign out") { onPage("account") }
+                SettingRow("🔒", "Privacy & security", "Visibility, fingerprint lock, locked chats, SOS") { onPage("privacy") }
+                SettingRow("💬", "Chats & talk button", "Message timer, hardware talk button") { onPage("chats") }
+                SettingRow("🔊", "Voice & sound", "Voice quality, loudness, beep") { onPage("voice") }
+                SettingRow("📡", "Connectivity", "Internet and nearby, field Wi-Fi range extender") { onPage("connectivity") }
+                SettingRow("📄", "Privacy policy", "How your data is handled") { a.openPolicy() }
+                if (!p.allOk) SettingRow("⚠️", "Permissions needed", "Some permissions are missing: tap to fix") { a.requestPerm("all") }
+                Text("ZeroBar · version " + app.pttradio.BuildConfig.VERSION_NAME, Modifier.fillMaxWidth().padding(24.dp), color = C.faint, fontSize = 12.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
-            Section("Privacy") { PrivacyNote() }
-            Section("Talk button") {
+            return@Column
+        }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
+            when (page) {
+                "profile" -> {
+                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(Modifier.clip(CircleShape).clickable { a.pickPhoto() }) { Avatar(s.me?.name ?: "", s.me?.id ?: "", 110.dp, pic = s.me?.pic ?: "") }
+                        Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                            Text(if (s.me?.pic.isNullOrEmpty()) "Add photo" else "Change photo", Modifier.clickable { a.pickPhoto() }, color = C.accent, fontSize = 15.sp)
+                            if (!s.me?.pic.isNullOrEmpty()) Text("Remove", Modifier.clickable { a.removePhoto() }, color = C.dim, fontSize = 15.sp)
+                        }
+                    }
+                    Section("Name") {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Field(name, { name = it.take(24) }, "Name", Modifier.weight(1f))
+                            Btn("Save", enabled = name.isNotBlank() && name.trim() != s.me?.name) { a.setName(name) }
+                        }
+                        Body("This is how people see you. Your photo is shown to people on the app.", color = C.dim, size = 12.sp)
+                    }
+                    Section("Status") {
+                        Segments(listOf("available" to "Available", "dnd" to "Do not disturb"), s.status, Modifier.fillMaxWidth()) { a.setStatus(it) }
+                        Body(if (s.status == "dnd") "Talk is not played aloud. It arrives as voice messages you can play when you want; others see you are on Do not disturb."
+                             else "Talk plays straight away, like a walkie-talkie.", color = C.dim, size = 12.sp)
+                    }
+                }
+                "account" -> {
+                    if (profile.email.isNotEmpty()) Section("E-mail") { Body(profile.email, size = 15.sp); Body("Used only to sign you in.", color = C.dim, size = 12.sp) }
+                    Section("Mobile number") {
+                        var mobile by remember { mutableStateOf(profile.mobile) }
+                        var saved by remember { mutableStateOf<String?>(null) }
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Field(mobile, { v -> mobile = v.filter { it.isDigit() || it == '+' }.take(16) }, "e.g. +91 98765 43210", Modifier.weight(1f))
+                            Btn("Save", enabled = mobile != profile.mobile) { a.saveMobile(mobile) { r -> saved = r } }
+                        }
+                        saved?.let { Body(it, color = C.dim, size = 12.sp) }
+                        Body("Kept with your account for support; never shown to other users.", color = C.dim, size = 12.sp)
+                    }
+                    var out by remember { mutableStateOf(false) }
+                    Btn("Sign out", Modifier.fillMaxWidth().padding(top = 12.dp), danger = true) { out = true }
+                    if (out) Sheet("Sign out?", { out = false }) {
+                        Body("Your name, keys, chats and settings are removed from this phone. You can sign in again with your e-mail, " +
+                            "but people will have to add you to their groups again.", color = C.dim, size = 13.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Btn("Cancel", Modifier.weight(1f)) { out = false }
+                            Btn("Sign out", Modifier.weight(1f), danger = true) { out = false; a.signOut() }
+                        }
+                    }
+                }
+                "privacy" -> {
+                    Column {
+                        SwitchRow("Visible to people nearby", if (d.visible) "Phones around you can find you over Bluetooth and Wi-Fi."
+                            else "Hidden: phones nearby cannot find you. Internet calls and SOS alerts still work.", d.visible) { a.setVisible(it) }
+                        SwitchRow("Fingerprint lock", "Ask for your fingerprint (or screen lock) when ZeroBar opens.", d.appLock) { a.setAppLock(it) }
+                    }
+                    Section("Locked chats") {
+                        Body(if (d.locked.isEmpty()) "None. Touch and hold a chat, then tap the lock, to lock it." else "${d.locked.size} chat(s) need your fingerprint to open. Unlock them the same way.",
+                            color = C.dim, size = 13.sp)
+                    }
+                    Section("Emergency (SOS) messages are shown to") {
+                Segments(listOf("c" to "My contacts", "a" to "Anyone nearby"), if (sosAnyone) "a" else "c", Modifier.fillMaxWidth()) { a.setSosAnyone(it == "a") }
+                Body(if (sosAnyone) "Every phone with ZeroBar in range shows your alert, including strangers who could help."
+                     else "Only people in your groups and chats see your alert. Other phones with the app still pass it on, without showing it, so it can reach a contact further away.",
+                    color = C.dim, size = 12.sp)
+                    }
+                    Section("Your privacy") { PrivacyNote() }
+                }
+                "chats" -> {
+                    Section("Messages delete themselves after") {
+                        Segments(listOf("30" to "30 s", "60" to "1 m", "120" to "2 m", "180" to "3 m", "300" to "5 m", "600" to "10 m"), s.ttlSec.toString(), Modifier.fillMaxWidth()) { a.setTtl(it.toInt()) }
+                        Body("Text, pictures and voice messages stay only in this phone's memory, and only until this timer runs out.", color = C.dim, size = 12.sp)
+                    }
+                    Section("Hardware talk button") {
                 val vd = android.view.KeyEvent.KEYCODE_VOLUME_DOWN
                 val vu = android.view.KeyEvent.KEYCODE_VOLUME_UP
                 val sel = when (btn.key) { 0 -> "off"; vd -> "vd"; vu -> "vu"; else -> "custom" }
@@ -379,21 +492,10 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: B
                         }
                     }
                 }
-            }
-            Section("Messages delete themselves after") {
-                Segments(listOf("15" to "15 s", "30" to "30 s", "60" to "1 min", "120" to "2 min"), s.ttlSec.toString(), Modifier.fillMaxWidth()) { a.setTtl(it.toInt()) }
-                Body("Text is kept in memory only, on this phone, for at most 2 minutes. Voice is never stored anywhere.", color = C.dim, size = 12.sp)
-            }
-            Section("Link") {
-                Segments(listOf("auto" to "Auto", "net" to "Internet", "nearby" to "Nearby", "both" to "Both"), mode, Modifier.fillMaxWidth()) { a.setMode(it) }
-                Body(when (mode) {
-                    "net" -> "Internet only. Bluetooth and Wi-Fi discovery stay off."
-                    "nearby" -> "Phone-to-phone only, over Bluetooth and Wi-Fi. No server is used."
-                    "both" -> "Internet and nearby together. Lets this phone stay reachable both ways; uses the most battery."
-                    else -> "Internet when there is one. Nearby phones are found over Bluetooth and Wi-Fi whenever there is no internet, and also while the app is open."
-                }, color = C.dim, size = 12.sp)
-            }
-            Section("Voice quality") {
+                    }
+                }
+                "voice" -> {
+                    Section("Voice quality") {
                 Segments(listOf("1" to "Auto", "0" to "Standard"), if (s.hd && s.hdOk) "1" else "0", Modifier.fillMaxWidth()) { a.setHd(it == "1") }
                 Body(when {
                     !s.hdOk -> "This phone cannot use adaptive voice, so it stays on Standard (about 64 kbit/s)."
@@ -401,22 +503,25 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: B
                         "data saver without internet (12 kbit/s). Used when every phone on the channel supports it; otherwise Standard."
                     else -> "About 64 kbit/s, no compression. Works with every version of the app."
                 }, color = C.dim, size = 12.sp)
-            }
-            Section("Speaker loudness") {
+                    }
+                    Section("Speaker loudness") {
                 Segments(listOf("0" to "Normal", "1" to "Loud", "2" to "Maximum"), boost.toString(), Modifier.fillMaxWidth()) { a.setBoost(it.toInt()) }
                 Body("Quiet voices are raised to a loud, even level; background noise is not amplified and loud voices are limited so they do not distort. " +
                     "Turn the phone's media volume up too.", color = C.dim, size = 12.sp)
-            }
-            Section("End-of-transmission beep") {
-                Segments(listOf("1" to "On", "0" to "Off"), if (s.beep) "1" else "0", Modifier.width(180.dp)) { a.setBeep(it == "1") }
-            }
-            Section("Emergency (SOS) messages are shown to") {
-                Segments(listOf("c" to "My contacts", "a" to "Anyone nearby"), if (sosAnyone) "a" else "c", Modifier.fillMaxWidth()) { a.setSosAnyone(it == "a") }
-                Body(if (sosAnyone) "Every phone with ZeroBar in range shows your alert, including strangers who could help."
-                     else "Only people in your groups and chats see your alert. Other phones with the app still pass it on, without showing it, so it can reach a contact further away.",
-                    color = C.dim, size = 12.sp)
-            }
-            Section("Range extender · field Wi-Fi") {
+                    }
+                    Column { SwitchRow("End-of-talk beep", "A short beep when the other person releases the button.", s.beep) { a.setBeep(it) } }
+                }
+                "connectivity" -> {
+                    Section("How phones connect") {
+                Segments(listOf("auto" to "Auto", "net" to "Internet", "nearby" to "Nearby", "both" to "Both"), mode, Modifier.fillMaxWidth()) { a.setMode(it) }
+                Body(when (mode) {
+                    "net" -> "Internet only. Bluetooth and Wi-Fi discovery stay off."
+                    "nearby" -> "Phone-to-phone only, over Bluetooth and Wi-Fi. No server is used."
+                    "both" -> "Internet and nearby together. Lets this phone stay reachable both ways; uses the most battery."
+                    else -> "Internet when there is one. Nearby phones are found over Bluetooth and Wi-Fi whenever there is no internet, and also while the app is open."
+                }, color = C.dim, size = 12.sp)
+                    }
+                    Section("Range extender · field Wi-Fi") {
                 Body("For places with no internet. One phone turns on its hotspot with this name and password; every other phone that saved it " +
                     "joins automatically when in range, and the app talks over that Wi-Fi. The hotspot phone is the hub, so people can be further " +
                     "apart than Bluetooth allows. Use the same name and password on every phone.", color = C.dim, size = 12.sp)
@@ -430,20 +535,9 @@ fun SettingsScreen(s: RadioState, p: Perms, mode: String, server: String, btn: B
                 Body("Android does not let apps switch the hotspot on by themselves: \"Be the hotspot\" opens the hotspot settings and copies the " +
                     "password. Set security to WPA2. When internet is back, turn the hotspot off; the other phones go back to their usual networks on their own.",
                     color = C.dim, size = 12.sp)
-            }
-            // permissions are managed in Android's app settings; only anything still missing is shown here
-            if (!p.allOk) Section("Permissions needed") { PermList(p, a) }
-            var out by remember { mutableStateOf(false) }
-            Btn("Sign out", Modifier.fillMaxWidth().padding(top = 8.dp), danger = true) { out = true }
-            if (out) Sheet("Sign out?", { out = false }) {
-                Body("Your name, keys, chats and settings are removed from this phone. You can sign in again with your e-mail, " +
-                    "but people will have to add you to their groups again.", color = C.dim, size = 13.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Btn("Cancel", Modifier.weight(1f)) { out = false }
-                    Btn("Sign out", Modifier.weight(1f), danger = true) { out = false; a.signOut() }
+                    }
                 }
             }
-
             Spacer(Modifier.height(8.dp))
         }
     }

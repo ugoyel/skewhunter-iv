@@ -80,6 +80,10 @@ class App : Application() {
         return if ((down in 1..1499) || weak) 2 else 3
     }
 
+    /** Hidden from nearby people: the Bluetooth / Wi-Fi link stays off whatever the link mode. */
+    val visibleNearby = MutableStateFlow(true)
+    fun setVisible(on: Boolean) { visibleNearby.value = on }
+
     fun setBoost(level: Int) { prefs.edit().putInt("boost", level).apply(); audio.boost = level }
 
     /** True while the app is on screen. */
@@ -109,7 +113,8 @@ class App : Application() {
             core.state.value.let { st -> if (st.users[id] != null || st.groups.any { g -> g.members.any { it.id == id } }) st.nameOf(id) else null }
         }, { id -> core.state.value.groups.any { g -> g.members.any { it.id == id } } }, { Notifier.sos(this, it) })
         // emergency alerts are listened for whenever the local radios run
-        scope.launch { nearby.info.map { it.running }.distinctUntilChanged().collect { sos.listen(it) } }
+        // SOS alerts are still heard while hidden from nearby people
+        scope.launch { combine(nearby.info.map { it.running }.distinctUntilChanged(), visibleNearby) { r, v -> r || !v }.collect { sos.listen(it) } }
         scope.launch { core.state.map { it.netUp }.distinctUntilChanged().collect { nearby.internetUp = it } }
         scope.launch { onScreen.collect { nearby.foreground = it; sos.setForeground(it) } }
         // widgets show chat names: redraw them when groups are renamed, joined or removed
@@ -123,17 +128,21 @@ class App : Application() {
         // voice quality follows the connection: HD on good internet, lower bit rates as it gets worse
         scope.launch { combine(netTier, core.state.map { it.netUp }.distinctUntilChanged()) { t, up -> if (up) t else 1 }.collect { core.setLinkTier(it) } }
         audio.boost = prefs.getInt("boost", 1)
+        visibleNearby.value = prefs.getBoolean("visible", true)
+        // background: lighter presence and announcements
+        scope.launch { onScreen.collect { core.setForeground(it) } }
         // Rugged phones announce their dedicated PTT key with a broadcast instead of a key code.
         ContextCompat.registerReceiver(this, object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { if (i.action in PTT_DOWN) buttonDown() else buttonUp() }
         }, IntentFilter().apply { (PTT_DOWN + PTT_UP).forEach { addAction(it) } }, ContextCompat.RECEIVER_EXPORTED)
 
         scope.launch {
-            combine(core.state.map { it.netUp to (it.me != null) }.distinctUntilChanged(), linkMode, bump, onScreen) { a, m, _, vis -> listOf(a.first, a.second, m, vis) }
+            combine(core.state.map { it.netUp to (it.me != null) }.distinctUntilChanged(), linkMode, combine(bump, visibleNearby) { b, v -> b to v }, onScreen) { a, m, _, vis -> listOf(a.first, a.second, m, vis) }
                 .collectLatest { (netUpV, readyV, modeV, visV) ->
                     val netUp = netUpV as Boolean; val ready = readyV as Boolean; val mode = modeV as String; val vis = visV as Boolean
                     if (!ready) return@collectLatest
                     if (mode == "nearby") mqtt.stop() else mqtt.start()
+                    if (!visibleNearby.value) { radios(false); return@collectLatest }
                     when {
                         mode == "nearby" || mode == "both" -> radios(true)
                         mode == "net" -> radios(false)
@@ -296,6 +305,12 @@ object Notifier {
         } catch (x: Exception) { }
     }
 
+    /** Content of locked chats (or of everything while the app lock is on) is not shown in notifications. */
+    private fun hidden(c: Context, gid: String): Boolean {
+        val p = (c.applicationContext as App).prefs
+        return p.getBoolean("appLock", false) || gid in (p.getStringSet("lockedChats", emptySet()) ?: emptySet())
+    }
+
     fun event(c: Context, e: Event) {
         val nm = c.getSystemService(NotificationManager::class.java)
         val b = Notification.Builder(c, ALERT).setSmallIcon(R.drawable.ic_stat_radio).setAutoCancel(true)
@@ -308,7 +323,7 @@ object Notifier {
                 if (e.gid.isNotEmpty() && (!MainActivity.visible || e.gid != st.tunedGroup)) {
                     val title = if (e.chat.isEmpty() || e.chat == e.from) e.from else "${e.from} · ${e.chat}"
                     nm.notify(e.gid.hashCode() + 13, Notification.Builder(c, TALK).setSmallIcon(R.drawable.ic_stat_radio).setAutoCancel(true)
-                        .setContentTitle(title).setContentText(e.text).setContentIntent(open(c, e.gid.hashCode() + 13, e.gid, 0))
+                        .setContentTitle(title).setContentText(if (hidden(c, e.gid)) "New message" else e.text).setContentIntent(open(c, e.gid.hashCode() + 13, e.gid, 0))
                         .addAction(talkAction(c, e.gid.hashCode() + 14, e.gid, "Talk back")).build())
                 }
             }

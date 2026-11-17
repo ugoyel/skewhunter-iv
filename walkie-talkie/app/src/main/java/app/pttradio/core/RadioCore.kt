@@ -27,10 +27,10 @@ class RadioCore(
         const val IMG_CHUNK = 12_000
         const val IMG_MAX_CHUNKS = 64               // 768 KB: room for HD pictures over internet
         const val MAX_CH = 16
-        const val MAX_TTL_SEC = 120
+        const val MAX_TTL_SEC = 600
         const val HOPS = 3
         const val PRESENCE_EVERY = 45_000L
-        const val PRESENCE_EXPIRE = 120_000L
+        const val PRESENCE_EXPIRE = 420_000L      // a phone in the background reports every 3 minutes
         const val NEARBY_EXPIRE = 150_000L
         const val STALE_PROFILE = 30L * 24 * 3600 * 1000
         const val MAX_TX = 60_000L
@@ -104,7 +104,7 @@ class RadioCore(
     fun attach(t: Transport) {
         t.listener = this
         transports.add(t)
-        run { s.me?.let { t.setPicture(it.pic); t.setProfile(it.id, it.name, it.pub) }; refreshSubs(); onLinkNow(t) }
+        run { s.me?.let { t.setPicture(it.pic); t.setStatus(s.status); t.setProfile(it.id, it.name, it.pub) }; refreshSubs(); onLinkNow(t) }
     }
 
     private fun load() {
@@ -112,6 +112,7 @@ class RadioCore(
             ready = true,
             ttlSec = (kv.get("ttl")?.toIntOrNull() ?: MAX_TTL_SEC).coerceIn(5, MAX_TTL_SEC),
             beep = kv.get("beep") != "0",
+            status = kv.get("status") ?: "available",
             hd = kv.get("hd") != "0",
             hdOk = try { opus?.ok == true } catch (e: Throwable) { false },
         )
@@ -136,7 +137,7 @@ class RadioCore(
         val tg = kv.get("tunedGroup")
         if (tg != null && st.groups.any { it.id == tg }) st = st.copy(tunedGroup = tg, tunedCh = (kv.get("tunedCh")?.toIntOrNull() ?: 0).coerceIn(0, MAX_CH))
         state.value = st
-        st.me?.let { me -> transports.forEach { it.setPicture(me.pic); it.setProfile(me.id, me.name, me.pub) } }
+        st.me?.let { me -> transports.forEach { it.setPicture(me.pic); it.setStatus(st.status); it.setProfile(me.id, me.name, me.pub) } }
         setMyPresence()
         refreshSubs()
     }
@@ -214,7 +215,7 @@ class RadioCore(
         val me = s.me ?: return
         lastHelloAt = clock()
         val p = header(T_HELLO, 0, 0)
-        p.body = JSONObject().put("id", me.id).put("name", me.name).put("pub", me.pub).toString().toByteArray()
+        p.body = JSONObject().put("id", me.id).put("name", me.name).put("pub", me.pub).put("st", s.status).toString().toByteArray()
         seen[p.msgId] = true
         val raw = p.encode()
         for (t in transports) if (t.relays && t.isUp) try { t.send("", raw, false) } catch (e: Exception) { }
@@ -391,7 +392,7 @@ class RadioCore(
         lastPresenceAt = clock()
         val locks = JSONArray()
         if (ch >= 0) lockMap[g.id]?.get(me.id)?.forEach { l -> locks.put(JSONObject().put("ch", l.ch).put("allow", JSONArray(l.allow.toList()))) }
-        sendSealed(T_PRES, g.id, 0, unb64(g.key), JSONObject().put("ch", ch).put("locks", locks).put("op", if (s.hd && s.hdOk) 1 else 0).toString().toByteArray(), groupTopic(g.id))
+        sendSealed(T_PRES, g.id, 0, unb64(g.key), JSONObject().put("ch", ch).put("locks", locks).put("op", if (s.hd && s.hdOk) 1 else 0).put("st", s.status).toString().toByteArray(), groupTopic(g.id))
     }
 
     fun lockChannel() = run {
@@ -465,6 +466,7 @@ class RadioCore(
         val tier = linkTier
         bundle = when (tier) { 3 -> 2; 2 -> 3; 1 -> 2; else -> 1 }
         txBuf.clear()
+        txAll.clear()
         if (txOpus) { opus!!.setBitrate(when (tier) { 3 -> 32_000; 1 -> 12_000; else -> 16_000 }); opus.resetEnc() }
         val quality = when { offline -> ""; !txOpus -> "Standard voice"; tier == 3 -> "HD voice"; tier == 1 -> "Data saver"; else -> "Low-data voice" }
         txStart = clock()
@@ -477,6 +479,7 @@ class RadioCore(
     private fun txFrame(pcm: ShortArray) {
         if (!s.transmitting || s.group == null) return
         level.value = levelOf(pcm)
+        if (txAll.size < MAX_TX / 60) txAll.add(pcm)
         txClip?.let { if (it.size < MAX_TX / 60) it.add(pcm); return }
         txBuf.add(pcm)
         if (txBuf.size >= bundle) sendBundle()
@@ -538,6 +541,9 @@ class RadioCore(
         val key = channelKey(g, s.tunedCh) ?: return
         val seq = txSeq++ and 0xffff
         sendSealed(T_AUDIO, g.id, s.tunedCh, key, byteArrayOf((seq shr 8).toByte(), seq.toByte(), 1), chanTopic(g.id, s.tunedCh))
+        // your own words as a voice bubble too, to replay what you said
+        if (txAll.size >= 4) { val all = join(txAll); s.me?.let { me -> addMessage(me.id, me.name, "", true, voiceMs = all.size * 1000L / 16000, voice = Adpcm.encode(all, Adpcm.State())) } }
+        txAll.clear()
     }
 
     /** [to] = chat id and channel to send to; by default the chat that is open now. */
@@ -597,7 +603,7 @@ class RadioCore(
     }
 
     private fun pendingMsg(o: Out) = TextMsg(o.msgId, s.me?.id ?: "", s.me?.name ?: "", o.text, o.created, Long.MAX_VALUE, true, o.image,
-        pending = true, voiceMs = (o.pcm?.size ?: 0) * 60L)
+        pending = true, voiceMs = (o.pcm?.size ?: 0) * 60L, voice = o.pcm?.let { Adpcm.encode(join(it), Adpcm.State()) })
 
     private fun deliver(g: Group, o: Out): Boolean {
         val key = channelKey(g, o.ch) ?: return false
@@ -696,16 +702,17 @@ class RadioCore(
     }
 
     private fun addMessage(fromId: String, from: String, text: String, mine: Boolean, image: ByteArray? = null,
-                           id: Long = Crypto.randomId(), voiceMs: Long = 0, gid: String? = s.tunedGroup, ch: Int = s.tunedCh) {
+                           id: Long = Crypto.randomId(), voiceMs: Long = 0, gid: String? = s.tunedGroup, ch: Int = s.tunedCh,
+                           voice: ByteArray? = null, dnd: Boolean = false) {
         val now = clock()
         val chat = gid ?: return
-        editChat(chat, ch) { (it + TextMsg(id, fromId, from, text, now, now + s.ttlSec * 1000L, mine, image, voiceMs = voiceMs)).takeLast(100) }
+        editChat(chat, ch) { (it + TextMsg(id, fromId, from, text, now, now + s.ttlSec * 1000L, mine, image, voiceMs = voiceMs, voice = voice, dnd = dnd)).takeLast(100) }
         if (mine) return
         if (chat != s.tunedGroup) update { copy(unread = unread + (chat to (unread[chat] ?: 0) + 1)) }
         record(fromId, chat, kindOf(text, image, voiceMs), false)
         val g = s.groups.firstOrNull { it.id == chat }
         val preview = when { image != null -> "Picture"; voiceMs > 0 -> "Voice message"; text.startsWith("geo:") -> "Location"; else -> text }
-        onEvent?.invoke(Event.Message(from, chat, g?.let { s.titleOf(it) } ?: "", preview))
+        if (voice == null || dnd) onEvent?.invoke(Event.Message(from, chat, g?.let { s.titleOf(it) } ?: "", preview))
     }
 
     // ---------------------------------------------------------------- receiving
@@ -735,7 +742,7 @@ class RadioCore(
         if (!pinned(id, pub)) return
         val old = s.users[id]
         // via: the link it came in on when heard directly, empty when another phone passed it on
-        val u = (old ?: User(id, "", "")).copy(name = o.getString("name").take(24), pub = pub, nearbyAt = clock(), ts = clock(), via = via, seenAt = clock())
+        val u = (old ?: User(id, "", "")).copy(name = o.getString("name").take(24), pub = pub, nearbyAt = clock(), ts = clock(), via = via, seenAt = clock(), status = o.optString("st"))
         update { copy(users = users + (id to u)) }
         usersDirty = true
         resendInvites(onlyTo = id)
@@ -765,27 +772,28 @@ class RadioCore(
         val isOpus = plain[2].toInt() and 2 != 0
         if (isOpus && !s.hdOk) return
         if (s.talkerId != sender || rxKey != key) {
+            s.talkerId?.let { finishRx(it, rxKey) }
             rxSeq = -1; rxFrames = 0; rxDelayed = plain[2].toInt() and 4 != 0; rxKey = key
             if (isOpus) opus?.resetDec()
             update { copy(talkerId = sender, talker = nameOf(sender), hdNow = isOpus, talkGid = g.id) }
             record(sender, g.id, "talk", false)
-            if (plain[2].toInt() and 1 == 0) onEvent?.invoke(Event.Talk(g.id, s.titleOf(g), s.nameOf(sender)))
+            if (plain[2].toInt() and 1 == 0 && s.status != "dnd") onEvent?.invoke(Event.Talk(g.id, s.titleOf(g), s.nameOf(sender)))
         }
         else if (rxSeq >= 0 && ((seq - rxSeq) and 0xffff) > 0x8000) return // late duplicate
         rxSeq = seq
         lastRxAt = now
         if (plain[2].toInt() and 1 != 0) {
-            audio.endOfTalk(s.beep)
+            if (s.status != "dnd") audio.endOfTalk(s.beep)
             level.value = 0f
             update { copy(talkerId = null, talker = null, hdNow = false, talkGid = null) }
-            // a recording sent after a delay also leaves a line in the log, stamped with when it arrived
-            if (rxDelayed && rxFrames > 0) addMessage(sender, s.nameOf(sender), "", false, voiceMs = rxFrames * 60L, gid = g.id, ch = p.ch)
+            finishRx(sender, key)
             rxFrames = 0
         } else {
             val pcm = if (isOpus) opus!!.decode(plain, 3, plain.size - 3) else Adpcm.decode(plain, 3, plain.size - 3)
             rxFrames++
-            level.value = levelOf(pcm)
-            audio.play(pcm)
+            if (rxPcm.size < MAX_TX / 60) rxPcm.add(pcm)
+            // Do not disturb: nothing is played now; the whole transmission arrives as a voice message
+            if (s.status != "dnd") { level.value = levelOf(pcm); audio.play(pcm) }
         }
     }
 
@@ -793,6 +801,45 @@ class RadioCore(
     private fun sawAlive(uid: String) {
         val u = s.users[uid] ?: return
         if (clock() - u.seenAt > 5000) { update { copy(users = users + (uid to u.copy(seenAt = clock()))) }; usersDirty = true }
+    }
+
+    /** Available, or Do not disturb: then incoming talk is kept as voice messages instead of being played. */
+    fun setStatus(st: String) = run {
+        kv.put("status", st)
+        update { copy(status = st) }
+        transports.forEach { it.setStatus(st) }
+        s.group?.let { sendPresence(it, s.tunedCh) }
+        if (s.nearbyUp) sendHello()
+    }
+
+    @Volatile private var foreground = true
+
+    /** In the background, presence and nearby announcements go out much less often to save battery. */
+    fun setForeground(fg: Boolean) { foreground = fg }
+
+    /** Plays a voice message again. */
+    fun playVoice(id: Long) = run {
+        val m = (s.messages + s.inbox.values.flatten()).firstOrNull { it.id == id } ?: return@run
+        val v = m.voice ?: return@run
+        val pcm = Adpcm.decode(v, 0, v.size)
+        var i = 0
+        while (i < pcm.size) { audio.play(pcm.copyOfRange(i, minOf(pcm.size, i + 960))); i += 960 }
+        audio.endOfTalk(false)
+    }
+
+    private val rxPcm = ArrayList<ShortArray>()          // the voice being received, kept so it can be played again
+    private val txAll = ArrayList<ShortArray>()          // what this phone said, for its own replay bubble
+
+    private fun join(l: List<ShortArray>): ShortArray = ShortArray(l.sumOf { it.size }).also { o -> var at = 0; for (f in l) { f.copyInto(o, at); at += f.size } }
+
+    /** The received transmission becomes a playable voice message in its chat. */
+    private fun finishRx(sender: String, key: String) {
+        if (rxPcm.isEmpty()) return
+        val all = join(rxPcm)
+        rxPcm.clear()
+        val parts = key.split("/")
+        addMessage(sender, s.nameOf(sender), "", false, voiceMs = all.size * 1000L / 16000, gid = parts.getOrNull(0), ch = parts.getOrNull(1)?.toIntOrNull() ?: 0,
+            voice = Adpcm.encode(all, Adpcm.State()), dnd = s.status == "dnd")
     }
 
     /** Sets (or clears, with "") this phone's profile photo. */
@@ -810,6 +857,7 @@ class RadioCore(
         sawAlive(uid)
         val ch = o.getInt("ch")
         opCaps["$gid/$uid"] = o.optInt("op") == 1
+        o.optString("st").takeIf { it.isNotEmpty() }?.let { st -> s.users[uid]?.takeIf { it.status != st }?.let { u -> update { copy(users = users + (uid to u.copy(status = st))) } } }
         val la = o.optJSONArray("locks")
         val locks = if (ch < 0 || la == null) emptyList() else (0 until la.length()).map { la.getJSONObject(it) }.map { l ->
             val a = l.getJSONArray("allow")
@@ -897,14 +945,14 @@ class RadioCore(
 
     private fun pinned(id: String, pub: String): Boolean = knownPub(id).let { it == null || it == pub }
 
-    override fun onUser(id: String, name: String, pub: String, online: Boolean, ts: Long, pic: String) = run {
+    override fun onUser(id: String, name: String, pub: String, online: Boolean, ts: Long, pic: String, status: String) = run {
         if (!isId(id) || id == s.me?.id || name.isBlank() || pub.isEmpty()) return@run
         if (s.users.size > 5000 && id !in s.users) return@run
         if (!pinned(id, pub)) return@run
         val old = s.users[id]
         // last seen: now while online, or the moment we notice them go offline
         val seen = if (online || old?.online == true) clock() else maxOf(old?.seenAt ?: 0, ts)
-        val u = (old ?: User(id, "", "")).copy(name = name.take(24), pub = pub, online = online, ts = ts, pic = pic.take(20_000), seenAt = seen)
+        val u = (old ?: User(id, "", "")).copy(name = name.take(24), pub = pub, online = online, ts = ts, pic = pic.take(20_000), seenAt = seen, status = status)
         if (u == old) return@run
         update { copy(users = users + (id to u)) }
         usersDirty = true
@@ -933,9 +981,9 @@ class RadioCore(
         if (st.messages.any { it.expires <= now }) st = st.copy(messages = st.messages.filter { it.expires > now })
         if (st.inbox.values.any { l -> l.any { it.expires <= now } })
             st = st.copy(inbox = st.inbox.mapValues { e -> e.value.filter { it.expires > now } }.filterValues { it.isNotEmpty() })
-        var lateVoice: Pair<String, Long>? = null
+        var lateVoice: String? = null
         if (st.talkerId != null && now - lastRxAt > 1000) {
-            if (rxDelayed && rxFrames > 0) lateVoice = st.talkerId!! to rxFrames * 60L
+            lateVoice = st.talkerId
             rxFrames = 0
             level.value = 0f
             st = st.copy(talkerId = null, talker = null, hdNow = false, talkGid = null); audio.endOfTalk(false)
@@ -953,10 +1001,7 @@ class RadioCore(
         if (pres != st.presence) st = st.copy(presence = pres)
         state.value = st
         if (lockChange) publishLocks()
-        lateVoice?.let { (id, ms) ->
-            val parts = rxKey.split("/")
-            addMessage(id, s.nameOf(id), "", false, voiceMs = ms, gid = parts.getOrNull(0), ch = parts.getOrNull(1)?.toIntOrNull() ?: 0)
-        }
+        lateVoice?.let { finishRx(it, rxKey) }
         if (recentDirty && now - recentSavedAt > 10_000) {
             recentDirty = false; recentSavedAt = now
             val a = JSONArray()
@@ -966,8 +1011,8 @@ class RadioCore(
         if (outbox.isNotEmpty()) flush()
         if (s.transmitting && now - txStart > MAX_TX) { pttUpNow(); notice("TX TIME LIMIT") }
         val g = s.group
-        if (g != null && now - lastPresenceAt > PRESENCE_EVERY) { setMyPresence(); sendPresence(g, s.tunedCh) }
-        if (s.nearbyUp && now - lastHelloAt > 20_000) sendHello()
+        if (g != null && now - lastPresenceAt > (if (foreground) PRESENCE_EVERY else 180_000L)) { setMyPresence(); sendPresence(g, s.tunedCh) }
+        if (s.nearbyUp && now - lastHelloAt > (if (foreground) 20_000L else 60_000L)) sendHello()
         incoming.entries.removeAll { now - it.value.at > 60_000 }
         if (usersDirty && now - usersSavedAt > 10_000) {
             usersDirty = false; usersSavedAt = now

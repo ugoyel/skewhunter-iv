@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.foundation.pager.HorizontalPager
@@ -103,7 +104,7 @@ fun onAppNow(s: RadioState, now: Long): List<User> = s.users.values
 fun presenceDot(s: RadioState, uid: String?, now: Long): Color? {
     val u = s.users[uid ?: return null] ?: return null
     // green = reachable now (blue when nearby without internet), grey = offline
-    return when { isNearby(u, now) -> C.blue; u.online -> C.green; else -> C.faint }
+    return when { u.status == "dnd" && (u.online || isNearby(u, now)) -> C.red; isNearby(u, now) -> C.blue; u.online -> C.green; else -> C.faint }
 }
 
 /** How a person can be reached right now, e.g. "Nearby · Bluetooth 62%". */
@@ -132,7 +133,7 @@ private fun activityText(s: RadioState, g: Group): String {
 @Composable
 fun Home(
     s: RadioState, p: Perms, near: NearbyInfo, alerts: List<SosAlert>, sending: SosSending?, a: Actions, now: Long,
-    tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit,
+    tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit, visible: Boolean = true, locked: Set<String> = emptySet(),
 ) {
     var q by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(0) }                 // 0 all, 1 groups, 2 people
@@ -155,7 +156,8 @@ fun Home(
     val clearSel = { sel = emptySet(); selChats = emptySet(); picking = false }
     // Back leaves the selection instead of leaving the app
     BackHandler(selecting) { clearSel() }
-    fun open(gid: String) { a.tune(gid, if (s.tunedGroup == gid) s.tunedCh else 0); go(Scr.RADIO) }
+    // a locked chat asks for the fingerprint first
+    fun open(gid: String) { a.unlockChat(gid) { a.tune(gid, if (s.tunedGroup == gid) s.tunedCh else 0); go(Scr.RADIO) } }
 
     Column(Modifier.fillMaxSize()) {
         // ---------------------------------------------------------------- top bar
@@ -168,6 +170,8 @@ fun Home(
                 if (!one.direct) Icon(Icons.Filled.Edit, "Rename group", Modifier.clip(CircleShape).clickable { renaming = one; clearSel() }.padding(10.dp).size(22.dp), tint = C.text)
                 Icon(Icons.Filled.Home, "Add to home screen", Modifier.clip(CircleShape).clickable { a.addToHome(one.id); clearSel() }.padding(10.dp).size(22.dp), tint = C.text)
             }
+            if (selChats.isNotEmpty()) Icon(Icons.Filled.Lock, if (selChats.all { it in locked }) "Unlock chats" else "Lock chats",
+                Modifier.clip(CircleShape).clickable { a.lockChats(selChats, !selChats.all { it in locked }); clearSel() }.padding(10.dp).size(22.dp), tint = C.text)
             if (selChats.isNotEmpty()) Icon(Icons.Filled.Delete, "Delete chats", Modifier.clip(CircleShape).clickable { deletingMany = selChats }.padding(10.dp).size(22.dp), tint = C.text)
             if (people.isNotEmpty() && selChats.none { id -> s.groups.firstOrNull { it.id == id }?.direct == false }) {
                 if (s.groups.any { !it.direct }) Text("Add to…", Modifier.clip(RoundedCornerShape(18.dp)).clickable { addTo = true }.padding(horizontal = 8.dp, vertical = 8.dp), color = C.accent, fontSize = 15.sp)
@@ -182,8 +186,19 @@ fun Home(
             Box {
                 Icon(Icons.Filled.MoreVert, "Menu", Modifier.padding(start = 4.dp).clip(CircleShape).clickable { menu = true }.padding(10.dp).size(22.dp), tint = C.text)
                 DropdownMenu(menu, { menu = false }, Modifier.background(C.raised)) {
+                    DropdownMenuItem({ Text("Visible to people nearby", color = C.text) }, { a.setVisible(!visible) },
+                        trailingIcon = { androidx.compose.material3.Switch(visible, { a.setVisible(it) }, colors = androidx.compose.material3.SwitchDefaults.colors(
+                            checkedThumbColor = C.bg, checkedTrackColor = C.accent, uncheckedThumbColor = C.dim, uncheckedTrackColor = C.raised)) })
+                    DropdownMenuItem({ Text(if (s.status == "dnd") "Status: Do not disturb" else "Status: Available", color = C.text) },
+                        { menu = false; a.setStatus(if (s.status == "dnd") "available" else "dnd") },
+                        leadingIcon = { Dot(if (s.status == "dnd") C.red else C.green, 10.dp) })
+                    androidx.compose.material3.HorizontalDivider(color = C.line)
                     DropdownMenuItem({ Text("New group", color = C.text) }, { menu = false; onTab(0); picking = true })
-                    DropdownMenuItem({ Text("Settings", color = C.text) }, { menu = false; go(Scr.SETTINGS) })
+                    DropdownMenuItem({ Text("Profile", color = C.text) }, { menu = false; a.openSettings("profile") })
+                    DropdownMenuItem({ Text("Account", color = C.text) }, { menu = false; a.openSettings("account") })
+                    DropdownMenuItem({ Text("Privacy & security", color = C.text) }, { menu = false; a.openSettings("privacy") })
+                    DropdownMenuItem({ Text("Privacy policy", color = C.text) }, { menu = false; a.openPolicy() })
+                    DropdownMenuItem({ Text("Settings", color = C.text) }, { menu = false; a.openSettings("") })
                 }
             }
         }
@@ -443,6 +458,7 @@ private fun ChatList(
             val talking = s.talkGid == g.id && s.talker != null
             val sub = when {
                 talking -> "${s.talker} is talking…"
+                g.id in locked -> "🔒 Locked chat"
                 last != null -> preview(last, !g.direct)
                 g.direct -> reachText(s, near, other, now).ifEmpty { activityText(s, g) }
                 else -> activityText(s, g)

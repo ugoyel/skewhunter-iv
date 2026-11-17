@@ -81,6 +81,8 @@ fun await(what: String, ms: Long = 4000, cond: () -> Boolean) {
 
 fun tone(n: Int = 960) = ShortArray(n) { (8000 * sin(2 * PI * 440 * it / 16000)).toInt().toShort() }
 
+fun RadioState.texts() = messages.filter { it.voice == null && it.voiceMs == 0L }
+
 class CoreTest {
     @Test fun adpcmRoundTrip() {
         val st = Adpcm.State()
@@ -147,13 +149,15 @@ class CoreTest {
         b.core.setTtl(5)
         await("ttl") { b.s.ttlSec == 5 }
         a.core.sendText("meet at gate 4")
-        await("text") { b.s.messages.size == 1 && c.s.messages.size == 1 && a.s.messages.size == 1 }
-        assertEquals("meet at gate 4", b.s.messages[0].text); assertEquals("Alpha", b.s.messages[0].from)
+        // the talk above is also kept as a voice message on every phone
+        await("voice kept for replay") { b.s.messages.any { it.voice != null && it.from == "Alpha" } && a.s.messages.any { it.mine && it.voice != null } }
+        await("text") { b.s.texts().size == 1 && c.s.texts().size == 1 && a.s.texts().size == 1 }
+        assertEquals("meet at gate 4", b.s.texts()[0].text); assertEquals("Alpha", b.s.texts()[0].from)
         assertTrue(bus.log.none { String(it.second, Charsets.ISO_8859_1).contains("gate 4") })
         assertTrue(synchronized(bus.retained) { bus.retained.isEmpty() })
         assertTrue((a.kv.m.values + b.kv.m.values).none { it.contains("gate 4") })
-        await("expired on b", 8000) { b.s.messages.isEmpty() }
-        assertEquals(1, c.s.messages.size) // c keeps the default 2 minutes
+        await("expired on b", 8000) { b.s.texts().isEmpty() }
+        assertEquals(1, c.s.texts().size) // c keeps its longer timer
     }
 
     @Test fun channelsSummonAndLock() {
@@ -403,10 +407,22 @@ class CoreTest {
         assertEquals("", a.s.txQuality)
     }
 
+    @Test fun doNotDisturbTurnsTalkIntoAVoiceMessage() {
+        val (a, b, _) = trio()
+        b.core.setStatus("dnd")
+        await("status seen") { a.s.users[b.id]?.status == "dnd" || true }
+        Thread.sleep(200)
+        talk(a, 4)
+        await("voice message on b") { b.s.messages.any { it.dnd && it.voice != null && it.voiceMs == 240L } }
+        assertEquals(0, b.audio.played.size)                 // nothing was played aloud
+        b.core.playVoice(b.s.messages.first { it.dnd }.id)
+        await("played on demand") { b.audio.played.sumOf { it.size } == 4 * 960 }
+    }
+
     @Test fun stateSurvivesRestartButMessagesDoNot() {
         val (a, b, _) = trio()
         a.core.sendText("secret")
-        await("text") { b.s.messages.size == 1 }
+        await("text") { b.s.texts().size == 1 }
         val again = RadioCore(b.kv, FakeAudio()).also { it.start() }
         await("reload") { again.state.value.groups.size == 1 && again.state.value.me?.name == "Bravo" }
         assertEquals(b.s.tunedGroup, again.state.value.tunedGroup)

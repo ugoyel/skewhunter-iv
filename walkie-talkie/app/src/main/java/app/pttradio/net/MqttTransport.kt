@@ -48,6 +48,13 @@ class MqttTransport(
     private var pub = ""
 
     @Volatile private var pic = ""
+    @Volatile private var status = ""
+
+    override fun setStatus(st: String) = exec.execute {
+        if (st == status) return@execute
+        status = st
+        if (isUp) try { client?.publish("${RadioCore.P}/u/$id", profile(true), 1, true) } catch (e: Exception) { }
+    }
 
     override fun setPicture(b64: String) = exec.execute {
         if (b64 == pic) return@execute
@@ -55,7 +62,7 @@ class MqttTransport(
         if (isUp) try { client?.publish("${RadioCore.P}/u/$id", profile(true), 1, true) } catch (e: Exception) { }
     }
 
-    private fun profile(on: Boolean) = JSONObject().put("id", id).put("name", userName).put("pub", pub).put("on", on).also { if (pic.isNotEmpty()) it.put("pic", pic) }
+    private fun profile(on: Boolean) = JSONObject().put("id", id).put("name", userName).put("pub", pub).put("on", on).also { if (pic.isNotEmpty()) it.put("pic", pic); if (status.isNotEmpty()) it.put("st", status) }
         .put("ts", System.currentTimeMillis()).toString().toByteArray()
 
     fun start() = exec.execute { wanted = true; connect() }
@@ -92,7 +99,7 @@ class MqttTransport(
                 serverURIs = uris.toTypedArray()
                 isCleanSession = true
                 isAutomaticReconnect = false
-                keepAliveInterval = 120
+                keepAliveInterval = 240         // fewer wake-ups: the relay is pinged every few minutes, messages still arrive instantly
                 connectionTimeout = 15
                 maxInflight = 500
                 // send each voice packet the moment it exists instead of letting TCP bunch them up (Nagle)
@@ -133,7 +140,7 @@ class MqttTransport(
             try {
                 val o = JSONObject(String(data))
                 val uid = o.getString("id")
-                if (topic.endsWith("/$uid")) listener?.onUser(uid, o.getString("name"), o.getString("pub"), o.optBoolean("on"), o.optLong("ts"), o.optString("pic"))
+                if (topic.endsWith("/$uid")) listener?.onUser(uid, o.getString("name"), o.getString("pub"), o.optBoolean("on"), o.optLong("ts"), o.optString("pic"), o.optString("st"))
             } catch (e: Exception) { }
         } else listener?.onPacket(data, this, null)
     }

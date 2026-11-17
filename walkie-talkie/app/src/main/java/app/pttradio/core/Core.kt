@@ -145,7 +145,7 @@ class Packet(val type: Int, val ttl: Int, val msgId: Long, val scope: Long, val 
 /** [via] is the link this phone was last heard on directly: "nearby" (Bluetooth / Wi-Fi Direct) or "lan" (field Wi-Fi). */
 /** [pic] = small profile photo (base64 JPEG), [seenAt] = last time this phone saw any sign of them. */
 data class User(val id: String, val name: String, val pub: String, val online: Boolean = false, val nearbyAt: Long = 0, val ts: Long = 0, val via: String = "",
-                val pic: String = "", val seenAt: Long = 0)
+                val pic: String = "", val seenAt: Long = 0, val status: String = "")
 data class Member(val id: String, val name: String, val pub: String, val joined: Boolean)
 /** [direct] = a one-to-one chat: shown under the other person's name. */
 /** [nameAt] = when the name was last changed, so the newest rename wins everywhere. */
@@ -160,7 +160,9 @@ data class Pres(val ch: Int, val at: Long)
 /** [image] holds a JPEG for picture messages. A [text] of the form "geo:lat,lon,accuracy" is a shared location. */
 /** [pending] = waiting for a link (no timer yet). [voiceMs] > 0 marks a voice message sent or heard after a delay. */
 data class TextMsg(val id: Long, val fromId: String, val from: String, val text: String, val at: Long, val expires: Long, val mine: Boolean,
-                   val image: ByteArray? = null, val pending: Boolean = false, val voiceMs: Long = 0) {
+                   val image: ByteArray? = null, val pending: Boolean = false, val voiceMs: Long = 0,
+                   /** The voice itself (ADPCM, memory only) so it can be played again; [dnd] = arrived while on Do not disturb. */
+                   val voice: ByteArray? = null, val dnd: Boolean = false) {
     /** latitude, longitude, accuracy in metres - or null when this is not a location message. */
     val geo: Triple<Double, Double, Int>? get() {
         if (!text.startsWith("geo:")) return null
@@ -201,6 +203,8 @@ data class RadioState(
     val recent: List<Recent> = emptyList(),
     /** Chat the current incoming voice belongs to (it can be a chat that is not open). */
     val talkGid: String? = null,
+    /** "available" or "dnd" (Do not disturb: incoming talk becomes voice messages instead of playing). */
+    val status: String = "available",
     /** Voice quality of the current transmission, e.g. "HD voice"; empty when not talking. */
     val txQuality: String = "",
     /** Talking with no link: the voice is kept in memory and sent when a link is back. */
@@ -267,7 +271,7 @@ interface VoiceCodec {
 
 interface TransportListener {
     fun onPacket(raw: ByteArray, t: Transport, src: String?)
-    fun onUser(id: String, name: String, pub: String, online: Boolean, ts: Long, pic: String = "")
+    fun onUser(id: String, name: String, pub: String, online: Boolean, ts: Long, pic: String = "", status: String = "")
     fun onLink(t: Transport)
 }
 
@@ -280,6 +284,8 @@ interface Transport {
     fun setProfile(id: String, name: String, pub: String)
     /** Profile photo shown to others (base64 JPEG, empty for none). */
     fun setPicture(b64: String) {}
+    /** Availability shown to others ("available" / "dnd"). */
+    fun setStatus(st: String) {}
     fun setSubscriptions(topics: Set<String>)
     /** An empty [raw] with [retained] clears a stored message. */
     fun send(topic: String, raw: ByteArray, retained: Boolean)

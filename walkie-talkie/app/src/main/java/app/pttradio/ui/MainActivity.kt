@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -46,18 +48,32 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun AppRoot(verified: Boolean, s: RadioState, p: Perms, near: NearbyInfo, alerts: List<app.pttradio.net.SosAlert>, sending: app.pttradio.net.SosSending?,
-            field: Pair<String, String>, sosAnyone: Boolean, boost: Int, profile: Profile, level: kotlinx.coroutines.flow.StateFlow<Float>?, login: Boolean, mode: String, server: String, btn: ButtonCfg, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
+            d: SettingsData, page: String, onPage: (String) -> Unit, level: kotlinx.coroutines.flow.StateFlow<Float>?, login: Boolean,
+            appLocked: Boolean, onUnlock: () -> Unit, a: Actions, scr: Scr, tab: Int, onTab: (Int) -> Unit, go: (Scr) -> Unit) {
     val now by produceState(System.currentTimeMillis()) { while (true) { delay(500); value = System.currentTimeMillis() } }
     // Android 16 draws apps edge to edge: keep content clear of the status bar, navigation bar and keyboard
     Box(Modifier.fillMaxSize().background(C.bg).safeDrawingPadding()) {
         when {
             !s.ready -> {}
             s.me == null -> Welcome(a, login, verified)
+            appLocked -> LockScreen(onUnlock)
             scr == Scr.SETUP -> Setup(p, a) { go(Scr.HOME) }
-            scr == Scr.SETTINGS -> SettingsScreen(s, p, mode, server, btn, field, sosAnyone, boost, profile, a) { go(Scr.HOME) }
-            scr == Scr.RADIO && s.group != null -> RadioScreen(s, near, level, a, now) { go(Scr.HOME) }
-            else -> Home(s, p, near, alerts, sending, a, now, tab, onTab, go)
+            scr == Scr.SETTINGS -> SettingsScreen(s, p, d, page, onPage, a) { go(Scr.HOME) }
+            scr == Scr.RADIO && s.group != null -> RadioScreen(s, near, level, a, now, d.locked) { go(Scr.HOME) }
+            else -> Home(s, p, near, alerts, sending, a, now, tab, onTab, go, d.visible, d.locked)
         }
+    }
+}
+
+@Composable
+fun LockScreen(onUnlock: () -> Unit) {
+    androidx.compose.foundation.layout.Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center,
+        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+        androidx.compose.material3.Text("🔒", fontSize = 48.sp)
+        androidx.compose.foundation.layout.Spacer(Modifier.height(12.dp))
+        Body("ZeroBar is locked", weight = androidx.compose.ui.text.font.FontWeight.SemiBold, size = 18.sp)
+        androidx.compose.foundation.layout.Spacer(Modifier.height(20.dp))
+        Btn("Unlock", Modifier.padding(horizontal = 48.dp).fillMaxWidth(), primary = true, onClick = onUnlock)
     }
 }
 
@@ -364,6 +380,12 @@ class MainActivity : ComponentActivity(), Actions {
     }
     private var btn by mutableStateOf(ButtonCfg())
     private var sosOpen by mutableStateOf(false)
+    private var nearVisible by mutableStateOf(true)
+    private var appLock by mutableStateOf(false)
+    private var appLocked by mutableStateOf(false)
+    private var lockedChats by mutableStateOf(setOf<String>())
+    private var settingsPage by mutableStateOf("")
+    private var stoppedAt = 0L
     private var boostLevel by mutableStateOf(1)
 
     private fun refreshButton(learning: Boolean = false) {
@@ -415,6 +437,10 @@ class MainActivity : ComponentActivity(), Actions {
         super.onCreate(savedInstanceState)
         serverUrl = app.prefs.getString("server", "") ?: ""
         sosOpen = app.prefs.getBoolean("sosAnyone", false)
+        nearVisible = app.prefs.getBoolean("visible", true)
+        appLock = app.prefs.getBoolean("appLock", false)
+        appLocked = appLock
+        lockedChats = app.prefs.getStringSet("lockedChats", emptySet())?.toSet() ?: emptySet()
         profile = Profile(app.prefs.getString("email", "") ?: "", app.prefs.getString("mobile", "") ?: "")
         boostLevel = app.prefs.getInt("boost", 1)
         if (core.state.value.me != null || app.prefs.getString("me", null) != null) {
@@ -430,7 +456,9 @@ class MainActivity : ComponentActivity(), Actions {
             val sending by app.sos.sending.collectAsState()
             LaunchedEffect(s.me?.id) { if (s.me != null) RadioService.start(this@MainActivity) }
             BackHandler(enabled = s.me != null && scr != Scr.HOME) { scr = Scr.HOME }
-            AppRoot(verified, s, perms, near, alerts, sending, field, sosOpen, boostLevel, profile, core.level, auth.enabled, mode, serverUrl, btn, this, scr, tab, { tab = it }) { scr = it }
+            val d = SettingsData(mode, btn, field, sosOpen, boostLevel, profile, nearVisible, appLock, lockedChats)
+            AppRoot(verified, s, perms, near, alerts, sending, d, settingsPage, { settingsPage = it }, core.level, auth.enabled,
+                appLocked, { unlockApp() }, this, scr, tab, { tab = it }) { if (it == Scr.SETTINGS && scr != Scr.SETTINGS) settingsPage = ""; scr = it }
             warning?.let { w ->
                 Sheet("Warning", { warning = null }) {
                     Body(w, size = 14.sp)
@@ -480,6 +508,55 @@ class MainActivity : ComponentActivity(), Actions {
 
     override fun onPause() { visible = false; app.onScreen.value = false; app.buttonUp(); super.onPause() }
 
+    override fun onStop() { stoppedAt = System.currentTimeMillis(); super.onStop() }
+
+    override fun onStart() {
+        super.onStart()
+        // away for more than 30 seconds: lock again
+        if (appLock && stoppedAt > 0 && System.currentTimeMillis() - stoppedAt > 30_000) appLocked = true
+        if (appLocked) unlockApp()
+    }
+
+    private fun unlockApp() = authenticate("Unlock ZeroBar") { appLocked = false }
+
+    /** Fingerprint (or the phone's screen lock). Phones without any screen lock are let through. */
+    private fun authenticate(title: String, ok: () -> Unit) {
+        if (Build.VERSION.SDK_INT < 28) { ok(); return }
+        try {
+            val b = android.hardware.biometrics.BiometricPrompt.Builder(this).setTitle(title)
+            if (Build.VERSION.SDK_INT >= 30) b.setAllowedAuthenticators(android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_WEAK or
+                android.hardware.biometrics.BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+            else @Suppress("DEPRECATION") b.setDeviceCredentialAllowed(true)
+            b.build().authenticate(android.os.CancellationSignal(), mainExecutor, object : android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(r: android.hardware.biometrics.BiometricPrompt.AuthenticationResult?) { ok() }
+                override fun onAuthenticationError(code: Int, msg: CharSequence?) {
+                    // no fingerprint or screen lock set up on this phone: nothing to check against
+                    if (code == android.hardware.biometrics.BiometricPrompt.BIOMETRIC_ERROR_NO_DEVICE_CREDENTIAL ||
+                        code == android.hardware.biometrics.BiometricPrompt.BIOMETRIC_ERROR_HW_NOT_PRESENT ||
+                        code == android.hardware.biometrics.BiometricPrompt.BIOMETRIC_ERROR_NO_BIOMETRICS) ok()
+                }
+            })
+        } catch (e: Exception) { ok() }
+    }
+
+    override fun setStatus(st: String) { core.setStatus(st) }
+    override fun setVisible(on: Boolean) { app.prefs.edit().putBoolean("visible", on).apply(); nearVisible = on; app.setVisible(on) }
+    override fun setAppLock(on: Boolean) {
+        // turning it on or off needs the fingerprint once, so nobody else can change it
+        authenticate(if (on) "Turn on fingerprint lock" else "Turn off fingerprint lock") { app.prefs.edit().putBoolean("appLock", on).apply(); appLock = on }
+    }
+    override fun lockChats(ids: Set<String>, lock: Boolean) {
+        val apply = { lockedChats = if (lock) lockedChats + ids else lockedChats - ids; app.prefs.edit().putStringSet("lockedChats", lockedChats).apply() }
+        if (lock) apply() else authenticate("Unlock chat") { apply() }
+    }
+    override fun unlockChat(gid: String, then: () -> Unit) { if (gid in lockedChats) authenticate("Open locked chat") { then() } else then() }
+    override fun playVoice(id: Long) { core.playVoice(id) }
+    override fun openSettings(page: String) { settingsPage = page; scr = Scr.SETTINGS }
+    override fun openPolicy() {
+        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/ugoyel/skewhunter-iv/blob/claude/walkie-talkie-app-fwj92l/walkie-talkie/play/privacy-policy.md"))) }
+        catch (e: Exception) { }
+    }
+
     private fun has(p: String) = checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
 
     private fun refreshPerms() {
@@ -494,6 +571,7 @@ class MainActivity : ComponentActivity(), Actions {
     @SuppressLint("BatteryLife")
     override fun requestPerm(kind: String) {
         when (kind) {
+            "all" -> askAll()
             "mic" -> micReq.launch(Manifest.permission.RECORD_AUDIO)
             "notif" -> if (Build.VERSION.SDK_INT >= 33) notifReq.launch(Manifest.permission.POST_NOTIFICATIONS)
             "nearby" -> nearbyReq.launch(NearbyTransport.permissions())
