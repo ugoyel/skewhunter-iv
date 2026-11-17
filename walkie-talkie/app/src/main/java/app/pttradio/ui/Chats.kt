@@ -233,7 +233,7 @@ fun Home(
             Banner(C.amber, "Someone else is also called ${me.name}", "Pick a more unique name so people can tell you apart.", "Change") { go(Scr.SETTINGS) }
         if (!s.netUp && !selecting) StatusLine(s, near, now, a)
 
-        @Composable fun ChatListPage() = ChatList(s, near, now, q.trim(), if (picking || (sel.isNotEmpty() && selChats.isEmpty())) 2 else filter, sel, selChats, selecting,
+        @Composable fun ChatListPage() = ChatList(s, near, now, q.trim(), if (picking || (sel.isNotEmpty() && selChats.isEmpty())) 2 else filter, sel, selChats, selecting, locked,
                 onChat = { g ->
                     val other = s.otherIn(g)
                     when {
@@ -419,7 +419,7 @@ private fun StatusLine(s: RadioState, near: NearbyInfo, now: Long, a: Actions) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChatList(
-    s: RadioState, near: NearbyInfo, now: Long, q: String, filter: Int, sel: Set<String>, selChats: Set<String>, selecting: Boolean,
+    s: RadioState, near: NearbyInfo, now: Long, q: String, filter: Int, sel: Set<String>, selChats: Set<String>, selecting: Boolean, locked: Set<String>,
     onChat: (Group) -> Unit, onChatLong: (Group) -> Unit, onPerson: (User) -> Unit, onPersonLong: (User) -> Unit, a: Actions, go: (Scr) -> Unit,
 ) {
     fun hit(name: String) = q.isEmpty() || name.contains(q, ignoreCase = true)
