@@ -542,7 +542,7 @@ class RadioCore(
         val seq = txSeq++ and 0xffff
         sendSealed(T_AUDIO, g.id, s.tunedCh, key, byteArrayOf((seq shr 8).toByte(), seq.toByte(), 1), chanTopic(g.id, s.tunedCh))
         // your own words as a voice bubble too, to replay what you said
-        if (txAll.size >= 4) { val all = join(txAll); s.me?.let { me -> addMessage(me.id, me.name, "", true, voiceMs = all.size * 1000L / 16000, voice = Adpcm.encode(all, Adpcm.State())) } }
+        if (txAll.size >= 3) { val all = join(txAll); s.me?.let { me -> addMessage(me.id, me.name, "", true, voiceMs = all.size * 1000L / 16000, voice = Adpcm.encode(all, Adpcm.State())) } }
         txAll.clear()
     }
 
