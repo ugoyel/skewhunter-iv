@@ -37,7 +37,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** What the player wants to tell the screen. */
-data class PlayerNotice(val title: String? = null, val error: String? = null, val offErrorMs: Float? = null)
+data class PlayerNotice(
+    val title: String? = null,
+    val error: String? = null,
+    val offErrorMs: Float? = null,
+    /** YouTube is showing an ad on this phone; it rejoins the party right after. */
+    val ad: Boolean = false,
+)
 
 /**
  * YouTube's official embedded player, steered onto the party's timeline by [VideoSyncController].
@@ -77,8 +83,9 @@ class YouTubeWebPlayer(context: Context) {
     var onNotice: (PlayerNotice) -> Unit = {}
 
     /** Karaoke: the DJ's mic is on, so play a little quieter (smoothly). */
-    var duck: () -> Boolean = { false }
-    private var appliedDuck: Boolean? = null
+    /** Player volume, % (it dips while the DJ is on the mic). */
+    var volume: () -> Int = { 100 }
+    private var appliedVolume: Int? = null
 
     /** The player ended the video (used on the DJ phone). */
     var onEnded: () -> Unit = {}
@@ -142,7 +149,7 @@ class YouTubeWebPlayer(context: Context) {
             return
         }
         controller = VideoSyncController() // a new player starts from nothing
-        appliedDuck = null
+        appliedVolume = null
         everReady = false
         startedAtMs = System.currentTimeMillis()
         webView = newWebView()
@@ -228,15 +235,15 @@ class YouTubeWebPlayer(context: Context) {
         val target = t?.positionAt(hostNow) ?: 0L
         val startsIn = t?.startsInUs(hostNow) ?: 0L
         for (a in controller.step(nowUs, t, target, startsIn, report, mayStart = resumed && visibleEnough())) execute(a)
-        val d = duck()
-        if (ready && d != appliedDuck) {
-            appliedDuck = d
-            js("hearbyVolume(${if (d) DUCK_VOLUME else 100})")
+        val v = volume()
+        if (ready && v != appliedVolume) {
+            appliedVolume = v
+            js("hearbyVolume($v)")
         }
         val notice = if (report.error != 0) {
             PlayerNotice(error = describe(report.error))
         } else {
-            PlayerNotice(title = json.optString("title").takeIf { it.isNotBlank() }, offErrorMs = controller.lastErrorUs?.let { Math.round(it / 1000.0).toFloat() })
+            PlayerNotice(title = json.optString("title").takeIf { it.isNotBlank() }, offErrorMs = controller.lastErrorUs?.let { Math.round(it / 1000.0).toFloat() }, ad = controller.adPlaying)
         }
         showNotice(notice)
     }
@@ -286,7 +293,7 @@ class YouTubeWebPlayer(context: Context) {
         private const val TICK_MS = 200L
         private const val OFFLINE_AFTER_MS = 12_000L
         /** Player volume while the karaoke mic is on (YouTube's 0..100 scale). */
-        const val DUCK_VOLUME = 45
+        const val DUCK_VOLUME = 30
         private const val NO_ANSWER_MS = 2_000L
         private const val NOT_STARTED = "The video player didn't start on this phone. Update Android System WebView and try again."
         private const val RENDERER_WINDOW_MS = 60_000L
@@ -314,7 +321,7 @@ fun SyncedYouTubePlayer(
     hostOffsetUs: () -> Long,
     correctionUs: () -> Long,
     modifier: Modifier = Modifier,
-    duck: () -> Boolean = { false },
+    volume: () -> Int = { 100 },
     onNotice: (PlayerNotice) -> Unit = {},
     onEnded: () -> Unit = {},
 ) {
@@ -326,7 +333,7 @@ fun SyncedYouTubePlayer(
         player.correctionUs = correctionUs
         player.onNotice = onNotice
         player.onEnded = onEnded
-        player.duck = duck
+        player.volume = volume
     }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(player, lifecycle) {

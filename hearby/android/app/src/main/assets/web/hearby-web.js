@@ -75,6 +75,7 @@
     PARK_COOLDOWN: 600000, INITIAL_SEEK_LEAD: 250000, INITIAL_PLAY_LEAD: 150000, MAX_LEAD: 2000000,
     LEARN_LIMIT: 300000, LOAD_COOLDOWN: 1000000, SEEK_COOLDOWN: 1500000, START_COOLDOWN: 1200000,
     MAX_FINE_NUDGE: 0.10, MAX_COARSE_NUDGE: 0.25,
+    PROGRESS: 200000, AD_AFTER: 2500000, AD_RETRY: 15000000,
   };
 
   /** The available speed closest to normal, within maxChange, on the requested side. */
@@ -108,6 +109,10 @@
       this.awaitingStart = false;
       this.errors = [];
       this.lastErrorUs = null;
+      this.progressPos = null;
+      this.progressAt = 0;
+      this.adRetryAt = 0;
+      this.adPlaying = false; // playing, but the video doesn't move: an ad
       this.seeks = 0;
       this.nudges = 0;
     }
@@ -158,6 +163,7 @@
         return [];
       }
 
+      if (this.adWait(nowUs, report, playing)) return [];
       if (report.state === S.BUFFERING) return [];
       if (!playing) {
         if (!mayStart) return [];
@@ -207,6 +213,22 @@
       return [{ type: 'rate', rate: r, forUs }];
     }
 
+    /** True while an ad shows: leave it alone (a seek now and then in case it's simply stuck). */
+    adWait(nowUs, report, playing) {
+      const moved = this.progressPos === null || Math.abs(report.positionUs - this.progressPos) > K.PROGRESS;
+      if (moved || !playing) {
+        this.progressPos = report.positionUs;
+        this.progressAt = nowUs;
+        if (this.adPlaying) { this.adPlaying = false; this.errors = []; }
+        return false;
+      }
+      if (nowUs - this.progressAt < K.AD_AFTER) return false;
+      if (!this.adPlaying) { this.adPlaying = true; this.adRetryAt = nowUs + K.AD_RETRY; this.lastErrorUs = null; }
+      if (nowUs < this.adRetryAt) return true;
+      this.adRetryAt = nowUs + K.AD_RETRY;
+      return false;
+    }
+
     seekTo(nowUs, targetPositionUs, play) {
       this.seeks++;
       this.leadAtSeek = this.seekLead;
@@ -228,6 +250,8 @@
       this.awaitingStart = false;
       this.errors = [];
       this.lastErrorUs = null;
+      this.adPlaying = false;
+      this.progressPos = null;
     }
   }
 

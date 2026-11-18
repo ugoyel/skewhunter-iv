@@ -300,7 +300,9 @@ private struct VideoCard: View {
                 Text(video.playing ? "Playing on every phone" : "Paused by the DJ")
                     .font(Party.font(14, .semibold)).foregroundColor(Party.inkSoft).lineLimit(1)
                 Spacer(minLength: 0)
-                if let off = notice.offErrorMs, notice.error == nil, video.playing {
+                if notice.ad, notice.error == nil, video.playing {
+                    pill("ad, then back in sync", Party.sun)
+                } else if let off = notice.offErrorMs, notice.error == nil, video.playing {
                     pill(abs(off) < 1 ? "in sync" : String(format: "%+.0f ms", Double(off)), abs(off) < 15 ? Party.lime : Party.sun)
                 }
             }

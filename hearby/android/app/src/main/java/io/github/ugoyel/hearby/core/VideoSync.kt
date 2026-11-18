@@ -81,6 +81,10 @@ sealed interface PlayerAction {
  * Steers one YouTube player onto the shared timeline. Pure logic: call [step] a few times a second
  * with the latest report and the target position, and carry out the returned actions.
  *
+ * Ads: YouTube may show one on any phone. Its player then says "playing" while the video itself
+ * stands still; the controller recognises that, leaves the ad alone ([adPlaying]) and, the moment
+ * the video moves again, jumps to where the party is by then. The party never waits for an ad.
+ *
  * Big errors (joining late, after an ad, after a pause) are fixed by seeking. A seek takes a
  * moment to take effect, so the controller aims ahead by a lead it learns from its own previous
  * seeks. How long a seek takes varies by tens of ms, though, so smaller errors are pulled in with
@@ -100,6 +104,13 @@ class VideoSyncController {
     private var awaitingStartResult = false
     private var started = false
     private val errors = ArrayDeque<Long>()
+    private var progressPositionUs = Long.MIN_VALUE
+    private var progressAtUs = 0L
+    private var adRetryAtUs = 0L
+
+    /** True while this player seems to be showing an ad (playing, but the video doesn't move). */
+    var adPlaying = false
+        private set
 
     /** Last measured error (player − target), µs, or null while not measuring. Positive = ahead. */
     var lastErrorUs: Long? = null
@@ -171,6 +182,7 @@ class VideoSyncController {
             return emptyList()
         }
 
+        if (adWait(nowUs, report, playing)) return emptyList()
         if (report.state == BUFFERING) return emptyList()
         if (!playing) {
             if (!mayStart) return emptyList()
@@ -220,6 +232,33 @@ class VideoSyncController {
         return listOf(PlayerAction.Rate(rate, forUs))
     }
 
+    /**
+     * True while an ad is showing: the player has said "playing" for a while but the video hasn't
+     * moved. Nothing is done then (a seek can't skip an ad, and only disturbs it), except a seek
+     * now and then in case it is a stuck player after all.
+     */
+    private fun adWait(nowUs: Long, report: PlayerReport, playing: Boolean): Boolean {
+        val moved = progressPositionUs == Long.MIN_VALUE || abs(report.positionUs - progressPositionUs) > PROGRESS_US
+        if (moved || !playing) {
+            progressPositionUs = report.positionUs
+            progressAtUs = nowUs
+            if (adPlaying) {
+                adPlaying = false // the video moves again: the usual checks catch up with the party
+                errors.clear()
+            }
+            return false
+        }
+        if (nowUs - progressAtUs < AD_AFTER_US) return false
+        if (!adPlaying) {
+            adPlaying = true
+            adRetryAtUs = nowUs + AD_RETRY_US
+            lastErrorUs = null
+        }
+        if (nowUs < adRetryAtUs) return true
+        adRetryAtUs = nowUs + AD_RETRY_US
+        return false // let one seek through
+    }
+
     private fun seekTo(nowUs: Long, targetPositionUs: Long, play: Boolean): List<PlayerAction> {
         seeks++
         leadAtSeek = seekLeadUs
@@ -241,6 +280,8 @@ class VideoSyncController {
         started = false
         errors.clear()
         lastErrorUs = null
+        adPlaying = false
+        progressPositionUs = Long.MIN_VALUE
     }
 
     companion object {
@@ -273,6 +314,12 @@ class VideoSyncController {
         const val START_COOLDOWN_US = 1_200_000L
         const val MAX_FINE_NUDGE = 0.10
         const val MAX_COARSE_NUDGE = 0.25
+        /** The video counts as moving once it has moved this far. */
+        const val PROGRESS_US = 200_000L
+        /** "Playing" this long without moving: an ad. */
+        const val AD_AFTER_US = 2_500_000L
+        /** During an ad, one seek this often, in case the player is simply stuck. */
+        const val AD_RETRY_US = 15_000_000L
 
         /** The available speed closest to normal, within [maxChange], on the requested side. */
         fun nudgeRate(rates: DoubleArray, slower: Boolean, maxChange: Double = MAX_FINE_NUDGE): Double? = rates

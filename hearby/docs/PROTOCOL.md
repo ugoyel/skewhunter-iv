@@ -283,6 +283,22 @@ Hex, exactly as on the wire.
 | VIDEO, no video on | `4842010d 0a0b0c0d 00000000 00 0000000000000000 0000000000000000 00 00` |
 | Chirp samples 50, 100, 500, 1500, 1900 | −0.2020977, 0.2314788, 0.2541216, 0.0428987, 0.0263643 |
 
+## Internet relay (YouTube parties across networks)
+
+Phones that can't reach the DJ phone (mobile data, another Wi-Fi) join through the relay in
+`hearby/relay` (a Cloudflare Worker). It speaks the same JSON messages as the guest page's WebSocket
+on Wi-Fi, so the page is the same:
+
+- `GET /p/<code>`: the guest page. `GET /ws/<code>?role=guest`: its WebSocket.
+- `GET /ws/<code>?role=host&key=<secret>`: the DJ phone. The first key used for a code owns it.
+- `{"t":"sync","c":x}` is answered by the relay itself with `{"t":"sync","c":x,"r":T,"s":T}`, T its
+  clock in µs. Every phone, the DJ's included, syncs to that clock (the DJ with the lowest round trip
+  of its last 20 exchanges, `RelayClock`).
+- The DJ sends `{"t":"info","stream":…,"host":…}` (guests then get `hello` with `"remote":true`),
+  the same `state` as on Wi-Fi but with the video's `anchor` on the relay's clock, and `{"t":"bye"}`
+  at the end. Guests send `hello` to get the latest state; everything else from them is ignored.
+- No audio goes through the relay: songs from the DJ's phone and the karaoke mic need the DJ's Wi-Fi.
+
 ## Security note
 
 Version 1 has no authentication or encryption: anyone on the same network segment can join a host

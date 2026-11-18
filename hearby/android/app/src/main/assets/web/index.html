@@ -176,6 +176,7 @@
       </div>
     </div>
     <div class="notice" id="lateNotice" hidden><p id="lateText"></p></div>
+    <div class="notice" id="remoteNotice" hidden><p>You joined over the internet: YouTube videos play here from anywhere. Songs from the DJ's phone and the DJ's mic reach phones on the DJ's Wi-Fi only.</p></div>
     <div class="notice" id="msgNotice" hidden><p id="msgText"></p></div>
 
     <div class="card">
@@ -217,6 +218,8 @@
   'use strict';
   const H = window.Hearby;
   const $ = (id) => document.getElementById(id);
+  // Joined through the internet relay (https://<relay>/p/<code>) rather than the DJ phone itself.
+  const REMOTE_CODE = (location.pathname.match(/^\/p\/([a-z0-9]{6,16})$/) || [])[1] || null;
   const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const nowUs = () => performance.now() * 1000;
   const store = {
@@ -245,7 +248,9 @@
   // ---- connection ----
   function connect() {
     if (ws || ended) return;
-    const socket = new WebSocket('ws://' + location.host + '/ws');
+    const socket = new WebSocket(REMOTE_CODE
+      ? (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/' + REMOTE_CODE + '?role=guest'
+      : 'ws://' + location.host + '/ws');
     socket.binaryType = 'arraybuffer';
     ws = socket;
     socket.onmessage = (e) => {
@@ -526,15 +531,18 @@
     const duck = !!(v && party.duck);
     if (duck !== yt.duck) {
       yt.duck = duck;
-      glideVolume(p, duck ? 45 : 100);
+      glideVolume(p, duck ? 30 : 100);
     }
     let muted = false;
     try { muted = p.isMuted(); } catch (e) { /* not ready */ }
     $('videoUnmute').hidden = !(IOS && muted && v);
     const off = yt.controller.lastErrorUs;
     const tag = $('videoSync');
-    tag.hidden = off === null || !v || !v.playing || yt.error !== 0;
-    if (!tag.hidden) {
+    tag.hidden = (off === null && !yt.controller.adPlaying) || !v || !v.playing || yt.error !== 0;
+    if (!tag.hidden && yt.controller.adPlaying) {
+      tag.textContent = 'ad, then back in sync';
+      tag.className = 'pill sun';
+    } else if (!tag.hidden) {
       const ms = Math.round(off / 1000);
       tag.textContent = Math.abs(ms) < 1 ? 'in sync' : (ms > 0 ? '+' : '') + ms + ' ms';
       tag.className = 'pill ' + (Math.abs(ms) < 15 ? 'lime' : 'sun');
@@ -586,12 +594,13 @@
     $('orb').textContent = synced ? '🎶' : '🎧';
     const v = party.video;
     $('song').hidden = !party.title || !!v; // the video card says it all
-    $('bars').hidden = !!v;
-    $('stats').hidden = !!v;
+    $('bars').hidden = !!v || !!REMOTE_CODE;
+    $('stats').hidden = !!v || !!REMOTE_CODE;
+    $('remoteNotice').hidden = !REMOTE_CODE || (!!v && !party.duck);
     $('songTitle').textContent = party.title || '';
     $('songSub').textContent = party.playing ? (party.artist || '') : 'Paused by the DJ';
     $('checked').hidden = !soundChecked;
-    $('micBanner').hidden = !party.duck;
+    $('micBanner').hidden = !party.duck || !!REMOTE_CODE;
     $('statSync').textContent = synced ? '±' + (sched.lastErrorS * 1000).toFixed(1) + ' ms' : '–';
     $('statPing').textContent = clock.synced ? (clock.rttUs / 1000).toFixed(1) + ' ms' : '–';
     $('statBuf').textContent = ctx ? Math.round(sched.bufferedS(ctx.currentTime) * 1000) + ' ms' : '–';

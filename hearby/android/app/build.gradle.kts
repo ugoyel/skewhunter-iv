@@ -26,8 +26,12 @@ android {
         applicationId = "io.github.ugoyel.hearby"
         minSdk = 29          // AudioPlaybackCapture + MediaCodec Opus encoder both arrived in Android 10
         targetSdk = 36
-        versionCode = 10
-        versionName = "1.6.2"
+        versionCode = 11
+        versionName = "1.7.0"
+        // The internet relay for parties across networks (hearby/relay); empty: Wi-Fi only.
+        // Set it in gradle.properties (hearby.relayUrl=https://...) or HEARBY_RELAY_URL.
+        val relayUrl = (project.findProperty("hearby.relayUrl") as String?) ?: System.getenv("HEARBY_RELAY_URL") ?: ""
+        buildConfigField("String", "RELAY_URL", "\"${relayUrl.trim()}\"")
     }
 
     signingConfigs {
@@ -57,6 +61,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     testOptions {
@@ -90,6 +95,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.17.0")
     // QR code on the DJ screen, so iPhones can open the guest page with their camera.
     implementation("com.google.zxing:core:3.5.3")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     testImplementation("junit:junit:4.13.2")

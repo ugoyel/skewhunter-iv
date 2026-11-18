@@ -179,47 +179,45 @@ numbers it needs come straight from the phones.
 ## Karaoke
 
 The mic button is push-to-talk: hold it and talk or sing, and the voice is on every phone; let go
-and it is muted at once. Every phone plays the voice, on the beat, over the music or the YouTube
-video, which dips smoothly (to about −7 dB) while the button is held. While it's held, the DJ
-screen says whether the mic hears you ("On air: Phone mic to 3 phones" or "Can't hear you yet"),
-and guests' screens show "The DJ is on the mic".
+and it is muted at once. The music (or YouTube video) dips to 30 % of its volume on every phone while
+the button is held, and the voice sits loud on top. While it's held, the DJ screen says whether the
+mic hears you ("On air: Phone mic to 3 phones" or "Can't hear you yet"), and guests' screens show
+"The DJ is on the mic". Nothing to set: loudness, noise and echo are handled automatically.
 
 The phone's own microphone is used, or a wired or USB headset's when one is plugged in. Bluetooth
 earbuds' microphones only work in phone-call mode (which would turn the DJ phone's sound into call
 quality), so with Bluetooth earbuds the voice comes from the phone's own microphone: hold the phone
 near your mouth.
 
-Every guest plays the party a cushion (about a third of a second) after the DJ phone sends it,
-which is what keeps them together. A singer following the room would therefore always land that
-much late. So while the mic is on:
+**Every phone stays in step.** The DJ phone plays the music exactly with the room while the mic is on
+(before 1.7.0 it ran a quarter-second ahead, which the room heard as an echo of the music). The voice
+goes into the guests' stream as it is captured and reaches every phone a cushion later (the time the
+network needs, about 0.2–0.4 s), all at the same moment.
 
-1. The DJ phone plays the music (or its YouTube video) a little ahead of the room, and the singer
-   sings along to it, holding the phone like a mic.
-2. Each slice of voice is stamped with the moment of music the singer was hearing and mixed into
-   the stream at exactly that moment. The stream to guests waits about 160 ms for it.
-3. Every phone plays music and voice together, on the beat, a cushion later.
+**The voice is cleaned before it goes out** (core/Karaoke.kt, `VoiceProcessor`):
 
-The DJ phone never plays its own voice back (no echo of yourself): it gets its own copy of the
-music, without the voice. The voice is cleaned up on the way (rumble filter, a noise gate so the
-room isn't sent back out between phrases, a compressor that keeps it steady and up front like a DJ
-on a PA, a soft limiter), and captured with Android's live performance microphone setting. After
-the mic closes, the DJ phone stays ready (and a little ahead) for 30 seconds, so the next press
-doesn't make its playback jump; then it steps back in line with the room.
+1. Rumble filter (high-pass at 100 Hz).
+2. Noise and echo removal (`VoiceCleaner`): 20 ms windows every 10 ms, 26 frequency bands. Steady
+   noise (fans, hum, crowd murmur) is learned from the quietest moments. The microphone also hears the
+   party itself: the music and the DJ's own voice coming back from the other phones, which would
+   otherwise go round again as a repeating echo. The DJ phone knows exactly what every phone is
+   playing and when (`RoomReference`), and learns how loudly its microphone hears that, by
+   regression, while the button is up (chatter or a YouTube video near the phone don't fool it).
+   Bands where the voice isn't clearly louder than noise and echo are turned down to −24 dB.
+3. A gate that silences the gaps between phrases.
+4. Automatic level: any voice, soft or shouting, comes out at about −15 dBFS (up to +30 dB of gain),
+   then a compressor (3:1) and a limiter keep it even and below full scale.
 
-Each phone's own YouTube player asks Android for the speaker like any media player. Hearby's stream
-(which carries the voice) steps aside before that request, so it isn't the one faded out, keeps
-playing, and takes the speaker back after the video. Before 1.6.1 it went quiet instead, so in
-YouTube mode the voice didn't reach the other phones.
+The DJ phone never plays the voice itself. While the button is held, its own YouTube player goes
+quiet if it plays through the phone's loudspeaker (right next to the microphone); songs on it dip to
+30 % like everywhere, and their echo is taken out of the mic by the cleaner.
 
-If a phone's microphone timestamps can't be trusted, the sender uses the newest voice it has instead
-of the moment the timestamps point at: the voice always gets through, at worst slightly off the beat. Songs dip in the stream itself; for YouTube, every phone's player
-lowers its own volume, gliding over half a second. Browser guests get both.
-
-Limits: the mic works only while Hearby is on screen (it switches off when the DJ leaves the app).
-The DJ phone running ahead is audible close to it; earphones on the DJ phone avoid that and also
-keep the singer's own phone out of the microphone. A phone right next to the DJ can feed the voice
-back into the mic as an echo, so keep a couple of steps from the loudest speaker. While the mic is
-on, the cushion stays at least 350 ms to leave room for the voice.
+Limits: the mic works only while Hearby is on screen. Phones in the same room play the voice a
+cushion after it was spoken, so close to the DJ there's a short slap-back of the live voice; hold
+the phone close to your mouth so the amplified voice is much louder than the live one. Because the
+voice arrives a cushion late, singing lands slightly behind the beat; talking over the music (the
+DJ vibe) isn't affected. In YouTube mode the video's own sound from the other phones can't be taken
+out by reference (Hearby doesn't have it), only by the noise removal and the gate.
 
 ## YouTube mode
 
@@ -246,7 +244,11 @@ How each phone stays in time with the others:
 Everything goes through YouTube's IFrame Player API (load, play, pause, seek, speed). Hearby never
 downloads, records, or re-streams the video, never hides or covers the player, and never plays it
 in the background: the video plays only while the app is on screen with the player visible, as
-YouTube's terms require. Ads play as YouTube decides; a phone that gets an ad catches up after it.
+YouTube's terms require. Ads play as YouTube decides, and the party never waits for them: a phone
+showing an ad (its player says "playing" but the video stands still for 2.5 s) is left alone, shows
+"ad, then back in sync", and the moment the video moves again it jumps to where everyone is by then.
+Hearby's player isn't signed in to YouTube, so YouTube Premium doesn't apply inside it: any phone may
+get an ad.
 
 In simulations with realistic players (start delays of 150 to 650 ms that vary every time, seeks
 that land on a keyframe until that part of the video has loaded, clocks that drift by up to 55 ppm,
@@ -345,7 +347,11 @@ are no package dependencies.
 The DJ phone plays along in sync, so there is no echo between it and the others.
 
 **Karaoke and announcements:** hold the mic button next to the play button and talk or sing; let go
-and it's muted. Sing along to the DJ phone itself.
+and it's muted. Hold the phone close to your mouth, like a mic.
+
+**Friends on another network:** with a relay set up (see `relay/README.md`), the DJ screen shows a
+*Not on this Wi-Fi?* card. Anyone can open its link from anywhere (mobile data works) and join
+YouTube videos in the browser. Songs from the DJ's phone and the mic still need the DJ's Wi-Fi.
 
 **iPhones:** they join the DJ's Wi-Fi or hotspot, then scan the QR code in the DJ screen's *iPhone?*
 card and tap *Join the party* in Safari. Keep the page open with the screen on.
@@ -478,8 +484,8 @@ Play accepts new apps as an **App Bundle** (`.aab`), not an APK. Besides uploadi
 | Safari guest page: end to end | The real DJ-side server (`WebGuestsLiveTest`) and the real page in headless Chromium: join, clock sync, 45 s of streamed audio, a sound-check chirp and correction, then a YouTube timeline on a stand-in player with variable start and seek delays and standard speed steps | Synced in 1 s; audio within 0.11 ms of target with no gaps or late frames; video within 0.13 ms; no page errors |
 | DJ-side web server | JVM tests over real sockets: page, 404s, WebSocket handshake (RFC 6455 vector), masked and fragmented frames, clock-sync replies, audio frames, stats, sound-check messages, a full party, goodbye | Pass |
 | QR code | The DJ screen's QR code decoded from the rendered screenshot | `http://192.168.43.1:47801` |
-| Karaoke on an emulator | Debug build with a test tone added to the microphone; a guest recorded the stream and it was decoded: holding the mic put the tone into the stream, letting go took it out, and the stream kept flowing throughout. The first run found the stream stopping as soon as the mic opened (the wait for the voice grew without limit when the DJ phone ran late); now capped at 300 ms | Pass after the fix |
-| Karaoke | Unit tests: the guest stream waits exactly long enough for each frame's voice, a clap lands in the frame the singer heard, the timestamped voice buffer, the smooth dip (0.3 s down, 0.8 s up), the gate (room hiss stays out, a voice gets in, it fades after a phrase), rumble removal, the limiter, the duck flag on Kotlin and Swift, the cushion floor. In a real browser: the YouTube player's volume glides from 100 to 45 in half a second. | Pass; the microphone itself not tried on a phone yet |
+| Karaoke on an emulator (1.6.2) | Debug build with a test tone added to the microphone; a guest recorded the stream and it was decoded: holding the mic put the tone into the stream, letting go took it out, and the stream kept flowing throughout | Pass |
+| Karaoke 1.7.0 | Unit tests, simulated room: a clear voice passes with distortion below −20 dB; steady noise drops by more than 18 dB alone and 15 dB between syllables while the voice keeps its level within 1.5 dB; the party's echo (music from every phone and the DJ's own voice coming back 0.3 s later, through a room with reverb) drops by more than 15 dB between words, 6 dB more than without knowing what plays, with the voice kept within 3 dB; chatter while the button is up doesn't inflate the learned echo; a voice 34 dB softer comes out within 4 dB of a loud one, around −15 dBFS, never above the limiter; the voice tape follows a microphone clock 200 ppm off a sample at a time; the 30 % dip ramps smoothly | Pass; real phones not tried yet |
 | Automatic tuning | Simulated parties (phone speakers, a Bluetooth speaker, Wi-Fi hiccups, changes only at song gaps), loss-driven quality steps, crowd caps, sound-check suggestions, SYNC_REQ flags on Kotlin and Swift | Nobody behind after settling; settles in one change; easy crowds come down to 200 ms |
 | YouTube links | Watch, share (`youtu.be`), Shorts, live, embed, YouTube Music and mobile links, with or without surrounding text, on both platforms | Pass |
 | DJ on an Android 14 emulator | Release APK 1.2.0: party starts as a plain `mediaPlayback` service (no screen-capture prompt); a 44.1 kHz MP3 opened with Hearby was decoded, resampled and played, with its title and artist; a Python guest received the Opus stream with no loss plus "now playing", pause and resume; the sound check sent the guest its chirp request and reported that it could not hear itself (the emulator has no speaker-to-microphone path) | Pass |

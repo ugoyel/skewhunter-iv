@@ -7,6 +7,8 @@ struct PlayerNotice: Equatable {
     var title: String?
     var error: String?
     var offErrorMs: Float?
+    /// YouTube is showing an ad on this phone; it rejoins the party right after.
+    var ad = false
 }
 
 /// YouTube's official embedded player, steered onto the party's timeline by `VideoSyncController`.
@@ -179,13 +181,13 @@ final class YouTubeWebPlayer: NSObject, WKNavigationDelegate, WKUIDelegate {
         let d = duck()
         if ready, d != appliedDuck {
             appliedDuck = d
-            js("hearbyVolume(\(d ? 45 : 100))")
+            js("hearbyVolume(\(d ? 30 : 100))")
         }
         if report.error != 0 {
             notify(PlayerNotice(error: YouTubeWebPlayer.describe(report.error)))
         } else {
             let title = (json["title"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            notify(PlayerNotice(title: title, offErrorMs: controller.lastErrorUs.map { Float((Double($0) / 1000).rounded()) }))
+            notify(PlayerNotice(title: title, offErrorMs: controller.lastErrorUs.map { Float((Double($0) / 1000).rounded()) }, ad: controller.adPlaying))
         }
     }
 

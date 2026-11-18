@@ -112,6 +112,9 @@ final class VideoSyncController {
     static let startCooldownUs: Int64 = 1_200_000
     static let maxFineNudge = 0.10
     static let maxCoarseNudge = 0.25
+    static let progressUs: Int64 = 200_000
+    static let adAfterUs: Int64 = 2_500_000
+    static let adRetryUs: Int64 = 15_000_000
 
     private var loadedId: String?
     private var cooldownUntilUs = Int64.min
@@ -123,6 +126,12 @@ final class VideoSyncController {
     private var leadAtSeek: Int64 = 0
     private var awaitingStartResult = false
     private var errors: [Int64] = []
+    private var progressPositionUs = Int64.min
+    private var progressAtUs: Int64 = 0
+    private var adRetryAtUs: Int64 = 0
+
+    /// True while this player seems to be showing an ad (playing, but the video doesn't move).
+    private(set) var adPlaying = false
 
     /// Last measured error (player − target), µs, or nil while not measuring. Positive = ahead.
     private(set) var lastErrorUs: Int64?
@@ -183,6 +192,7 @@ final class VideoSyncController {
             return []
         }
 
+        if adWait(nowUs: nowUs, report: report, playing: playing) { return [] }
         if report.state == C.buffering { return [] }
         if !playing {
             if !mayStart { return [] }
@@ -238,6 +248,31 @@ final class VideoSyncController {
 
     private func clampLead(_ v: Int64) -> Int64 { min(max(v, 0), VideoSyncController.maxLeadUs) }
 
+    /// True while an ad is showing: the player has said "playing" for a while but the video hasn't
+    /// moved. Nothing is done then, except a seek now and then in case it's simply stuck.
+    private func adWait(nowUs: Int64, report: PlayerReport, playing: Bool) -> Bool {
+        let C = VideoSyncController.self
+        let moved = progressPositionUs == Int64.min || abs(report.positionUs - progressPositionUs) > C.progressUs
+        if moved || !playing {
+            progressPositionUs = report.positionUs
+            progressAtUs = nowUs
+            if adPlaying {
+                adPlaying = false // the video moves again: the usual checks catch up with the party
+                errors.removeAll()
+            }
+            return false
+        }
+        if nowUs - progressAtUs < C.adAfterUs { return false }
+        if !adPlaying {
+            adPlaying = true
+            adRetryAtUs = nowUs + C.adRetryUs
+            lastErrorUs = nil
+        }
+        if nowUs < adRetryAtUs { return true }
+        adRetryAtUs = nowUs + C.adRetryUs
+        return false // let one seek through
+    }
+
     private func seekTo(nowUs: Int64, targetPositionUs: Int64, play: Bool) -> [PlayerAction] {
         seeks += 1
         leadAtSeek = seekLeadUs
@@ -259,6 +294,8 @@ final class VideoSyncController {
         awaitingStartResult = false
         errors.removeAll()
         lastErrorUs = nil
+        adPlaying = false
+        progressPositionUs = Int64.min
     }
 
     /// The available speed closest to normal, within `maxChange`, on the requested side.

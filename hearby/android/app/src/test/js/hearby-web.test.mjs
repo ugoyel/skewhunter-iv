@@ -224,7 +224,11 @@ test('a pause and resume brings everyone back together', () => {
 
 test('a phone that gets an ad catches up after it, and a late joiner jumps straight in', () => {
   const worst = [0, 0, 0];
-  run(phones(fineRates, 6e6), () => start, 0, 60, 20e6, worst);
+  const list = phones(fineRates, 6e6);
+  const now = run(list, () => start, 0, 7, 20e6, worst);
+  assert.ok(list[1].c.adPlaying, 'the ad is recognised and left alone');
+  run(list, () => start, now, 53, 20e6, worst);
+  assert.ok(!list[1].c.adPlaying);
   assert.ok(worst[1] < 15000);
   const late = [{ p: new SimPlayer(9, 20, fineRates), c: new H.VideoSyncController() }];
   const w = [0];

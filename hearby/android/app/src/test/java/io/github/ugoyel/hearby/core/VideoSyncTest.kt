@@ -2,6 +2,7 @@ package io.github.ugoyel.hearby.core
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Random
@@ -64,6 +65,8 @@ class VideoSyncTest {
         private val driftPpm: Double,
         val rates: DoubleArray,
         private val adUs: Long = 0,
+        /** A second ad in the middle of the video, when it reaches this position (µs). */
+        private val midrollAtUs: Long = Long.MAX_VALUE,
     ) {
         private val rng = Random(seed)
         var state = VideoSyncController.UNSTARTED
@@ -76,7 +79,9 @@ class VideoSyncTest {
         private var wantPlay = false
         private var bufferedFrom = 0.0
         private var bufferedTo = 0.0
-        private var adLeft = 0L
+        var adLeft = 0L
+            private set
+        private var midrollDone = false
         private var lastUs = 0L
         private var playAtUs = Long.MIN_VALUE
         private var restoreRateAtUs = Long.MIN_VALUE
@@ -168,6 +173,10 @@ class VideoSyncTest {
                     return
                 }
                 positionUs += dt * rate * (1 + driftPpm * 1e-6)
+                if (!midrollDone && positionUs >= midrollAtUs) {
+                    midrollDone = true
+                    adLeft = adUs
+                }
                 bufferedTo = maxOf(bufferedTo, positionUs + 30_000_000) // it keeps loading ahead
             }
         }
@@ -268,6 +277,43 @@ class VideoSyncTest {
         val worst = LongArray(3)
         run(phones, { start }, 0, 60.0, settleUs = 20_000_000, worst = worst)
         assertTrue("phone with the ad: worst ${worst[1] / 1000.0} ms after catching up", worst[1] < 15_000)
+    }
+
+    @Test
+    fun anAdIsLeftAloneAndThePhoneRejoinsTheMomentItEnds() {
+        // A 20 s ad in the middle of the video on one phone; the party (timeline) carries on.
+        val player = SimPlayer(9, driftPpm = 0.0, rates = fineRates, adUs = 20_000_000, midrollAtUs = 30_000_000)
+        val c = VideoSyncController()
+        val t = VideoTimeline("vid", "Song", true, anchorHostUs = 2_000_000, positionUs = 0, version = 1)
+        player.apply(PlayerAction.Load("vid"), 0) // the pre-roll: the same 20 s ad first
+        var now = 0L
+        var actionsDuringAd = 0
+        var sawAd = false
+        var adEndedAt = Long.MIN_VALUE
+        var backInSyncAt = Long.MIN_VALUE
+        var adsSeen = 0
+        var wasAd = false
+        while (now < 120_000_000) {
+            now += 200_000
+            player.advance(now)
+            val inAd = player.adLeft > 0 && player.state == VideoSyncController.PLAYING
+            val actions = c.step(now, t, t.positionAt(now), t.startsInUs(now), player.report(now), mayStart = true)
+            if (inAd && now > (if (adsSeen == 0) 6_000_000 else 36_000_000)) actionsDuringAd += actions.size
+            for (a in actions) player.apply(a, now)
+            if (c.adPlaying) sawAd = true
+            if (wasAd && !inAd) {
+                adEndedAt = now
+                backInSyncAt = Long.MIN_VALUE
+                adsSeen++
+            }
+            wasAd = inAd
+            if (adEndedAt != Long.MIN_VALUE && backInSyncAt == Long.MIN_VALUE && abs(player.positionUs.toLong() - t.positionAt(now)) < 15_000) backInSyncAt = now
+        }
+        assertEquals("both ads seen", 2, adsSeen)
+        assertTrue("noticed the ad", sawAd)
+        assertTrue("left the ads alone: $actionsDuringAd actions while they played", actionsDuringAd <= 4)
+        assertTrue("back in sync ${(backInSyncAt - adEndedAt) / 1000} ms after the ad", backInSyncAt != Long.MIN_VALUE && backInSyncAt - adEndedAt < 6_000_000)
+        assertFalse(c.adPlaying)
     }
 
     @Test

@@ -30,7 +30,8 @@ import io.github.ugoyel.hearby.client.PlayoutRunner
 import io.github.ugoyel.hearby.codec.MediaCodecOpusEncoder
 import io.github.ugoyel.hearby.core.AutoTuner
 import io.github.ugoyel.hearby.core.ClockSync
-import io.github.ugoyel.hearby.core.VoiceTape
+import io.github.ugoyel.hearby.core.RoomReference
+import io.github.ugoyel.hearby.BuildConfig
 import io.github.ugoyel.hearby.core.Karaoke
 import io.github.ugoyel.hearby.core.Ducker
 import io.github.ugoyel.hearby.core.VideoTimeline
@@ -108,6 +109,13 @@ data class HostUiState(
     /** The mic hears someone right now, and which mic it is ("Phone mic", "Headset mic"). */
     val micHearing: Boolean = false,
     val micInput: String = "",
+    /**
+     * This phone's own YouTube volume, %: the video dips while the mic is held, and on this phone's
+     * loudspeaker goes quiet altogether (it's right next to the microphone).
+     */
+    val videoVolume: Int = 100,
+    /** Link for phones on other networks (YouTube parties over the internet relay), once it's up. */
+    val anywhereUrl: String? = null,
     /** This phone went quiet: another app took the sound, or its headphones were unplugged. */
     val muted: Boolean = false,
     /** The guest page for phones without the app (iPhones), e.g. http://192.168.43.1:47801, or null. */
@@ -262,11 +270,12 @@ class PartyHostService : Service() {
         private var localEncoder: MediaCodecOpusEncoder? = null
 
         /**
-         * The karaoke microphone while it is ready: listening, this phone a little ahead of the room,
-         * and the guests' stream waiting for the voice. It stays ready for a while after each use so
-         * push-to-talk doesn't make this phone's playback jump every time.
+         * The karaoke microphone while it is ready. It keeps listening for a while after each use
+         * (muted), so the next press is instant and it keeps learning how the room sounds.
          */
         @Volatile private var mic: KaraokeMic? = null
+        /** What the party is playing, for the microphone to take its echo out. */
+        private val room = RoomReference()
         /** The voice goes out right now (the button is held, or switched on). */
         @Volatile private var micOpen = false
         @Volatile private var micReadyUntilNs = 0L
@@ -288,6 +297,9 @@ class PartyHostService : Service() {
             log = { m, e -> Log.w(TAG, m, e) },
         )
         @Volatile private var webPort = 0
+        /** The internet relay, when this build has one (BuildConfig.RELAY_URL). */
+        private val relay: RelayClient? = BuildConfig.RELAY_URL.takeIf { it.startsWith("https://") }
+            ?.let { RelayClient(it, streamId, hostName, ::nowUs) }
 
         @Volatile private var lastSentTimestampUs = 0L
         @Volatile private var video: VideoTimeline? = null
@@ -374,6 +386,8 @@ class PartyHostService : Service() {
             // When a cushion or quality change is waiting, leave a short gap between songs to make it in.
             player.gapBetweenSongs = { if (tuner.pending && checkRunner == null) SONG_GAP_FRAMES else 0 }
 
+            relay?.start()
+
             running = true
             senderThread = Thread(::sendLoop, "hearby-sender").also { it.start() }
             controlThread = Thread(::controlLoop, "hearby-control").also { it.start() }
@@ -402,6 +416,7 @@ class PartyHostService : Service() {
             }
             s?.close()
             if (wasRunning) web.stop("The DJ ended the party.") else web.stop()
+            relay?.stop(if (wasRunning) "The DJ ended the party." else null)
             senderThread?.join(1500)
             controlThread?.join(1500)
             local.stop()
@@ -457,7 +472,7 @@ class PartyHostService : Service() {
                 }
             }
             // This phone's own speaker gets its own copy: the same music, but never the karaoke voice
-            // (no echo of yourself), and on time even while the guests' stream waits for the voice.
+            // (no echo of yourself).
             val toLocal = MediaCodecOpusEncoder.PacketSink { data: ByteBuffer, size: Int, timestampUs: Long ->
                 if (size <= Proto.MAX_PAYLOAD) {
                     Wire.writeAudioHeader(localPacket, localSeq, timestampUs)
@@ -469,16 +484,15 @@ class PartyHostService : Service() {
 
             val localDucker = Ducker()
             val guestDucker = Ducker()
-            // Karaoke: the guests' frames wait here until the voice sung over them has been captured.
-            val held = ArrayDeque<Pair<Long, FloatArray>>()
-            var lookahead = 0
-            var lastTape: VoiceTape? = null
             var webSeq = 0L
 
-            fun toGuests(ts: Long, f: FloatArray, tape: VoiceTape?, duck: Float) {
+            fun toGuests(ts: Long, f: FloatArray, m: KaraokeMic?, duck: Float) {
                 guestDucker.process(f, Proto.FRAME_SAMPLES, duck)
-                if (tape != null) {
-                    tape.next(Karaoke.sungAtUs(ts, local.adjustUs()), Proto.FRAME_SAMPLES, voice)
+                if (m != null) {
+                    // The voice as it is captured: every phone plays it a cushion from now, with this
+                    // frame. The room plays both then; the microphone will hear them and take them out.
+                    m.tape.next(ts - Karaoke.LIVE_LAG_US, Proto.FRAME_SAMPLES, voice)
+                    room.add(ts + playoutDelayMs * 1000L, f, voice)
                     Karaoke.mix(f, voice, Proto.FRAME_SAMPLES)
                 }
                 toPcm16(f, pcm)
@@ -505,40 +519,18 @@ class PartyHostService : Service() {
                     quietFrames = if (audible) 0 else quietFrames + 1
                     val m = mic
                     // Cushion and quality change only while nothing is playing: phones switch a moment apart.
-                    if (quietFrames >= QUIET_FRAMES && tuner.pending && checkRunner == null && m == null && held.isEmpty()) {
+                    if (quietFrames >= QUIET_FRAMES && tuner.pending && checkRunner == null && !micOpen) {
                         enc = applyTuning(enc)
                     }
-                    // Songs duck in the stream itself; YouTube ducks in every phone's player.
+                    // Songs dip in the stream itself (on every phone, this one too); YouTube dips in
+                    // every phone's player.
                     val duck = if (micOpen && video == null) Karaoke.DUCK_GAIN else 1f
 
                     System.arraycopy(frame, 0, localFrame, 0, frame.size)
                     localDucker.process(localFrame, Proto.FRAME_SAMPLES, duck)
                     toPcm16(localFrame, pcm)
                     localEnc.encode(pcm, ts, toLocal)
-
-                    if (m != null) {
-                        lastTape = m.tape
-                        // How long the guests' stream waits for the voice: follows this phone's own
-                        // timing, never more than MAX_LOOKAHEAD_FRAMES, so it can't stall the party.
-                        val wanted = Karaoke.lookaheadFrames(local.adjustUs())
-                        if (wanted != lookahead && (wanted > lookahead || lookahead - wanted >= 3)) {
-                            Log.i(TAG, "karaoke: guests' stream waits ${wanted * Proto.FRAME_MS} ms for the voice")
-                            lookahead = wanted
-                        }
-                        held.addLast(ts to frame.copyOf())
-                        while (held.size > lookahead) {
-                            val (t, f) = held.removeFirst()
-                            toGuests(t, f, m.tape, duck)
-                        }
-                    } else {
-                        // The mic just went off: send what was waiting (with the voice already sung).
-                        while (held.isNotEmpty()) {
-                            val (t, f) = held.removeFirst()
-                            toGuests(t, f, lastTape, duck)
-                        }
-                        lookahead = 0
-                        toGuests(ts, frame, null, duck)
-                    }
+                    toGuests(ts, frame, m, duck)
                     if (enc.unsupportedFraming || localEnc.unsupportedFraming) {
                         fail("This device's Opus encoder uses an unsupported frame size.")
                         return
@@ -566,7 +558,7 @@ class PartyHostService : Service() {
             }
             if (tuner.wantDelayMs != playoutDelayMs) {
                 playoutDelayMs = tuner.wantDelayMs // guests pick it up from their next SYNC_RESP
-                if (mic == null) local.playoutDelayMs = playoutDelayMs
+                local.playoutDelayMs = playoutDelayMs
             }
             tuner.applied(System.nanoTime() / 1_000_000)
             Log.i(TAG, "auto-tuned: cushion ${tuner.delayMs} ms, ${tuner.bitrate / 1000} kbps")
@@ -653,10 +645,10 @@ class PartyHostService : Service() {
         }
 
         /** What is playing, for the guest page (see WebGuests). */
-        private fun webState(title: String, artist: String, playing: Boolean, v: VideoTimeline?): String {
+        private fun webState(title: String, artist: String, playing: Boolean, v: VideoTimeline?, clockShiftUs: Long = 0): String {
             val video = v?.let {
                 """{"id":${FlatJson.quote(it.videoId)},"title":${FlatJson.quote(it.title)},"playing":${it.playing},""" +
-                    """"anchor":${it.anchorHostUs},"pos":${it.positionUs},"v":${it.version}}"""
+                    """"anchor":${it.anchorHostUs + clockShiftUs},"pos":${it.positionUs},"v":${it.version}}"""
             } ?: "null"
             return """{"t":"state","title":${FlatJson.quote(title)},"artist":${FlatJson.quote(artist)},"playing":$playing,""" +
                 """"delay":$playoutDelayMs,"duck":$micOpen,"video":$video}"""
@@ -690,7 +682,7 @@ class PartyHostService : Service() {
             web.dropSilent(CLIENT_TIMEOUT_NS, nowNs)
             // The DJ phone's own YouTube player mustn't silence its stream either (see PlayoutRunner).
             local.ownVideoOn = video != null
-            // Push-to-talk: once the mic has been closed for a while, put this phone back in step.
+            // Push-to-talk: once the mic has been closed for a while, stop listening altogether.
             if (mic != null && !micOpen && nowNs > micReadyUntilNs) micOff()
             val snapshot = clients
             val browsers = web.guests
@@ -717,6 +709,8 @@ class PartyHostService : Service() {
                 for (c in snapshot) reply(sock, msg, c.address)
             }
             web.setState(webState(title, artist, on, v))
+            // Phones on other networks: the same state, with the video's moment on the relay's clock.
+            relay?.let { r -> r.clock.offsetUs?.let { off -> r.publish(webState(title, artist, on, v, clockShiftUs = off)) } }
 
             // Once a second, let the tuner look at how everyone is doing.
             if (nowNs - lastTuneNs >= 1_000_000_000L) {
@@ -749,20 +743,21 @@ class PartyHostService : Service() {
                     outputIsBluetooth = local.routeIsBluetooth,
                     soundCheck = soundCheck,
                     video = v,
-                    // Karaoke: this phone's video runs ahead of the room so the voice lands on the beat.
-                    correctionUs = if (mic != null) {
-                        local.adjustUs() + (Karaoke.MONITOR_DELAY_MS - playoutDelayMs) * 1000L
-                    } else {
-                        local.userOffsetMs * 1000L + local.calibrationUs
-                    },
+                    correctionUs = local.userOffsetMs * 1000L + local.calibrationUs,
                     micOn = micOpen,
                     micLevel = if (micOpen) mic?.level ?: 0f else 0f,
                     micHearing = micOpen && mic?.hearing == true,
                     micInput = mic?.inputName.orEmpty(),
+                    videoVolume = when {
+                        !micOpen -> 100
+                        local.routeIsSpeaker -> 0
+                        else -> Math.round(Karaoke.DUCK_GAIN * 100)
+                    },
                     bitrate = tuner.bitrate,
                     playoutDelayMs = playoutDelayMs,
                     suggestSoundCheck = tuner.suggestSoundCheck,
                     muted = local.muted,
+                    anywhereUrl = relay?.takeIf { r -> r.connected && r.clock.offsetUs != null }?.partyUrl,
                     webUrls = if (webPort == 0) emptyList() else (if (it.addresses.isEmpty()) LocalNet.localIpv4Addresses() else it.addresses)
                         .map { a -> "http://$a:$webPort" },
                 )
@@ -809,20 +804,16 @@ class PartyHostService : Service() {
         fun unmute() = local.setMuted(false)
 
         /**
-         * The DJ's mic: open (voice to every phone, music dips) or closed. Opening makes it ready
-         * first: this phone then plays a little ahead of the room (so the voice sung over it lands on
-         * the beat everywhere) and the guests' stream waits a few frames for the voice. False if the
-         * microphone could not be opened.
+         * The DJ's mic: open (voice to every phone, music dips) or closed. False if the microphone
+         * could not be opened.
          */
         @Synchronized
         fun setMicOpen(open: Boolean): Boolean {
             if (open) {
                 if (checkRunner != null) return false
                 if (mic == null) {
-                    val m = KaraokeMic(this@PartyHostService)
+                    val m = KaraokeMic(this@PartyHostService, room)
                     if (!m.start()) return false
-                    synchronized(tuner) { tuner.floorMs = maxOf(tuner.floorMs, KARAOKE_MIN_DELAY_MS) } // keep room for the voice
-                    local.playoutDelayMs = Karaoke.MONITOR_DELAY_MS
                     mic = m
                 }
                 mic?.open = true
@@ -838,13 +829,12 @@ class PartyHostService : Service() {
             return true
         }
 
-        /** Mic fully off: this phone back in step with the room (leaving the app, sound check, party over). */
+        /** Mic fully off (leaving the app, sound check, party over, or not used for a while). */
         @Synchronized
         fun micOff() {
             micOpen = false
             val m = mic ?: return
             mic = null
-            local.playoutDelayMs = playoutDelayMs
             m.stop()
             lastVideoNs = 0
         }
@@ -1001,9 +991,7 @@ class PartyHostService : Service() {
         private const val SONG_GAP_FRAMES = 75
         /** This phone's own copy: quality doesn't cost the network anything. */
         private const val LOCAL_BITRATE = 128_000
-        /** Cushion that leaves the guests room for the karaoke voice (a few frames of waiting). */
-        private const val KARAOKE_MIN_DELAY_MS = 350
-        /** After the mic closes, it stays ready this long, so the next press doesn't jump. */
+        /** After the mic closes, it keeps listening (muted) this long: the next press is instant. */
         private const val MIC_READY_NS = 30_000_000_000L
         private const val CHANNEL_ID = "host"
         private const val NOTIFICATION_ID = 41

@@ -13,15 +13,17 @@ import android.media.AudioManager
 import android.os.Process
 import android.util.Log
 import io.github.ugoyel.hearby.core.Proto
+import io.github.ugoyel.hearby.core.RoomReference
 import io.github.ugoyel.hearby.core.VoiceProcessor
 import io.github.ugoyel.hearby.core.VoiceTape
 
 /**
- * The DJ phone's microphone for karaoke: captures the voice, cleans it up ([VoiceProcessor]) and
- * keeps it on a [VoiceTape] with the moment each sample was captured, for the sender to mix in.
- * Only used while Hearby is on screen.
+ * The DJ phone's microphone for karaoke: captures the voice, cleans it up ([VoiceProcessor]: the
+ * room's noise and the party's own sound out, the voice loud and even) and keeps it on a
+ * [VoiceTape] with the moment each sample was captured, for the sender to mix in. [room] is what
+ * the party is playing, so its echo can be taken out. Only used while Hearby is on screen.
  */
-class KaraokeMic(private val context: Context) {
+class KaraokeMic(private val context: Context, private val room: RoomReference) {
     val tape = VoiceTape()
     private val processor = VoiceProcessor()
     @Volatile private var running = false
@@ -120,17 +122,32 @@ class KaraokeMic(private val context: Context) {
         val r = recorder ?: return
         val chunk = FloatArray(CHUNK)
         val stamp = AudioTimestamp()
-        var stamped = false
+        var stampPosition = 0L // a recent (sample index, capture time µs) pair from the recorder
+        var stampUs = Long.MIN_VALUE
+        var captured = 0L // samples read so far
         while (running) {
             val n = r.read(chunk, 0, CHUNK, AudioRecord.READ_BLOCKING)
             if (n <= 0) break
+            // When these samples were captured, on the clock the timeline uses: the recorder's own
+            // timestamps when they make sense, or else "the newest sample was captured just now".
+            if (r.getTimestamp(stamp, AudioTimestamp.TIMEBASE_MONOTONIC) == AudioRecord.SUCCESS &&
+                kotlin.math.abs(stamp.framePosition - (captured + n)) < Proto.SAMPLE_RATE / 2
+            ) {
+                stampPosition = stamp.framePosition
+                stampUs = stamp.nanoTime / 1000
+            } else if (stampUs == Long.MIN_VALUE) {
+                stampPosition = captured + n
+                stampUs = System.nanoTime() / 1000
+            }
+            val chunkUs = stampUs + (captured - stampPosition) * 1_000_000L / Proto.SAMPLE_RATE
+            captured += n
             if (testTone) {
                 for (i in 0 until n) {
                     chunk[i] += (0.05 * kotlin.math.sin(tonePhase)).toFloat()
                     tonePhase += 2 * Math.PI * 330 / Proto.SAMPLE_RATE
                 }
             }
-            processor.process(chunk, n)
+            processor.process(chunk, n, chunkUs, talking = open, room = room)
             hearing = processor.open
             // Opening and closing glide over 10 ms, so pressing the button never clicks.
             val target = if (open) 1f else 0f
@@ -139,16 +156,8 @@ class KaraokeMic(private val context: Context) {
                 chunk[i] *= openGain
             }
             tape.write(chunk, n)
-            // Tie samples to the clock the timeline uses: the recorder's own capture timestamps when
-            // they make sense, or else "the newest sample was captured just now".
-            val ok = r.getTimestamp(stamp, AudioTimestamp.TIMEBASE_MONOTONIC) == AudioRecord.SUCCESS &&
-                kotlin.math.abs(stamp.framePosition - tape.samplesWritten) < Proto.SAMPLE_RATE / 2
-            if (ok) {
-                tape.anchor(stamp.framePosition, stamp.nanoTime / 1000)
-                stamped = true
-            } else if (!stamped) {
-                tape.anchor(tape.samplesWritten, System.nanoTime() / 1000)
-            }
+            // The cleaned voice comes out `latency` samples after it went in.
+            tape.anchor(stampPosition + processor.latency, stampUs)
             var peak = 0f
             for (i in 0 until n) peak = maxOf(peak, kotlin.math.abs(chunk[i]))
             level = maxOf(peak.coerceAtMost(1f), level * 0.8f)

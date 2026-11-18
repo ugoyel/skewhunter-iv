@@ -26,6 +26,7 @@ import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.WriterException
 import com.google.zxing.EncodeHintType
 import com.google.zxing.BarcodeFormat
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.ui.geometry.Size
@@ -367,9 +368,9 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
     val video = state.video
     if (video != null) {
         val correction by rememberUpdatedState(state.correctionUs)
-        val micOn by rememberUpdatedState(state.micOn)
+        val volume by rememberUpdatedState(state.videoVolume)
         VideoCard(
-            video = video, hostOffsetUs = { 0L }, correctionUs = { correction }, duck = { micOn },
+            video = video, hostOffsetUs = { 0L }, correctionUs = { correction }, volume = { volume },
             onTitle = { actions.onVideoTitle(video.videoId, it) },
             onEnded = { actions.onVideoEnded(video.videoId) },
         ) {
@@ -383,6 +384,7 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
         if (state.micOn) MicNotice(state)
         micNotice?.let { Notice(it) }
         if (state.webUrls.isNotEmpty()) IPhoneCard(state.webUrls)
+        state.anywhereUrl?.let { AnywhereCard(it) }
         Crowd(state.listeners)
         GradientButton("End the party", actions.onStop, Modifier.fillMaxWidth(), icon = Icons.Rounded.Stop, brush = Party.Stop, glow = Party.Coral)
         return
@@ -461,6 +463,7 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
     if (checkCardShown) SoundCheckCard(state, actions.onSoundCheck, micNotice)
 
     if (state.webUrls.isNotEmpty()) IPhoneCard(state.webUrls)
+    state.anywhereUrl?.let { AnywhereCard(it) }
     Crowd(state.listeners)
 
     GradientButton("End the party", actions.onStop, Modifier.fillMaxWidth(), icon = Icons.Rounded.Stop, brush = Party.Stop, glow = Party.Coral)
@@ -528,7 +531,7 @@ internal fun VideoCard(
     correctionUs: () -> Long,
     onTitle: (String) -> Unit = {},
     onEnded: () -> Unit = {},
-    duck: () -> Boolean = { false },
+    volume: () -> Int = { 100 },
     controls: @Composable () -> Unit = {},
 ) {
     var notice by remember { mutableStateOf(PlayerNotice()) }
@@ -541,8 +544,9 @@ internal fun VideoCard(
                 if (video.playing) "Playing on every phone" else "Paused",
                 style = MaterialTheme.typography.labelLarge, color = Party.InkSoft, modifier = Modifier.weight(1f),
             )
+            if (notice.ad && notice.error == null && video.playing) Tag("ad, then back in sync", Party.Sun)
             notice.offErrorMs?.let { off ->
-                if (notice.error == null && video.playing) {
+                if (notice.error == null && video.playing && !notice.ad) {
                     Tag(if (abs(off) < 1f) "in sync" else "${signed1(off)} ms", if (abs(off) < 15f) Party.Lime else Party.Sun)
                 }
             }
@@ -552,7 +556,7 @@ internal fun VideoCard(
             if (LocalMotion.current) {
                 SyncedYouTubePlayer(
                     video, hostOffsetUs, correctionUs,
-                    duck = duck,
+                    volume = volume,
                     onNotice = { n ->
                         notice = n
                         n.title?.let(onTitle)
@@ -773,6 +777,33 @@ private fun IPhoneCard(urls: List<String>) {
                 for (u in urls) {
                     Text(u.removePrefix("http://"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White)
                 }
+            }
+        }
+    }
+}
+
+/** For phones on another network (mobile data, elsewhere): YouTube parties over the internet relay. */
+@Composable
+private fun AnywhereCard(url: String) {
+    GlassCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Public, null, tint = Party.Lime)
+            Spacer(Modifier.width(10.dp))
+            Text("Not on this Wi-Fi?", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = Color.White)
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Phones on mobile data or another network join YouTube videos with this link, in the browser. " +
+                "Songs from this phone and the mic need this Wi-Fi.",
+            style = MaterialTheme.typography.bodyMedium, color = Party.InkSoft,
+        )
+        Spacer(Modifier.height(14.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            QrCode(url, Modifier.size(132.dp))
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Or open", style = MaterialTheme.typography.labelMedium, color = Party.InkFaint)
+                Text(url.removePrefix("https://"), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = Color.White)
             }
         }
     }
@@ -1043,7 +1074,7 @@ internal fun Listening(
     val video = state.video
     if (video != null && state.phase != Phase.CONNECTING) {
         val latest by rememberUpdatedState(state)
-        VideoCard(video, hostOffsetUs = { latest.clockOffsetUs }, correctionUs = { latest.correctionUs }, duck = { latest.videoDuck })
+        VideoCard(video, hostOffsetUs = { latest.clockOffsetUs }, correctionUs = { latest.correctionUs }, volume = { if (latest.videoDuck) YouTubeWebPlayer.DUCK_VOLUME else 100 })
     } else GlassCard(lit = playing) {
         HeroRow(
             icon = if (state.outputIsBluetooth) Icons.Rounded.Bluetooth else Icons.Rounded.Headphones,

@@ -108,6 +108,8 @@ class PlayoutRunner(
     @Volatile var routeName = ""
         private set
     @Volatile var routeIsBluetooth = false
+    /** This phone's own loudspeaker (not headphones): what its microphone hears loudest. */
+    @Volatile var routeIsSpeaker = false
         private set
     @Volatile private var routeKey = ""
 
@@ -400,6 +402,7 @@ class PlayoutRunner(
             device.type == AudioDeviceInfo.TYPE_HEARING_AID
         routeKey = key
         routeIsBluetooth = bluetooth
+        routeIsSpeaker = device.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER || device.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER_SAFE
         routeName = when (device.type) {
             AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER_SAFE -> "Phone speaker"
             AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Earpiece"
