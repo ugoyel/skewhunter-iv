@@ -37,6 +37,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Lock
@@ -322,6 +323,7 @@ fun RadioScreen(s: RadioState, near: NearbyInfo, level: StateFlow<Float>?, a: Ac
                 Text(title, color = C.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(subtitle, color = subColor, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+            if (g.direct) Icon(Icons.Filled.Call, "Audio call", Modifier.clip(CircleShape).clickable { a.startCall(g.id) }.padding(10.dp).size(22.dp), tint = C.text)
             if (!g.direct) {
                 Text(if (s.tunedCh == 0) "Ch" else s.tunedCh.toString(), Modifier.clip(RoundedCornerShape(14.dp)).border(1.dp, C.line, RoundedCornerShape(14.dp))
                     .clickable { showCh = true }.padding(horizontal = 10.dp, vertical = 5.dp), color = if (s.tunedCh == 0) C.dim else C.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)

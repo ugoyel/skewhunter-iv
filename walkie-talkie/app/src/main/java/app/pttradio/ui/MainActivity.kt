@@ -56,7 +56,8 @@ fun AppRoot(verified: Boolean, s: RadioState, p: Perms, near: NearbyInfo, alerts
         when {
             !s.ready -> {}
             s.me == null -> Welcome(a, login, verified)
-            appLocked -> LockScreen(onUnlock)
+            appLocked && s.call?.state != "ringing" -> LockScreen(onUnlock)
+            s.call != null -> CallScreen(s, s.call, now, a)
             scr == Scr.SETUP -> Setup(p, a) { go(Scr.HOME) }
             scr == Scr.SETTINGS -> SettingsScreen(s, p, d, page, onPage, a) { go(Scr.HOME) }
             scr == Scr.RADIO && s.group != null -> RadioScreen(s, near, level, a, now, d.locked) { go(Scr.HOME) }
@@ -471,6 +472,18 @@ class MainActivity : ComponentActivity(), Actions {
                     }
                 }
             }
+            callWarn?.let { gid ->
+                Sheet("No internet", { callWarn = null }) {
+                    Body("There is no internet right now. This call will go over Bluetooth / Wi-Fi to phones nearby, so it only works within range and the sound may be lower quality. Do you still want to call?", size = 14.sp)
+                    androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Btn("Cancel", Modifier.weight(1f)) { callWarn = null }
+                        Btn("Call anyway", Modifier.weight(1f), primary = true) { callWarn = null; core.startCall(gid) }
+                    }
+                }
+            }
+            // show over the lock screen only while a call is ringing
+            val ringing = s.call?.state == "ringing"
+            LaunchedEffect(ringing) { if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(ringing); setTurnScreenOn(ringing) } }
             info?.let { t ->
                 Sheet("Note", { info = null }) {
                     Body(t, size = 14.sp)
@@ -483,6 +496,7 @@ class MainActivity : ComponentActivity(), Actions {
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); handle(intent) }
 
     private fun handle(i: Intent?) {
+        if (i?.getBooleanExtra("answer", false) == true) { i.removeExtra("answer"); answerCall() }
         i?.data?.takeIf { it.scheme == "zerobar" }?.let { signInLink(it); i.data = null; return }
         val gid = i?.getStringExtra("gid")
         if (gid != null) { core.tune(gid, i.getIntExtra("ch", 0).coerceAtLeast(0)); scr = Scr.RADIO }
@@ -551,6 +565,21 @@ class MainActivity : ComponentActivity(), Actions {
     }
     override fun unlockChat(gid: String, then: () -> Unit) { if (gid in lockedChats) authenticate("Open locked chat") { then() } else then() }
     override fun playVoice(id: Long) { core.playVoice(id) }
+
+    private var callWarn by mutableStateOf<String?>(null)
+    override fun startCall(gid: String) {
+        if (!perms.mic) { requestPerm("mic"); return }
+        val st = core.state.value
+        when {
+            st.netUp -> core.startCall(gid)
+            st.nearbyUp -> callWarn = gid   // ask first: no internet, nearby link only
+            else -> warning = "No connection: there is no internet and no phone nearby to reach them through."
+        }
+    }
+    override fun answerCall() { if (perms.mic) core.answerCall() else requestPerm("mic") }
+    override fun endCall() { core.endCall() }
+    override fun setCallMuted(m: Boolean) { core.setCallMuted(m) }
+    override fun setCallSpeaker(on: Boolean) { core.setCallSpeaker(on) }
     override fun openSettings(page: String) { settingsPage = page; scr = Scr.SETTINGS }
     override fun openPolicy() {
         try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/ugoyel/skewhunter-iv/blob/claude/walkie-talkie-app-fwj92l/walkie-talkie/play/privacy-policy.md"))) }

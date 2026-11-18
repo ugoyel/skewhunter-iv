@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- incoming calls ring on the lock screen -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <!-- No-internet link: Bluetooth + Wi-Fi through Nearby Connections -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
@@ -97,6 +99,8 @@
             android:name=".RadioService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback|microphone" />
+
+        <receiver android:name=".CallActionReceiver" android:exported="false" />
 
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>

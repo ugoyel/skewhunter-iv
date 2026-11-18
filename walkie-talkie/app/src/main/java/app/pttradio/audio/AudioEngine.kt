@@ -30,7 +30,7 @@ import kotlin.math.tanh
  * loud, even level without lifting background noise, a soft limiter so loud voices never distort, and Android's
  * loudness enhancer on top.
  */
-class AudioEngine(ctx: Context) : AudioIO {
+class AudioEngine(private val ctx: Context) : AudioIO {
     private val rate = 16000
     private val frame = 960
     @Volatile private var capturing = false
@@ -38,6 +38,26 @@ class AudioEngine(ctx: Context) : AudioIO {
     // Held only while a transmission is being received, so playback is not cut when the screen is off.
     private val wake = (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager)
         .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "pttradio:rx").apply { setReferenceCounted(false) }
+
+    @Volatile private var inCall = false
+    @Volatile private var trackDirty = false
+    private val am = ctx.getSystemService(AudioManager::class.java)
+
+    /** Calls use the phone's call audio path: echo cancelling, earpiece by default, speaker on request. */
+    override fun callMode(on: Boolean, speaker: Boolean) {
+        if (on != inCall) trackDirty = true
+        inCall = on
+        try {
+            am?.mode = if (on) AudioManager.MODE_IN_COMMUNICATION else AudioManager.MODE_NORMAL
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                val spk = am?.availableCommunicationDevices?.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                if (on && speaker && spk != null) am?.setCommunicationDevice(spk) else am?.clearCommunicationDevice()
+            } else oldSpeaker(on && speaker)
+        } catch (e: Exception) { }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun oldSpeaker(on: Boolean) { am?.isSpeakerphoneOn = on }
 
     /** Speaker loudness: 0 normal, 1 loud, 2 maximum. */
     @Volatile var boost = 1
@@ -73,6 +93,8 @@ class AudioEngine(ctx: Context) : AudioIO {
         try {
             if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(rec.audioSessionId)?.enabled = true
             if (AutomaticGainControl.isAvailable()) AutomaticGainControl.create(rec.audioSessionId)?.enabled = true
+            // removes the other person's voice coming back from this phone's speaker during calls
+            if (android.media.audiofx.AcousticEchoCanceler.isAvailable()) android.media.audiofx.AcousticEchoCanceler.create(rec.audioSessionId)?.enabled = true
         } catch (e: Exception) { }
         try { rec.startRecording() } catch (e: Exception) { rec.release(); return false }
         capturing = true
@@ -165,7 +187,7 @@ class AudioEngine(ctx: Context) : AudioIO {
     private fun newTrack(): AudioTrack {
         val min = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val t = AudioTrack.Builder()
-            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(if (inCall) AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
             .setAudioFormat(AudioFormat.Builder().setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
             .setBufferSizeInBytes(maxOf(min, frame * 2 * 12))    // room for ~700 ms
             .setTransferMode(AudioTrack.MODE_STREAM)
@@ -184,7 +206,7 @@ class AudioEngine(ctx: Context) : AudioIO {
     private fun fill(f: ShortArray) {
         pending.add(f)
         val until = System.currentTimeMillis() + PREBUFFER_WAIT
-        while (ms(pending) < PREBUFFER_MS) {
+        while (ms(pending) < (if (inCall) 160L else PREBUFFER_MS)) {
             val left = until - System.currentTimeMillis()
             if (left <= 0) break
             pending.add(queue.poll(left, TimeUnit.MILLISECONDS) ?: break)
@@ -216,6 +238,7 @@ class AudioEngine(ctx: Context) : AudioIO {
             val first = try { queue.take() } catch (e: InterruptedException) { return }
             try {
                 wake.acquire(20_000)
+                if (trackDirty) { trackDirty = false; try { track?.release() } catch (e: Exception) { }; track = null }
                 val t = track ?: newTrack().also { track = it }
                 try {
                     enhancer?.setTargetGain(when (boost) { 0 -> 0; 2 -> 900; else -> 500 })

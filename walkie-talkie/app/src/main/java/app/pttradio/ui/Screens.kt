@@ -95,6 +95,12 @@ interface Actions {
     /** Runs [then] once the chat is unlocked (straight away for chats that are not locked). */
     fun unlockChat(gid: String, then: () -> Unit)
     fun playVoice(id: Long)
+    /** Audio call to the other person of a one-to-one chat (warns first when there is no internet). */
+    fun startCall(gid: String)
+    fun answerCall()
+    fun endCall()
+    fun setCallMuted(m: Boolean)
+    fun setCallSpeaker(on: Boolean)
     fun openSettings(page: String)
     fun openPolicy()
     fun removePhoto()

@@ -23,7 +23,7 @@ class RadioCore(
 
     companion object {
         const val P = "pttr1"
-        const val T_HELLO = 1; const val T_AUDIO = 2; const val T_TEXT = 3; const val T_PRES = 4; const val T_CTL = 5; const val T_DIRECT = 6; const val T_IMG = 7
+        const val T_HELLO = 1; const val T_AUDIO = 2; const val T_TEXT = 3; const val T_PRES = 4; const val T_CTL = 5; const val T_DIRECT = 6; const val T_IMG = 7; const val T_CALL = 8
         const val IMG_CHUNK = 12_000
         const val IMG_MAX_CHUNKS = 64               // 768 KB: room for HD pictures over internet
         const val MAX_CH = 16
@@ -38,6 +38,8 @@ class RadioCore(
         fun inviteTopic(uid: String, gid: String) = "$P/inv/$uid/$gid"
         fun groupTopic(gid: String) = "$P/g/$gid/s"
         fun chanTopic(gid: String, ch: Int) = "$P/g/$gid/c/$ch"
+        fun callTopic(id: Long) = "$P/call/${id.hex()}"
+        const val RING_MS = 45_000L
         /** Kept on the relay (encrypted): the group's current name, so phones that were offline catch up when they connect. */
         fun metaTopic(gid: String) = "$P/g/$gid/m"
     }
@@ -148,6 +150,7 @@ class RadioCore(
         val me = s.me ?: return
         val subs = HashSet<String>()
         subs += "$P/u/+"; subs += inbox(me.id); subs += "$P/inv/${me.id}/+"
+        s.call?.let { subs += callTopic(it.id) }
         s.groups.forEach { subs += groupTopic(it.id); subs += chanTopic(it.id, 0); subs += metaTopic(it.id) }
         s.tunedGroup?.let { subs += chanTopic(it, s.tunedCh) }
         transports.forEach { it.setSubscriptions(subs) }
@@ -451,6 +454,7 @@ class RadioCore(
 
     /** @param gid when set (hardware talk button with a default group), tune to that group's main room first. */
     fun pttDown(gid: String? = null) = run {
+        if (s.call != null) { notice("ON A CALL"); return@run }
         if (gid != null && gid != s.tunedGroup && s.groups.any { it.id == gid }) tuneNow(gid, 0)
         val g = s.group
         if (g == null || s.transmitting) return@run
@@ -731,6 +735,116 @@ class RadioCore(
             T_PRES -> onPresence(p)
             T_CTL -> onCtl(p)
             T_DIRECT -> if (p.scope == meId) onDirect(p)
+            T_CALL -> onCallAudio(p)
+        }
+    }
+
+    // ---------------------------------------------------------------- one-to-one audio calls
+    // Ringing, answering and hanging up travel as encrypted direct messages; the audio itself as packets sealed
+    // with the chat's key on a topic of its own, in both directions at once.
+
+    private val callEnc = Adpcm.State()
+    private var callSeq = 0
+    private var callRxSeq = -1
+    private var callLastRx = 0L
+
+    private fun peerOf(gid: String): Member? = s.groups.firstOrNull { it.id == gid && it.direct }?.members?.firstOrNull { it.id != s.me?.id }
+
+    private fun callMsg(peer: Member, json: JSONObject) = sendDirect(peer.id, peer.pub, json, inbox(peer.id))
+
+    /** Calls the other person of a one-to-one chat. */
+    fun startCall(gid: String) = run {
+        if (s.call != null) return@run
+        val peer = peerOf(gid) ?: return@run
+        if (transports.none { it.isUp }) { notice("NO LINK"); return@run }
+        if (s.transmitting) pttUpNow()
+        val c = Call(Crypto.randomId(), gid, peer.id, "calling", clock())
+        update { copy(call = c, callNote = null) }
+        refreshSubs()
+        callMsg(peer, JSONObject().put("t", "call").put("id", c.id.hex()).put("g", gid).put("op", if (s.hdOk && opus != null) 1 else 0))
+    }
+
+    fun answerCall() = run {
+        val c = s.call?.takeIf { it.state == "ringing" } ?: return@run
+        val peer = peerOf(c.gid) ?: return@run endCallNow("Call ended")
+        callMsg(peer, JSONObject().put("t", "answer").put("id", c.id.hex()).put("op", if (s.hdOk && opus != null) 1 else 0))
+        goLive(c.copy(state = "active", since = clock()))
+    }
+
+    fun endCall() = run { endCallNow("Call ended", tell = true) }
+
+    fun setCallMuted(m: Boolean) = run { s.call?.let { update { copy(call = it.copy(muted = m)) } } }
+    fun setCallSpeaker(on: Boolean) = run { s.call?.let { update { copy(call = it.copy(speaker = on)) }; audio.callMode(true, on) } }
+
+    private fun goLive(c: Call) {
+        callEnc.pred = 0; callEnc.index = 0; callSeq = 0; callRxSeq = -1; callLastRx = clock()
+        update { copy(call = c) }
+        audio.callMode(true, c.speaker)
+        if (c.opus) { opus?.setBitrate(if (linkTier == 3) 24_000 else 16_000); opus?.resetEnc(); opus?.resetDec() }
+        if (!audio.startCapture { pcm -> run { callFrame(pcm) } }) { endCallNow("Microphone unavailable", tell = true) }
+    }
+
+    private fun endCallNow(why: String, tell: Boolean = false) {
+        val c = s.call ?: return
+        if (tell) peerOf(c.gid)?.let { callMsg(it, JSONObject().put("t", "end").put("id", c.id.hex())) }
+        if (c.state == "active") { audio.stopCapture(); audio.callMode(false, false) }
+        update { copy(call = null, callNote = why, notice = why.uppercase(), noticeAt = clock()) }
+        refreshSubs()
+        onEvent?.invoke(Event.CallOver(c.id))
+    }
+
+    private fun callFrame(pcm: ShortArray) {
+        val c = s.call?.takeIf { it.state == "active" } ?: return
+        val g = s.groups.firstOrNull { it.id == c.gid } ?: return
+        val frame = if (c.muted) ShortArray(pcm.size) else pcm
+        val enc = if (c.opus) opus?.encode(frame)?.takeIf { it.isNotEmpty() && it[0].toInt() != 0 } else null
+        if (c.opus && enc == null) return
+        val seq = callSeq++ and 0xffff
+        val body = byteArrayOf((seq shr 8).toByte(), seq.toByte(), (if (enc != null) 2 else 0).toByte()) + (enc ?: Adpcm.encode(frame, callEnc))
+        sendSealed(T_CALL, g.id, 0, unb64(g.key), body, callTopic(c.id))
+    }
+
+    private fun onCallAudio(p: Packet) {
+        val c = s.call?.takeIf { it.state == "active" } ?: return
+        if (p.sender.hex() != c.peer || p.scope != c.gid.idLong()) return
+        val g = s.groups.firstOrNull { it.id == c.gid } ?: return
+        val plain = Crypto.open(unb64(g.key), p.body, 0, p.aad()) ?: return
+        if (plain.size < 4) return
+        val seq = ((plain[0].toInt() and 0xff) shl 8) or (plain[1].toInt() and 0xff)
+        if (callRxSeq >= 0 && ((seq - callRxSeq) and 0xffff) > 0x8000) return
+        callRxSeq = seq
+        callLastRx = clock()
+        val pcm = if (plain[2].toInt() and 2 != 0) opus?.decode(plain, 3, plain.size - 3) ?: return else Adpcm.decode(plain, 3, plain.size - 3)
+        audio.play(pcm)
+    }
+
+    /** Ringing that nobody answers, and calls whose audio stopped arriving, end by themselves. */
+    private fun callTick(now: Long) {
+        val c = s.call ?: return
+        when {
+            c.state != "active" && now - c.since > RING_MS -> endCallNow(if (c.state == "calling") "No answer" else "Missed call", tell = c.state == "calling")
+            c.state == "active" && now - callLastRx > 20_000 -> endCallNow("Connection lost", tell = true)
+        }
+    }
+
+    private fun onCallSignal(from: String, o: JSONObject) {
+        val id = java.lang.Long.parseUnsignedLong(o.optString("id", "0").ifEmpty { "0" }, 16)
+        val c = s.call
+        when (o.getString("t")) {
+            "call" -> {
+                val gid = o.optString("g")
+                val g = s.groups.firstOrNull { it.id == gid && it.direct && it.members.any { m -> m.id == from } } ?: return
+                val peer = peerOf(g.id) ?: return
+                // already on a call, or Do not disturb: say busy
+                if (c != null || s.status == "dnd") { callMsg(peer, JSONObject().put("t", "busy").put("id", id.hex())); return }
+                update { copy(call = Call(id, gid, from, "ringing", clock(), opus = o.optInt("op") == 1 && s.hdOk && opus != null), callNote = null) }
+                refreshSubs()
+                onEvent?.invoke(Event.IncomingCall(id, gid, s.nameOf(from)))
+            }
+            "answer" -> if (c != null && c.id == id && c.state == "calling")
+                goLive(c.copy(state = "active", since = clock(), opus = c.opus || (o.optInt("op") == 1 && s.hdOk && opus != null)))
+            "busy" -> if (c != null && c.id == id) endCallNow("Busy")
+            "end" -> if (c != null && c.id == id) endCallNow(if (c.state == "active") "Call ended" else if (c.state == "ringing") "Missed call" else "Declined")
         }
     }
 
@@ -922,6 +1036,7 @@ class RadioCore(
                 if (g.direct && g.members.size == 2) acceptNow(inv, false)
                 else onEvent?.invoke(Event.InviteReceived(inv))
             }
+            "call", "answer", "busy", "end" -> onCallSignal(from, o)
             "chkey", "summon" -> {
                 val gid = o.getString("g"); val ch = o.getInt("ch")
                 val g = s.groups.firstOrNull { it.id == gid } ?: return
@@ -1002,6 +1117,7 @@ class RadioCore(
         state.value = st
         if (lockChange) publishLocks()
         lateVoice?.let { finishRx(it, rxKey) }
+        callTick(now)
         if (recentDirty && now - recentSavedAt > 10_000) {
             recentDirty = false; recentSavedAt = now
             val a = JSONArray()

@@ -419,6 +419,27 @@ class CoreTest {
         await("played on demand") { b.audio.played.sumOf { it.size } == 4 * 960 }
     }
 
+    @Test fun audioCallRingsAnswersCarriesVoiceBothWaysAndHangsUp() {
+        val (a, b, _) = trio()
+        a.core.openDirect(b.id)
+        await("one-to-one chat") { a.s.group?.direct == true && b.s.groups.any { it.direct } }
+        Thread.sleep(250)
+        a.core.startCall(a.s.group!!.id)
+        await("ringing on b") { b.s.call?.state == "ringing" && a.s.call?.state == "calling" }
+        assertTrue(b.events.any { it is Event.IncomingCall })
+        b.core.answerCall()
+        await("both connected") { a.s.call?.state == "active" && b.s.call?.state == "active" }
+        Thread.sleep(150)
+        repeat(3) { a.audio.onFrame!!(tone()) }
+        await("b hears a") { b.audio.played.size >= 3 }
+        repeat(2) { b.audio.onFrame!!(tone()) }
+        await("a hears b") { a.audio.played.size >= 2 }
+        a.core.pttDown()
+        await("no push-to-talk during a call") { a.s.notice == "ON A CALL" }
+        a.core.endCall()
+        await("hung up on both") { a.s.call == null && b.s.call == null }
+    }
+
     @Test fun stateSurvivesRestartButMessagesDoNot() {
         val (a, b, _) = trio()
         a.core.sendText("secret")

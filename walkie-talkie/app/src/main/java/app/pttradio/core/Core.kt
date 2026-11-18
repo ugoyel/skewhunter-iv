@@ -205,6 +205,9 @@ data class RadioState(
     val talkGid: String? = null,
     /** "available" or "dnd" (Do not disturb: incoming talk becomes voice messages instead of playing). */
     val status: String = "available",
+    val call: Call? = null,
+    /** Why the last call ended, shown briefly ("No answer", "Busy", "Call ended"). */
+    val callNote: String? = null,
     /** Voice quality of the current transmission, e.g. "HD voice"; empty when not talking. */
     val txQuality: String = "",
     /** Talking with no link: the voice is kept in memory and sent when a link is back. */
@@ -228,6 +231,8 @@ sealed class Event {
     data class Summoned(val gid: String, val groupName: String, val ch: Int, val by: String, val autoTuned: Boolean) : Event()
     /** Someone else's text, picture, location or delayed voice message arrived. */
     data class Message(val from: String, val gid: String = "", val chat: String = "", val text: String = "") : Event()
+    data class IncomingCall(val id: Long, val gid: String, val from: String) : Event()
+    data class CallOver(val id: Long) : Event()
     /** Someone started talking in one of this phone's chats. */
     data class Talk(val gid: String, val chat: String, val from: String) : Event()
 }
@@ -254,7 +259,13 @@ interface AudioIO {
     fun stopCapture()
     fun play(pcm: ShortArray)
     fun endOfTalk(beep: Boolean)
+    /** Phone-call audio: echo cancelling, earpiece or speaker, short buffer. Off = walkie-talkie audio. */
+    fun callMode(on: Boolean, speaker: Boolean) {}
 }
+
+/** A one-to-one audio call. [state]: "calling" (ringing out), "ringing" (incoming), "active". */
+data class Call(val id: Long, val gid: String, val peer: String, val state: String, val since: Long,
+                val muted: Boolean = false, val speaker: Boolean = false, val opus: Boolean = false)
 
 /** Optional low-data voice codec supplied by the platform (Opus on Android). All calls come from the radio thread. */
 interface VoiceCodec {

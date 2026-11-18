@@ -239,11 +239,18 @@ object Notifier {
     private const val ALERT = "alert"
     private const val SOS = "sos"
     private const val TALK = "talk"
+    private const val CALLS = "calls"
+    const val CALL_NOTE = 7001
 
     fun channels(c: Context) {
         val nm = c.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(STANDBY, "Radio standby", NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) })
         nm.createNotificationChannel(NotificationChannel(ALERT, "Invitations and channel calls", NotificationManager.IMPORTANCE_HIGH))
+        nm.createNotificationChannel(NotificationChannel(CALLS, "Incoming calls", NotificationManager.IMPORTANCE_HIGH).apply {
+            setSound(android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE),
+                android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE).build())
+            enableVibration(true); vibrationPattern = longArrayOf(0, 800, 600, 800, 600, 800)
+        })
         // heads-up but silent: the voice itself is already playing, and messages vibrate on their own
         nm.createNotificationChannel(NotificationChannel(TALK, "Someone talking or messaging you", NotificationManager.IMPORTANCE_HIGH).apply {
             setSound(null, null); enableVibration(false)
@@ -327,6 +334,20 @@ object Notifier {
                         .addAction(talkAction(c, e.gid.hashCode() + 14, e.gid, "Talk back")).build())
                 }
             }
+            is Event.IncomingCall -> {
+                val answer = PendingIntent.getActivity(c, 7002, Intent(c, MainActivity::class.java).putExtra("answer", true)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                val show = PendingIntent.getActivity(c, 7003, Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                val decline = PendingIntent.getBroadcast(c, 7004, Intent(c, CallActionReceiver::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                val icon = android.graphics.drawable.Icon.createWithResource(c, R.drawable.ic_stat_radio)
+                nm.notify(CALL_NOTE, Notification.Builder(c, CALLS).setSmallIcon(R.drawable.ic_stat_radio)
+                    .setContentTitle("${e.from} is calling").setContentText("ZeroBar audio call").setCategory(Notification.CATEGORY_CALL)
+                    .setOngoing(true).setTimeoutAfter(RadioCore.RING_MS).setContentIntent(show).setFullScreenIntent(show, true)
+                    .addAction(Notification.Action.Builder(icon, "Decline", decline).build())
+                    .addAction(Notification.Action.Builder(icon, "Answer", answer).build()).build())
+            }
+            is Event.CallOver -> nm.cancel(CALL_NOTE)
             is Event.Talk -> {
                 val st = (c.applicationContext as App).core.state.value
                 if (!MainActivity.visible || e.gid != st.tunedGroup)
@@ -378,5 +399,13 @@ class RadioService : Service() {
             if ((c.applicationContext as App).core.state.value.me == null && (c.applicationContext as App).prefs.getString("me", null) == null) return
             try { c.startForegroundService(Intent(c, RadioService::class.java).setAction(if (mic) ACTION_MIC else null)) } catch (e: Exception) { }
         }
+    }
+}
+
+/** "Decline" on the incoming-call notification. */
+class CallActionReceiver : BroadcastReceiver() {
+    override fun onReceive(c: Context, i: Intent) {
+        (c.applicationContext as App).core.endCall()
+        c.getSystemService(NotificationManager::class.java).cancel(Notifier.CALL_NOTE)
     }
 }
