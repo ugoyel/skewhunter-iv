@@ -242,7 +242,7 @@ class CoreTest {
         a.core.sendImage(jpeg)
         await("image") { b.s.messages.any { it.image != null } }
         assertArrayEquals(jpeg, b.s.messages.first { it.image != null }.image)
-        assertTrue(a.s.messages.any { it.mine && it.image != null })
+        await("own copy") { a.s.messages.any { it.mine && it.image != null } }
         a.core.sendLocation(28.613939, 77.209021, 7)
         await("location") { b.s.messages.any { it.geo != null } }
         val geo = b.s.messages.first { it.geo != null }.geo!!
