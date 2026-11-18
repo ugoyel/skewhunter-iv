@@ -323,7 +323,8 @@ fun RadioScreen(s: RadioState, near: NearbyInfo, level: StateFlow<Float>?, a: Ac
                 Text(title, color = C.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(subtitle, color = subColor, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            if (g.direct) Icon(Icons.Filled.Call, "Audio call", Modifier.clip(CircleShape).clickable { a.startCall(g.id) }.padding(10.dp).size(22.dp), tint = C.text)
+            Icon(Icons.Filled.Call, if (g.direct) "Audio call" else "Group call", Modifier.clip(CircleShape).clickable { a.startCall(g.id) }.padding(10.dp).size(22.dp),
+                tint = if (s.liveCalls[g.id] != null) C.accent else C.text)
             if (!g.direct) {
                 Text(if (s.tunedCh == 0) "Ch" else s.tunedCh.toString(), Modifier.clip(RoundedCornerShape(14.dp)).border(1.dp, C.line, RoundedCornerShape(14.dp))
                     .clickable { showCh = true }.padding(horizontal = 10.dp, vertical = 5.dp), color = if (s.tunedCh == 0) C.dim else C.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
@@ -338,11 +339,30 @@ fun RadioScreen(s: RadioState, near: NearbyInfo, level: StateFlow<Float>?, a: Ac
                         DropdownMenuItem({ Text("Add people", color = C.text) }, { menu = false; showAdd = true })
                         DropdownMenuItem({ Text("Channels", color = C.text) }, { menu = false; showCh = true })
                     }
+                    DropdownMenuItem({ Text("Group map", color = C.text) }, { menu = false; a.showMap() })
+                    if (!g.direct) DropdownMenuItem({ Text("Roll call", color = C.text) }, { menu = false; a.rollCall(g.id) })
                     DropdownMenuItem({ Text("Add to home screen", color = C.text) }, { menu = false; a.addToHome(g.id) })
                     DropdownMenuItem({ Text(if (g.id in locked) "Unlock chat" else "Lock chat", color = C.text) }, { menu = false; a.lockChats(setOf(g.id), g.id !in locked) })
                     DropdownMenuItem({ Text(if (g.direct) "Delete chat" else "Leave group", color = C.red) }, { menu = false; confirmLeave = true })
                 }
             }
+        }
+
+        // ---------------------------------------------------------------- group call, roll call, meeting point
+        s.liveCalls[g.id]?.takeIf { s.call == null }?.let { l ->
+            Banner(C.accent, "Group call going on", l.members.joinToString { s.nameOf(it) }.take(60) + " · ${l.members.size}/${app.pttradio.core.RadioCore.CALL_MAX}", "Join") { a.startCall(g.id) }
+        }
+        s.rolls[g.id]?.let { r ->
+            val mine = s.me?.id in r.ok
+            val total = g.members.size
+            Banner(if (mine) C.accent else C.amber, "📋 Roll call by ${if (r.by == s.me?.id) "you" else s.nameOf(r.by)}",
+                "${r.ok.size}/$total OK" + (g.members.filter { it.id !in r.ok }.takeIf { it.isNotEmpty() }?.let { m -> " · waiting: " + m.joinToString { s.nameOf(it.id) }.take(50) } ?: ""),
+                if (mine) "Close" else "I'm OK") { if (mine) a.clearRoll(g.id) else a.rollOk(g.id) }
+        }
+        s.meets[g.id]?.let { m ->
+            val me = s.positions[s.me?.id]
+            val where = me?.let { " · " + distText(app.pttradio.core.distance(it.lat, it.lon, m.lat, m.lon)) + " " + app.pttradio.core.compass(app.pttradio.core.bearing(it.lat, it.lon, m.lat, m.lon)) } ?: ""
+            Banner(C.blue, "📍 Meeting point" + where, m.label.ifBlank { "set by " + s.nameOf(m.by) }, "Map") { a.showMap() }
         }
 
         // ---------------------------------------------------------------- messages

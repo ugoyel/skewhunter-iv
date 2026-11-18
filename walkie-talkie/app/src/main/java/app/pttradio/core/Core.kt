@@ -212,6 +212,12 @@ data class RadioState(
     val txQuality: String = "",
     /** Talking with no link: the voice is kept in memory and sent when a link is back. */
     val recording: Boolean = false,
+    /** Latest position and recent trail of each person (memory only), the meeting point and roll call of each group. */
+    val positions: Map<String, Pos> = emptyMap(),
+    val trails: Map<String, List<Pos>> = emptyMap(),
+    val meets: Map<String, Meet> = emptyMap(),
+    val rolls: Map<String, Roll> = emptyMap(),
+    val liveCalls: Map<String, LiveCall> = emptyMap(),
 ) {
     val group: Group? get() = groups.firstOrNull { it.id == tunedGroup }
     /** A group's name, or for a one-to-one chat the other person's name. */
@@ -235,7 +241,27 @@ sealed class Event {
     data class CallOver(val id: Long) : Event()
     /** Someone started talking in one of this phone's chats. */
     data class Talk(val gid: String, val chat: String, val from: String) : Event()
+    /** Someone asked everyone in a group to answer "I'm OK". */
+    data class RollCall(val gid: String, val chat: String, val from: String) : Event()
 }
+
+/** Metres between two points on the Earth. */
+fun distance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val r = 6_371_000.0
+    val dLat = Math.toRadians(lat2 - lat1); val dLon = Math.toRadians(lon2 - lon1)
+    val a = Math.sin(dLat / 2).let { it * it } + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) * Math.sin(dLon / 2).let { it * it }
+    return 2 * r * Math.asin(Math.sqrt(a.coerceIn(0.0, 1.0)))
+}
+
+/** Compass direction from the first point to the second, 0–360 degrees (0 = north). */
+fun bearing(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val p1 = Math.toRadians(lat1); val p2 = Math.toRadians(lat2); val dl = Math.toRadians(lon2 - lon1)
+    val y = Math.sin(dl) * Math.cos(p2)
+    val x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl)
+    return (Math.toDegrees(Math.atan2(y, x)) + 360) % 360
+}
+
+fun compass(deg: Double) = arrayOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")[(((deg + 22.5) % 360) / 45).toInt()]
 
 fun chName(ch: Int) = if (ch == 0) "MAIN" else "CH " + ch.toString().padStart(2, '0')
 
@@ -265,7 +291,18 @@ interface AudioIO {
 
 /** A one-to-one audio call. [state]: "calling" (ringing out), "ringing" (incoming), "active". */
 data class Call(val id: Long, val gid: String, val peer: String, val state: String, val since: Long,
-                val muted: Boolean = false, val speaker: Boolean = false, val opus: Boolean = false)
+                val muted: Boolean = false, val speaker: Boolean = false, val opus: Boolean = false,
+                /** A group call (up to [RadioCore.CALL_MAX] people): [peer] is who started it, [members] who else is on it. */
+                val group: Boolean = false, val members: Set<String> = emptySet())
+
+/** A person's position. [alt] is the height above sea level in metres (NaN when the phone has none). */
+data class Pos(val lat: Double, val lon: Double, val alt: Double, val acc: Int, val at: Long)
+/** A group's meeting point. */
+data class Meet(val lat: Double, val lon: Double, val label: String, val by: String, val at: Long)
+/** A roll call: who asked, and who answered "I'm OK". */
+data class Roll(val id: Long, val by: String, val at: Long, val ok: Set<String>)
+/** A group call going on that this phone is not part of (yet). */
+data class LiveCall(val id: Long, val by: String, val members: Set<String>, val at: Long)
 
 /** Optional low-data voice codec supplied by the platform (Opus on Android). All calls come from the radio thread. */
 interface VoiceCodec {

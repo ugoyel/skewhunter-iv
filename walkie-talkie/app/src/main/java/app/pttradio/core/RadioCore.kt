@@ -42,6 +42,10 @@ class RadioCore(
         const val RING_MS = 45_000L
         /** Kept on the relay (encrypted): the group's current name, so phones that were offline catch up when they connect. */
         fun metaTopic(gid: String) = "$P/g/$gid/m"
+        /** Kept on the relay (encrypted): the group's meeting point. */
+        fun meetTopic(gid: String) = "$P/g/$gid/p"
+        const val CALL_MAX = 5
+        const val TRAIL_MAX = 720
     }
 
     val state = MutableStateFlow(RadioState())
@@ -151,7 +155,7 @@ class RadioCore(
         val subs = HashSet<String>()
         subs += "$P/u/+"; subs += inbox(me.id); subs += "$P/inv/${me.id}/+"
         s.call?.let { subs += callTopic(it.id) }
-        s.groups.forEach { subs += groupTopic(it.id); subs += chanTopic(it.id, 0); subs += metaTopic(it.id) }
+        s.groups.forEach { subs += groupTopic(it.id); subs += chanTopic(it.id, 0); subs += metaTopic(it.id); subs += meetTopic(it.id) }
         s.tunedGroup?.let { subs += chanTopic(it, s.tunedCh) }
         transports.forEach { it.setSubscriptions(subs) }
     }
@@ -248,6 +252,14 @@ class RadioCore(
     }
 
     /** Opens (creating when needed) the one-to-one chat with a person. [done] gets the chat id. */
+    /** Someone added from their QR code: known from then on, even if never online at the same time. */
+    fun addContact(id: String, name: String, pub: String) = run {
+        if (!isId(id) || id == s.me?.id || name.isBlank() || pub.isEmpty() || !pinned(id, pub)) return@run
+        val old = s.users[id]
+        update { copy(users = users + (id to (old ?: User(id, "", "")).copy(name = name.take(24), pub = pub, ts = maxOf(old?.ts ?: 0, clock())))) }
+        usersDirty = true
+    }
+
     fun openDirect(uid: String, tune: Boolean = true, done: ((String) -> Unit)? = null) = run {
         val me = s.me ?: return@run
         if (uid == me.id) return@run
@@ -739,6 +751,129 @@ class RadioCore(
         }
     }
 
+    // ---------------------------------------------------------------- positions, meeting point, roll call
+    // Positions travel as encrypted group messages, over the internet or from phone to phone, and stay in memory only.
+
+    private fun putPos(uid: String, p: Pos, trail: Boolean) {
+        val old = s.trails[uid].orEmpty()
+        val last = old.lastOrNull()
+        // a trail point when the person moved 15 m or more, or every 5 minutes while standing still
+        val add = trail && (last == null || distance(last.lat, last.lon, p.lat, p.lon) >= 15 || p.at - last.at >= 300_000)
+        update { copy(positions = positions + (uid to p), trails = if (add) trails + (uid to (old + p).takeLast(TRAIL_MAX)) else trails) }
+    }
+
+    /** This phone's new position: kept for the map and the trail, and sent to every chat when [send]. */
+    fun myPosition(lat: Double, lon: Double, alt: Double, acc: Int, send: Boolean, trail: Boolean) = run {
+        val me = s.me ?: return@run
+        val p = Pos(lat, lon, alt, acc, clock())
+        putPos(me.id, p, trail)
+        if (!send) return@run
+        val o = JSONObject().put("t", "pos").put("la", lat).put("lo", lon).put("ac", acc).put("at", p.at)
+        if (!alt.isNaN()) o.put("al", Math.round(alt * 10) / 10.0)
+        for (g in s.groups) sendCtl(g, o)
+    }
+
+    fun clearTrail(uid: String) = run { update { copy(trails = trails - uid) } }
+
+    /** Sets (or with null, removes) the group's meeting point, kept on the relay so late arrivals get it too. */
+    fun setMeet(gid: String, lat: Double?, lon: Double?, label: String) = run {
+        val me = s.me ?: return@run
+        val g = s.groups.firstOrNull { it.id == gid } ?: return@run
+        val at = clock()
+        val o = JSONObject().put("t", "meet").put("at", at)
+        if (lat == null || lon == null) { o.put("clr", true); update { copy(meets = meets - gid) } }
+        else { o.put("la", lat).put("lo", lon).put("l", label.take(40)); update { copy(meets = meets + (gid to Meet(lat, lon, label.take(40), me.id, at))) } }
+        sendSealed(T_CTL, g.id, 0, unb64(g.key), o.toString().toByteArray(), meetTopic(g.id), retained = true)
+        if (lat != null && lon != null) post("📍 Meeting point: ${label.ifBlank { "here" }}\ngeo:" + String.format(java.util.Locale.US, "%.6f,%.6f,0", lat, lon), null, gid to 0)
+    }
+
+    /** Asks everyone in the group to answer "I'm OK". */
+    fun rollCall(gid: String) = run {
+        val me = s.me ?: return@run
+        val g = s.groups.firstOrNull { it.id == gid } ?: return@run
+        val id = Crypto.randomId()
+        update { copy(rolls = rolls + (gid to Roll(id, me.id, clock(), setOf(me.id)))) }
+        sendCtl(g, JSONObject().put("t", "roll").put("id", id))
+        post("📋 Roll call: everyone please tap I'm OK", null, gid to 0)
+    }
+
+    fun rollOk(gid: String) = run {
+        val me = s.me ?: return@run
+        val g = s.groups.firstOrNull { it.id == gid } ?: return@run
+        val r = s.rolls[gid] ?: return@run
+        update { copy(rolls = rolls + (gid to r.copy(ok = r.ok + me.id))) }
+        sendCtl(g, JSONObject().put("t", "rollok").put("id", r.id))
+    }
+
+    fun clearRoll(gid: String) = run { update { copy(rolls = rolls - gid) } }
+
+    // ---------------------------------------------------------------- group calls
+    // Up to CALL_MAX people. Joining and leaving travel as group messages; while on the call each phone says
+    // "here" every 10 seconds, so others can see the call and join late. The audio of each speaker is mixed.
+
+    private val mixQ = HashMap<String, ArrayDeque<ShortArray>>()
+    private val mixAt = HashMap<String, Long>()
+    private val mixSeq = HashMap<String, Int>()
+    private var hereAt = 0L
+
+    private fun onGroupCall(g: Group, from: String, o: JSONObject) {
+        if (g.members.none { it.id == from }) return
+        val id = o.optLong("id")
+        val c = s.call
+        when (o.optString("op")) {
+            "start", "here", "join" -> {
+                val live = s.liveCalls[g.id]
+                val mem = (if (live?.id == id) live.members else emptySet()) + from
+                update { copy(liveCalls = liveCalls + (g.id to LiveCall(id, live?.takeIf { it.id == id }?.by ?: from, mem, clock()))) }
+                if (c != null && c.group && c.id == id && from !in c.members) update { copy(call = c.copy(members = c.members + from)) }
+                if (o.optString("op") == "start" && c == null && s.status != "dnd") {
+                    update { copy(call = Call(id, g.id, from, "ringing", clock(), group = true, members = setOf(from))) }
+                    refreshSubs()
+                    onEvent?.invoke(Event.IncomingCall(id, g.id, s.nameOf(from)))
+                }
+            }
+            "leave" -> {
+                s.liveCalls[g.id]?.takeIf { it.id == id }?.let { l ->
+                    update { copy(liveCalls = if (l.members.size <= 1) liveCalls - g.id else liveCalls + (g.id to l.copy(members = l.members - from))) }
+                }
+                if (c != null && c.group && c.id == id) {
+                    mixQ.remove(from)
+                    if (c.state == "ringing" && (c.members - from).isEmpty()) endCallNow("Missed call")
+                    else update { copy(call = c.copy(members = c.members - from)) }
+                }
+            }
+        }
+    }
+
+    private fun gcall(g: Group, op: String, id: Long) = sendCtl(g, JSONObject().put("t", "gcall").put("op", op).put("id", id))
+
+    /** Joins a group call that is already going on. */
+    fun joinCall(gid: String) = run {
+        if (s.call != null) return@run
+        val g = s.groups.firstOrNull { it.id == gid } ?: return@run
+        val l = s.liveCalls[gid] ?: return@run
+        if (l.members.size >= CALL_MAX) { notice("CALL IS FULL"); return@run }
+        if (s.transmitting) pttUpNow()
+        refreshSubs()
+        gcall(g, "join", l.id)
+        goLive(Call(l.id, gid, l.by, "active", clock(), group = true, members = l.members))
+        refreshSubs()
+    }
+
+    private fun mixIn(from: String, pcm: ShortArray) {
+        val now = clock()
+        mixAt[from] = now
+        val q = mixQ.getOrPut(from) { ArrayDeque() }
+        q.addLast(pcm)
+        if (q.size > 8) q.removeFirst()
+        mixQ.keys.retainAll { now - (mixAt[it] ?: 0) < 600 }
+        // play once every speaker who is talking has a frame, or this one is getting ahead
+        if (mixQ.values.any { it.isEmpty() } && q.size < 3) return
+        val out = IntArray(pcm.size)
+        for (fq in mixQ.values) fq.removeFirstOrNull()?.let { f -> for (i in out.indices) if (i < f.size) out[i] += f[i].toInt() }
+        audio.play(ShortArray(out.size) { out[it].coerceIn(-32768, 32767).toShort() })
+    }
+
     // ---------------------------------------------------------------- one-to-one audio calls
     // Ringing, answering and hanging up travel as encrypted direct messages; the audio itself as packets sealed
     // with the chat's key on a topic of its own, in both directions at once.
@@ -755,6 +890,17 @@ class RadioCore(
     /** Calls the other person of a one-to-one chat. */
     fun startCall(gid: String) = run {
         if (s.call != null) return@run
+        val grp = s.groups.firstOrNull { it.id == gid && !it.direct }
+        if (grp != null) {
+            if (s.liveCalls[gid] != null) { joinCall(gid); return@run }
+            if (transports.none { it.isUp }) { notice("NO LINK"); return@run }
+            if (s.transmitting) pttUpNow()
+            val c = Call(Crypto.randomId(), gid, s.me?.id ?: return@run, "active", clock(), group = true)
+            gcall(grp, "start", c.id)
+            goLive(c)
+            refreshSubs()
+            return@run
+        }
         val peer = peerOf(gid) ?: return@run
         if (transports.none { it.isUp }) { notice("NO LINK"); return@run }
         if (s.transmitting) pttUpNow()
@@ -766,6 +912,12 @@ class RadioCore(
 
     fun answerCall() = run {
         val c = s.call?.takeIf { it.state == "ringing" } ?: return@run
+        if (c.group) {
+            val g = s.groups.firstOrNull { it.id == c.gid } ?: return@run endCallNow("Call ended")
+            gcall(g, "join", c.id)
+            goLive(c.copy(state = "active", since = clock()))
+            return@run
+        }
         val peer = peerOf(c.gid) ?: return@run endCallNow("Call ended")
         callMsg(peer, JSONObject().put("t", "answer").put("id", c.id.hex()).put("op", if (s.hdOk && opus != null) 1 else 0))
         goLive(c.copy(state = "active", since = clock()))
@@ -786,7 +938,9 @@ class RadioCore(
 
     private fun endCallNow(why: String, tell: Boolean = false) {
         val c = s.call ?: return
-        if (tell) peerOf(c.gid)?.let { callMsg(it, JSONObject().put("t", "end").put("id", c.id.hex())) }
+        if (tell && c.group) s.groups.firstOrNull { it.id == c.gid }?.let { if (c.state == "active") gcall(it, "leave", c.id) }
+        else if (tell) peerOf(c.gid)?.let { callMsg(it, JSONObject().put("t", "end").put("id", c.id.hex())) }
+        if (c.group) { mixQ.clear(); mixSeq.clear(); if (c.state == "active") update { copy(liveCalls = liveCalls[c.gid]?.let { l -> if (l.members.size <= 1) liveCalls - c.gid else liveCalls + (c.gid to l.copy(members = l.members - (me?.id ?: ""))) } ?: liveCalls) } }
         if (c.state == "active") { audio.stopCapture(); audio.callMode(false, false) }
         update { copy(call = null, callNote = why, notice = why.uppercase(), noticeAt = clock()) }
         refreshSubs()
@@ -797,6 +951,8 @@ class RadioCore(
         val c = s.call?.takeIf { it.state == "active" } ?: return
         val g = s.groups.firstOrNull { it.id == c.gid } ?: return
         val frame = if (c.muted) ShortArray(pcm.size) else pcm
+        // group calls: silence is not sent (only a frame now and then, to show this phone is still there)
+        if (c.group && (c.muted || levelOf(pcm) < 0.02f) && callSeq % 25 != 0) { callSeq++; return }
         val enc = if (c.opus) opus?.encode(frame)?.takeIf { it.isNotEmpty() && it[0].toInt() != 0 } else null
         if (c.opus && enc == null) return
         val seq = callSeq++ and 0xffff
@@ -806,6 +962,21 @@ class RadioCore(
 
     private fun onCallAudio(p: Packet) {
         val c = s.call?.takeIf { it.state == "active" } ?: return
+        if (c.group) {
+            if (p.scope != c.gid.idLong()) return
+            val g = s.groups.firstOrNull { it.id == c.gid } ?: return
+            val from = p.sender.hex()
+            if (g.members.none { it.id == from }) return
+            val plain = Crypto.open(unb64(g.key), p.body, 0, p.aad()) ?: return
+            if (plain.size < 4 || plain[2].toInt() and 2 != 0) return
+            val seq = ((plain[0].toInt() and 0xff) shl 8) or (plain[1].toInt() and 0xff)
+            mixSeq[from]?.let { if (((seq - it) and 0xffff) > 0x8000) return }
+            mixSeq[from] = seq
+            callLastRx = clock()
+            if (from !in c.members) update { copy(call = c.copy(members = c.members + from)) }
+            mixIn(from, Adpcm.decode(plain, 3, plain.size - 3))
+            return
+        }
         if (p.sender.hex() != c.peer || p.scope != c.gid.idLong()) return
         val g = s.groups.firstOrNull { it.id == c.gid } ?: return
         val plain = Crypto.open(unb64(g.key), p.body, 0, p.aad()) ?: return
@@ -820,7 +991,15 @@ class RadioCore(
 
     /** Ringing that nobody answers, and calls whose audio stopped arriving, end by themselves. */
     private fun callTick(now: Long) {
+        s.liveCalls.filterValues { now - it.at > 30_000 }.keys.takeIf { it.isNotEmpty() }?.let { gone -> update { copy(liveCalls = liveCalls - gone) } }
         val c = s.call ?: return
+        if (c.group) {
+            if (c.state != "active") { if (now - c.since > RING_MS) endCallNow("Missed call"); return }
+            if (now - hereAt > 10_000) { hereAt = now; s.groups.firstOrNull { it.id == c.gid }?.let { gcall(it, "here", c.id) } }
+            // alone on the call for a while: nobody came, or everybody left
+            if (now - callLastRx > RING_MS && now - c.since > RING_MS) endCallNow(if (c.members.isEmpty()) "No one joined" else "Call ended", tell = true)
+            return
+        }
         when {
             c.state != "active" && now - c.since > RING_MS -> endCallNow(if (c.state == "calling") "No answer" else "Missed call", tell = c.state == "calling")
             c.state == "active" && now - callLastRx > 20_000 -> endCallNow("Connection lost", tell = true)
@@ -1003,6 +1182,40 @@ class RadioCore(
                 if (n.isNotEmpty() && !g.direct && g.members.any { it.id == p.sender.hex() } && (at == 0L || at > g.nameAt))
                     replaceGroup(g.copy(name = n, nameAt = if (at > 0) at else clock()))
             }
+            "pos" -> {
+                val uid = p.sender.hex()
+                if (g.members.none { it.id == uid }) return
+                val lat = o.optDouble("la", Double.NaN); val lon = o.optDouble("lo", Double.NaN)
+                if (lat.isNaN() || lon.isNaN() || lat !in -90.0..90.0 || lon !in -180.0..180.0) return
+                val at = o.optLong("at").takeIf { it > 0 && it <= clock() + 60_000 } ?: clock()
+                if ((s.positions[uid]?.at ?: 0) >= at) return
+                sawAlive(uid)
+                putPos(uid, Pos(lat, lon, o.optDouble("al", Double.NaN), o.optInt("ac"), at), true)
+            }
+            "meet" -> {
+                val uid = p.sender.hex()
+                if (g.members.none { it.id == uid }) return
+                val at = o.optLong("at")
+                if ((s.meets[gid]?.at ?: 0) >= at) return
+                if (o.optBoolean("clr")) { update { copy(meets = meets - gid) }; return }
+                val lat = o.optDouble("la", Double.NaN); val lon = o.optDouble("lo", Double.NaN)
+                if (lat.isNaN() || lon.isNaN()) return
+                update { copy(meets = meets + (gid to Meet(lat, lon, o.optString("l").take(40), uid, at))) }
+            }
+            "roll" -> {
+                val uid = p.sender.hex()
+                if (g.members.none { it.id == uid }) return
+                val id = o.optLong("id")
+                if (s.rolls[gid]?.id == id) return
+                update { copy(rolls = rolls + (gid to Roll(id, uid, clock(), setOf(uid)))) }
+                onEvent?.invoke(Event.RollCall(gid, s.titleOf(g), s.nameOf(uid)))
+            }
+            "rollok" -> {
+                val r = s.rolls[gid] ?: return
+                if (r.id != o.optLong("id")) return
+                update { copy(rolls = rolls + (gid to r.copy(ok = r.ok + p.sender.hex()))) }
+            }
+            "gcall" -> onGroupCall(g, p.sender.hex(), o)
             "leave" -> {
                 val id = o.getString("id")
                 if (id != p.sender.hex()) return

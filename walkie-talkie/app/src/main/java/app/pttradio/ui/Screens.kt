@@ -65,7 +65,7 @@ data class Profile(val email: String = "", val mobile: String = "")
 
 data class ButtonCfg(val key: Int = 0, val learning: Boolean = false, val group: String = "")
 
-enum class Scr { HOME, RADIO, SETTINGS, SETUP }
+enum class Scr { HOME, RADIO, SETTINGS, SETUP, SAFETY, MAP }
 
 interface Actions {
     fun setName(n: String)
@@ -95,6 +95,26 @@ interface Actions {
     /** Runs [then] once the chat is unlocked (straight away for chats that are not locked). */
     fun unlockChat(gid: String, then: () -> Unit)
     fun playVoice(id: Long)
+    /** Flashlight SOS in Morse plus, with [sound], a loud siren. */
+    fun startSignal(sound: Boolean)
+    fun stopSignal()
+    /** Check-in deadline in [minutes] from now; 0 = "I'm OK" (clear it). */
+    fun setCheckIn(minutes: Int)
+    fun setShare(on: Boolean)
+    fun setTrail(on: Boolean)
+    fun clearTrail()
+    /** Group map of the open chat. */
+    fun showMap()
+    fun setMeetHere(gid: String)
+    fun clearMeet(gid: String)
+    fun rollCall(gid: String)
+    fun rollOk(gid: String)
+    fun clearRoll(gid: String)
+    fun setSaver(on: Boolean)
+    fun resetData()
+    /** My QR code, for others to scan and add me. */
+    fun showQr()
+    fun scanQr()
     /** Audio call to the other person of a one-to-one chat (warns first when there is no internet). */
     fun startCall(gid: String)
     fun answerCall()
@@ -334,6 +354,8 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 data class SettingsData(
     val mode: String, val btn: ButtonCfg, val field: Pair<String, String>, val sosAnyone: Boolean, val boost: Int,
     val profile: Profile, val visible: Boolean, val appLock: Boolean, val locked: Set<String>,
+    val saver: Boolean = false, val dataUsed: Long = 0,
+    val checkinAt: Long = 0, val share: Boolean = false, val trail: Boolean = false,
 )
 
 /** One row of the settings list: round icon, title, short description. */
@@ -526,6 +548,12 @@ fun SettingsScreen(s: RadioState, p: Perms, d: SettingsData, page: String, onPag
                     "both" -> "Internet and nearby together. Lets this phone stay reachable both ways; uses the most battery."
                     else -> "Internet when there is one. Nearby phones are found over Bluetooth and Wi-Fi whenever there is no internet, and also while the app is open."
                 }, color = C.dim, size = 12.sp)
+                    }
+                    Section("Data saver") {
+                        SwitchRow("Data saver", "Lowest voice bit rate, small pictures, position every 5 minutes. For little or costly internet.", d.saver) { a.setSaver(it) }
+                        Body("Internet data used by ZeroBar this month: " + android.text.format.Formatter.formatShortFileSize(androidx.compose.ui.platform.LocalContext.current, d.dataUsed) +
+                            ". Bluetooth / Wi-Fi between phones uses no data.", color = C.dim, size = 12.sp)
+                        Btn("Reset counter") { a.resetData() }
                     }
                     Section("Range extender · field Wi-Fi") {
                 Body("For places with no internet. One phone turns on its hotspot with this name and password; every other phone that saved it " +

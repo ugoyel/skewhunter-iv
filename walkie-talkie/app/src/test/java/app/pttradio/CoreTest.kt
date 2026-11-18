@@ -440,6 +440,43 @@ class CoreTest {
         await("hung up on both") { a.s.call == null && b.s.call == null }
     }
 
+    @Test fun positionsHeightMeetingPointAndRollCallReachTheGroup() {
+        val (a, b, c) = trio()
+        val gid = a.s.groups[0].id
+        Thread.sleep(200)
+        a.core.myPosition(30.0, 78.0, 2000.0, 8, send = true, trail = true)
+        b.core.myPosition(30.001, 78.0, 2120.0, 8, send = true, trail = true)
+        await("positions on c") { c.s.positions[a.id] != null && c.s.positions[b.id]?.alt == 2120.0 }
+        assertEquals(111.0, distance(30.0, 78.0, 30.001, 78.0), 1.0)
+        assertEquals("N", compass(bearing(30.0, 78.0, 30.001, 78.0)))
+        a.core.setMeet(gid, 30.002, 78.001, "Hut")
+        await("meet on b") { b.s.meets[gid]?.label == "Hut" }
+        val late = Node(a.t.bus, "Late")                 // retained on the relay: phones that join later get it too
+        assertTrue(late.t.bus.retained.keys.any { it.endsWith("/p") })
+        a.core.rollCall(gid)
+        await("roll on b") { b.s.rolls[gid] != null && b.events.any { it is Event.RollCall } }
+        b.core.rollOk(gid); c.core.rollOk(gid)
+        await("all ok on a") { a.s.rolls[gid]?.ok?.size == 3 }
+    }
+
+    @Test fun groupCallRingsEveryoneAndMixesVoices() {
+        val (a, b, c) = trio()
+        val gid = a.s.groups[0].id
+        Thread.sleep(200)
+        a.core.startCall(gid)
+        await("ringing on b and c") { b.s.call?.state == "ringing" && c.s.call?.state == "ringing" && a.s.call?.group == true }
+        b.core.answerCall(); c.core.answerCall()
+        await("on the call") { a.s.call?.members?.containsAll(setOf(b.id, c.id)) == true }
+        Thread.sleep(150)
+        repeat(4) { b.audio.onFrame!!(tone()); c.audio.onFrame!!(tone()) }
+        await("a hears both, mixed") { a.audio.played.size >= 3 }
+        assertTrue(a.audio.played.size <= 6)          // mixed, not one stream after the other
+        c.core.endCall()
+        await("c left") { c.s.call == null && a.s.call?.members?.contains(c.id) == false }
+        a.core.endCall(); b.core.endCall()
+        await("all off") { a.s.call == null && b.s.call == null }
+    }
+
     @Test fun stateSurvivesRestartButMessagesDoNot() {
         val (a, b, _) = trio()
         a.core.sendText("secret")

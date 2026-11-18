@@ -133,8 +133,12 @@ class MqttTransport(
 
     override fun connectionLost(cause: Throwable?) = exec.execute { active = emptySet(); listener?.onLink(this); scheduleRetry() }
 
+    /** Bytes sent and received through the relay, roughly including the protocol overhead. */
+    @Volatile var onBytes: ((Int) -> Unit)? = null
+
     override fun messageArrived(topic: String, m: MqttMessage) {
         val data = m.payload
+        onBytes?.invoke(data.size + topic.length + 8)
         if (data.isEmpty()) return
         if (topic.startsWith("${RadioCore.P}/u/")) {
             try {
@@ -173,6 +177,7 @@ class MqttTransport(
         // QoS 1: the relay confirms every packet, so nothing is silently dropped on the way. Voice and text are
         // still never retained: if nobody is listening they are gone.
         c.publish(topic, raw, 1, retained)
+        onBytes?.invoke(raw.size + topic.length + 8 + 4)
     }
 
     override fun relay(raw: ByteArray, src: String?) {}

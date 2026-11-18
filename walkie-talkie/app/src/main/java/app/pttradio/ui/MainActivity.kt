@@ -17,6 +17,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -60,6 +62,8 @@ fun AppRoot(verified: Boolean, s: RadioState, p: Perms, near: NearbyInfo, alerts
             s.call != null -> CallScreen(s, s.call, now, a)
             scr == Scr.SETUP -> Setup(p, a) { go(Scr.HOME) }
             scr == Scr.SETTINGS -> SettingsScreen(s, p, d, page, onPage, a) { go(Scr.HOME) }
+            scr == Scr.SAFETY -> SafetyScreen(d.checkinAt, now, d.share, d.trail, a) { go(Scr.HOME) }
+            scr == Scr.MAP && s.group != null -> MapScreen(s, now, d.share, a) { go(Scr.RADIO) }
             scr == Scr.RADIO && s.group != null -> RadioScreen(s, near, level, a, now, d.locked) { go(Scr.HOME) }
             else -> Home(s, p, near, alerts, sending, a, now, tab, onTab, go, d.visible, d.locked)
         }
@@ -153,7 +157,7 @@ class MainActivity : ComponentActivity(), Actions {
     }
 
     /** HD over internet, SD (smaller, quicker over Bluetooth / Wi-Fi) without. */
-    private fun quality() = if (core.state.value.netUp) 1600 to 600_000 else 960 to 170_000
+    private fun quality() = if (core.state.value.netUp && !app.saver.value) 1600 to 600_000 else 960 to 170_000
 
     private val imageReq = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) kotlin.concurrent.thread(isDaemon = true) {
@@ -432,6 +436,7 @@ class MainActivity : ComponentActivity(), Actions {
         if (r.values.any { !it }) warning = "Nearby devices denied. Without internet the radio can't reach phones around you. The app won't work properly."
         else app.refreshLinks()
         app.nearby.publish()
+        app.tracker.apply()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -456,8 +461,15 @@ class MainActivity : ComponentActivity(), Actions {
             val alerts by app.sos.alerts.collectAsState()
             val sending by app.sos.sending.collectAsState()
             LaunchedEffect(s.me?.id) { if (s.me != null) RadioService.start(this@MainActivity) }
-            BackHandler(enabled = s.me != null && scr != Scr.HOME) { scr = Scr.HOME }
-            val d = SettingsData(mode, btn, field, sosOpen, boostLevel, profile, nearVisible, lockOn, lockedChats)
+            BackHandler(enabled = s.me != null && scr != Scr.HOME) { scr = if (scr == Scr.MAP) Scr.RADIO else Scr.HOME }
+            val saver by app.saver.collectAsState()
+            val used by app.dataUsed.collectAsState()
+            val checkin by app.checkinAt.collectAsState()
+            val share by app.tracker.share.collectAsState()
+            val trail by app.tracker.trail.collectAsState()
+            val signalOn by app.signal.on.collectAsState()
+            val lit by app.signal.lit.collectAsState()
+            val d = SettingsData(mode, btn, field, sosOpen, boostLevel, profile, nearVisible, lockOn, lockedChats, saver, used, checkin, share, trail)
             AppRoot(verified, s, perms, near, alerts, sending, d, settingsPage, { settingsPage = it }, core.level, auth.enabled,
                 appLocked, { unlockApp() }, this, scr, tab, { tab = it }) { if (it == Scr.SETTINGS && scr != Scr.SETTINGS) settingsPage = ""; scr = it }
             warning?.let { w ->
@@ -484,6 +496,19 @@ class MainActivity : ComponentActivity(), Actions {
             // show over the lock screen only while a call is ringing
             val ringing = s.call?.state == "ringing"
             LaunchedEffect(ringing) { if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(ringing); setTurnScreenOn(ringing) } }
+            if (signalOn) {
+                BackHandler { stopSignal() }
+                // full brightness while flashing
+                LaunchedEffect(Unit) { window.attributes = window.attributes.apply { screenBrightness = 1f } }
+                SignalScreen(lit, this)
+            }
+            qr?.let { bmp ->
+                Sheet("My QR code", { qr = null }) {
+                    androidx.compose.foundation.Image(bmp, "QR code", Modifier.fillMaxWidth().aspectRatio(1f).background(androidx.compose.ui.graphics.Color.White).padding(12.dp))
+                    Body("Others scan this in ZeroBar (Add by QR code) or with their camera to add you, even with no internet.", color = C.dim, size = 12.sp)
+                    Btn("Done", Modifier.fillMaxWidth(), primary = true) { qr = null }
+                }
+            }
             info?.let { t ->
                 Sheet("Note", { info = null }) {
                     Body(t, size = 14.sp)
@@ -497,6 +522,8 @@ class MainActivity : ComponentActivity(), Actions {
 
     private fun handle(i: Intent?) {
         if (i?.getBooleanExtra("answer", false) == true) { i.removeExtra("answer"); answerCall() }
+        if (i?.getBooleanExtra("safety", false) == true) { i.removeExtra("safety"); scr = Scr.SAFETY }
+        i?.data?.takeIf { it.scheme == "zerobar" && it.host == "u" }?.let { addFromQr(it.toString()); i.data = null; return }
         i?.data?.takeIf { it.scheme == "zerobar" }?.let { signInLink(it); i.data = null; return }
         val gid = i?.getStringExtra("gid")
         if (gid != null) { core.tune(gid, i.getIntExtra("ch", 0).coerceAtLeast(0)); scr = Scr.RADIO }
@@ -565,6 +592,73 @@ class MainActivity : ComponentActivity(), Actions {
     }
     override fun unlockChat(gid: String, then: () -> Unit) { if (gid in lockedChats) authenticate("Open locked chat") { then() } else then() }
     override fun playVoice(id: Long) { core.playVoice(id) }
+
+    // ---- safety tools ----
+    override fun startSignal(sound: Boolean) { app.signal.start(sound) }
+    override fun stopSignal() {
+        app.signal.stop()
+        window.attributes = window.attributes.apply { screenBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE }
+    }
+    override fun setCheckIn(minutes: Int) {
+        if (minutes <= 0) { app.pttradio.CheckIn.ok(this); return }
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) requestPerm("notif")
+        app.pttradio.CheckIn.set(this, System.currentTimeMillis() + minutes * 60_000L)
+        // a fresh position for the alert, if one is ever needed
+        if (app.lastFix == null && hasLocation()) fix { l -> if (l != null && app.lastFix == null) app.lastFix = l }
+    }
+    private fun hasLocation() = checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    override fun setShare(on: Boolean) {
+        if (on && !hasLocation()) { requestPerm("nearby"); info = "Allow Location, then turn sharing on again."; return }
+        app.tracker.setShare(on); RadioService.start(this, mic = true)
+    }
+    override fun setTrail(on: Boolean) {
+        if (on && !hasLocation()) { requestPerm("nearby"); info = "Allow Location, then turn the trail on again."; return }
+        app.tracker.setTrail(on); RadioService.start(this, mic = true)
+    }
+    override fun clearTrail() { core.state.value.me?.let { core.clearTrail(it.id) } }
+    override fun showMap() { if (core.state.value.group != null) scr = Scr.MAP }
+    override fun setMeetHere(gid: String) {
+        val p = core.state.value.positions[core.state.value.me?.id] ?: return
+        core.setMeet(gid, p.lat, p.lon, java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date()) + " · by " + (core.state.value.me?.name ?: ""))
+    }
+    override fun clearMeet(gid: String) { core.setMeet(gid, null, null, "") }
+    override fun rollCall(gid: String) { core.rollCall(gid) }
+    override fun rollOk(gid: String) { core.rollOk(gid) }
+    override fun clearRoll(gid: String) { core.clearRoll(gid) }
+    override fun setSaver(on: Boolean) { app.setSaver(on) }
+    override fun resetData() { app.resetData() }
+
+    // ---- QR code: add people face to face, no internet needed ----
+    private var qr by mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null)
+    override fun showQr() {
+        val me = core.state.value.me ?: return
+        val text = "zerobar://u/${me.id}?n=${Uri.encode(me.name)}&k=${Uri.encode(me.pub)}"
+        try {
+            val m = com.google.zxing.qrcode.QRCodeWriter().encode(text, com.google.zxing.BarcodeFormat.QR_CODE, 0, 0, mapOf(com.google.zxing.EncodeHintType.MARGIN to 1))
+            val bmp = android.graphics.Bitmap.createBitmap(m.width, m.height, android.graphics.Bitmap.Config.RGB_565)
+            for (x in 0 until m.width) for (y in 0 until m.height) bmp.setPixel(x, y, if (m[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+            qr = android.graphics.Bitmap.createScaledBitmap(bmp, m.width * 12, m.height * 12, false).asImageBitmap()
+        } catch (e: Exception) { info = "Could not make the QR code." }
+    }
+    override fun scanQr() {
+        try {
+            com.google.mlkit.vision.codescanner.GmsBarcodeScanning.getClient(this,
+                com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions.Builder().setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_QR_CODE).build())
+                .startScan()
+                .addOnSuccessListener { b -> addFromQr(b.rawValue ?: "") }
+                .addOnFailureListener { info = "The scanner is not available on this phone yet (Google Play services downloads it once, with internet). You can also scan with the camera app." }
+        } catch (e: Exception) { info = "The scanner is not available on this phone." }
+    }
+    private fun addFromQr(text: String) {
+        val u = Uri.parse(text)
+        val id = if (u.scheme == "zerobar" && u.host == "u") u.pathSegments.firstOrNull() else null
+        val name = u.getQueryParameter("n"); val pub = u.getQueryParameter("k")
+        if (id == null || name.isNullOrBlank() || pub.isNullOrBlank()) { info = "That is not a ZeroBar QR code."; return }
+        if (id == core.state.value.me?.id) { info = "That is your own code."; return }
+        core.addContact(id, name, pub)
+        core.openDirect(id)
+        scr = Scr.RADIO
+    }
 
     private var callWarn by mutableStateOf<String?>(null)
     override fun startCall(gid: String) {

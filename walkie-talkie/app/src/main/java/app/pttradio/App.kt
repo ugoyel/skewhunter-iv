@@ -64,6 +64,27 @@ class App : Application() {
     lateinit var nearby: NearbyTransport
     lateinit var lan: LanTransport
     lateinit var sos: Sos
+    val signal by lazy { SosSignal(this) }
+    /** Check-in deadline (0 = none). */
+    val checkinAt = MutableStateFlow(0L)
+    /** Latest GPS fix of this phone, for check-in alerts and the group map. */
+    @Volatile var lastFix: android.location.Location? = null
+    lateinit var tracker: Tracker
+    /** Data saver: lowest voice bit rate, small pictures, fewer position updates. */
+    val saver = MutableStateFlow(false)
+    fun setSaver(on: Boolean) { prefs.edit().putBoolean("saver", on).apply(); saver.value = on; tracker.apply() }
+    /** Internet data used through the relay this month, in bytes. */
+    val dataUsed = MutableStateFlow(0L)
+    private var dataSavedAt = 0L
+    private fun month() = java.text.SimpleDateFormat("yyyyMM", java.util.Locale.US).format(java.util.Date())
+    fun countData(n: Int) {
+        val m = month()
+        if (prefs.getString("dataMonth", "") != m) { prefs.edit().putString("dataMonth", m).putLong("dataBytes", 0).apply(); dataUsed.value = 0 }
+        dataUsed.value += n
+        val now = System.currentTimeMillis()
+        if (now - dataSavedAt > 30_000) { dataSavedAt = now; prefs.edit().putLong("dataBytes", dataUsed.value).apply() }
+    }
+    fun resetData() { prefs.edit().putLong("dataBytes", 0).putString("dataMonth", month()).apply(); dataUsed.value = 0 }
     /** auto = internet, plus nearby whenever there is no internet or the app is on screen · net · nearby · both */
     val linkMode = MutableStateFlow("auto")
     private val bump = MutableStateFlow(0)
@@ -101,6 +122,9 @@ class App : Application() {
         }, AudioEngine(this).also { audio = it }, opus = OpusCodec())
         val alarms = Alarms(this)
         mqtt = MqttTransport({ servers() }, { alarms }, { alarms.retryIn(it) })
+        mqtt.onBytes = { countData(it) }
+        saver.value = prefs.getBoolean("saver", false)
+        dataUsed.value = if (prefs.getString("dataMonth", "") == month()) prefs.getLong("dataBytes", 0) else 0
         alarms.onRetry = { mqtt.retryNow() }
         nearby = NearbyTransport(this)
         core.onEvent = { Notifier.event(this, it) }
@@ -126,8 +150,16 @@ class App : Application() {
             override fun onLost(network: Network) { netTier.value = 1 }
         })
         // voice quality follows the connection: HD on good internet, lower bit rates as it gets worse
-        scope.launch { combine(netTier, core.state.map { it.netUp }.distinctUntilChanged()) { t, up -> if (up) t else 1 }.collect { core.setLinkTier(it) } }
+        scope.launch { combine(netTier, core.state.map { it.netUp }.distinctUntilChanged()) { t, up -> if (up) t else 1 }
+            .combine(saver) { t, sv -> if (sv) minOf(t, 1) else t }.collect { core.setLinkTier(it) } }
+        tracker = Tracker(this)
+        tracker.apply()
         audio.boost = prefs.getInt("boost", 1)
+        // a pending check-in survives restarts: re-arm it, or fire it if it fell due meanwhile
+        prefs.getLong("checkinAt", 0).takeIf { it > 0 }?.let { at ->
+            checkinAt.value = at
+            if (at > System.currentTimeMillis()) CheckIn.set(this, at) else if (!prefs.getBoolean("checkinMissed", false)) CheckIn.handle(this, "app.pttradio.CHECKIN_DUE")
+        }
         visibleNearby.value = prefs.getBoolean("visible", true)
         // background: lighter presence and announcements
         scope.launch { onScreen.collect { core.setForeground(it) } }
@@ -348,6 +380,15 @@ object Notifier {
                     .addAction(Notification.Action.Builder(icon, "Answer", answer).build()).build())
             }
             is Event.CallOver -> nm.cancel(CALL_NOTE)
+            is Event.RollCall -> {
+                buzz(c, longArrayOf(0, 300, 150, 300))
+                val ok = PendingIntent.getBroadcast(c, e.gid.hashCode() + 22, Intent(c, RollReceiver::class.java).putExtra("gid", e.gid),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                nm.notify(e.gid.hashCode() + 21, Notification.Builder(c, ALERT).setSmallIcon(R.drawable.ic_stat_radio).setAutoCancel(true)
+                    .setContentTitle("Roll call from ${e.from}").setContentText("${e.chat}: tap I'm OK so they know you are fine")
+                    .setContentIntent(open(c, e.gid.hashCode() + 21, e.gid, 0))
+                    .addAction(Notification.Action.Builder(android.graphics.drawable.Icon.createWithResource(c, R.drawable.ic_stat_radio), "I'm OK", ok).build()).build())
+            }
             is Event.Talk -> {
                 val st = (c.applicationContext as App).core.state.value
                 if (!MainActivity.visible || e.gid != st.tunedGroup)
@@ -372,7 +413,7 @@ class RadioService : Service() {
         val app = application as App
         try {
             val n = Notifier.standby(this, Notifier.statusLine(app.core.state.value))
-            if (Build.VERSION.SDK_INT >= 29) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK) else startForeground(1, n)
+            if (Build.VERSION.SDK_INT >= 29) startForeground(1, n, types(false)) else startForeground(1, n)
         } catch (e: Exception) { stopSelf(); return }
         scope.launch {
             app.core.state.map { Notifier.statusLine(it) to it.tunedGroup }.distinctUntilChanged().collectLatest { (text, gid) ->
@@ -385,13 +426,23 @@ class RadioService : Service() {
         // Sent while the app is on screen: Android only grants background microphone use (needed for the
         // hardware talk button) to a service that was promoted while the app was visible.
         if (intent?.action == ACTION_MIC && Build.VERSION.SDK_INT >= 30) try {
-            startForeground(1, Notifier.standby(this, Notifier.statusLine((application as App).core.state.value)),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-        } catch (e: Exception) { }
+            startForeground(1, Notifier.standby(this, Notifier.statusLine((application as App).core.state.value)), types(true))
+        } catch (e: Exception) {
+            try { startForeground(1, Notifier.standby(this, Notifier.statusLine((application as App).core.state.value)), types(true, loc = false)) } catch (e: Exception) { }
+        }
         return START_STICKY
     }
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onDestroy() { scope.cancel(); super.onDestroy() }
+
+    /** Foreground service types: always media; the microphone for the talk button; location while sharing position. */
+    private fun types(mic: Boolean, loc: Boolean = true): Int {
+        val app = application as App
+        var t = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+        if (mic && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) t = t or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        if (loc && mic && Build.VERSION.SDK_INT >= 29 && app.tracker.active && app.tracker.allowed()) t = t or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        return t
+    }
 
     companion object {
         const val ACTION_MIC = "mic"

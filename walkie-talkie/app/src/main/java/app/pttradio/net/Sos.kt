@@ -41,7 +41,11 @@ object SosCodes {
         "Follow me, moving on",
         "Low battery",
         "Open ZeroBar, let's connect",
+        "Missed check-in",
     )
+    /** Sent automatically by the check-in timer; not offered in the manual list. */
+    const val MISSED_CHECKIN = 8
+    val manual get() = text.take(MISSED_CHECKIN)
     fun of(code: Int) = text.getOrElse(code) { "Alert" }
 }
 
@@ -67,7 +71,7 @@ class Sos(
     companion object {
         const val MFR = 0xFFFF            // Bluetooth SIG company id reserved for testing / non-commercial use
         const val MAGIC: Byte = 0x53
-        const val MAX_HOPS = 2
+        const val MAX_HOPS = 6        // each phone that hears an alert repeats it: up to 6 phones in a chain
         const val SEND_MS = 10 * 60_000L
         const val RELAY_MS = 5 * 60_000L
         const val KEEP_MS = 30 * 60_000L

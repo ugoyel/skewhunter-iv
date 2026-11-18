@@ -194,6 +194,9 @@ fun Home(
                         leadingIcon = { Dot(if (s.status == "dnd") C.red else C.green, 10.dp) })
                     androidx.compose.material3.HorizontalDivider(color = C.line)
                     DropdownMenuItem({ Text("New group", color = C.text) }, { menu = false; onTab(0); picking = true })
+                    DropdownMenuItem({ Text("Safety tools", color = C.text) }, { menu = false; go(Scr.SAFETY) })
+                    DropdownMenuItem({ Text("My QR code", color = C.text) }, { menu = false; a.showQr() })
+                    DropdownMenuItem({ Text("Add by QR code", color = C.text) }, { menu = false; a.scanQr() })
                     DropdownMenuItem({ Text("Profile", color = C.text) }, { menu = false; a.openSettings("profile") })
                     DropdownMenuItem({ Text("Account", color = C.text) }, { menu = false; a.openSettings("account") })
                     DropdownMenuItem({ Text("Privacy & security", color = C.text) }, { menu = false; a.openSettings("privacy") })
@@ -291,8 +294,10 @@ fun Home(
             "Shown to your contacts only, unless you allow anyone in Settings. Your GPS position is included. With internet it also goes to your groups.",
             color = C.dim, size = 13.sp)
         Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SosCodes.text.forEachIndexed { i, t -> Btn(t, Modifier.fillMaxWidth(), primary = i == 0) { sosMenu = false; a.sendSos(i) } }
+            SosCodes.manual.forEachIndexed { i, t -> Btn(t, Modifier.fillMaxWidth(), primary = i == 0) { sosMenu = false; a.sendSos(i) } }
         }
+        Btn("🔦 Flash + siren (seen and heard far away)", Modifier.fillMaxWidth()) { sosMenu = false; a.startSignal(true) }
+        Btn("Safety tools: check-in timer, map, trail", Modifier.fillMaxWidth()) { sosMenu = false; go(Scr.SAFETY) }
     }
     if (newChat) Sheet("New chat", { newChat = false }) {
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { newChat = false; picking = true }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -369,7 +374,7 @@ fun Home(
 }
 
 @Composable
-private fun Banner(color: Color, title: String, text: String, action: String, onAction: () -> Unit) {
+fun Banner(color: Color, title: String, text: String, action: String, onAction: () -> Unit) {
     Row(Modifier.padding(horizontal = 14.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(color.copy(alpha = 0.13f))
         .padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
