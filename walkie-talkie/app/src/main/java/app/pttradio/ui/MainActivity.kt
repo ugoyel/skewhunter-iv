@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pttradio.App
 import app.pttradio.BuildConfig
+import app.pttradio.CheckIn
 import app.pttradio.net.Auth
 import app.pttradio.RadioService
 import app.pttradio.core.RadioState
@@ -600,9 +601,9 @@ class MainActivity : ComponentActivity(), Actions {
         window.attributes = window.attributes.apply { screenBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE }
     }
     override fun setCheckIn(minutes: Int) {
-        if (minutes <= 0) { app.pttradio.CheckIn.ok(this); return }
+        if (minutes <= 0) { CheckIn.ok(this); return }
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) requestPerm("notif")
-        app.pttradio.CheckIn.set(this, System.currentTimeMillis() + minutes * 60_000L)
+        CheckIn.set(this, System.currentTimeMillis() + minutes * 60_000L)
         // a fresh position for the alert, if one is ever needed
         if (app.lastFix == null && hasLocation()) fix { l -> if (l != null && app.lastFix == null) app.lastFix = l }
     }
