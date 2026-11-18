@@ -26,8 +26,8 @@ android {
         applicationId = "io.github.ugoyel.hearby"
         minSdk = 29          // AudioPlaybackCapture + MediaCodec Opus encoder both arrived in Android 10
         targetSdk = 36
-        versionCode = 11
-        versionName = "1.7.0"
+        versionCode = 12
+        versionName = "1.7.1"
         // The internet relay for parties across networks (hearby/relay); empty: Wi-Fi only.
         // Set it in gradle.properties (hearby.relayUrl=https://...) or HEARBY_RELAY_URL.
         val relayUrl = (project.findProperty("hearby.relayUrl") as String?) ?: System.getenv("HEARBY_RELAY_URL") ?: ""

@@ -346,6 +346,10 @@ are no package dependencies.
 
 The DJ phone plays along in sync, so there is no echo between it and the others.
 
+**YouTube:** tap *Search YouTube* at the top of the DJ screen. It's YouTube's own mobile site (same
+search, suggestions, filters and results as the app; sign in there for personal results). Tapping a
+video plays it on every phone instead of opening it.
+
 **Karaoke and announcements:** hold the mic button next to the play button and talk or sing; let go
 and it's muted. Hold the phone close to your mouth, like a mic.
 

@@ -27,6 +27,7 @@ import com.google.zxing.WriterException
 import com.google.zxing.EncodeHintType
 import com.google.zxing.BarcodeFormat
 import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.ui.geometry.Size
@@ -366,6 +367,9 @@ internal fun HostIdle(
 @Composable
 internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String? = null, notice: String? = null) {
     val video = state.video
+    val checkCardShown = video == null && (state.suggestSoundCheck || state.soundCheck.running || state.soundCheck.message != null)
+
+    // 1. YouTube: the playing video and its controls, then the search for the next one.
     if (video != null) {
         val correction by rememberUpdatedState(state.correctionUs)
         val volume by rememberUpdatedState(state.videoVolume)
@@ -383,21 +387,52 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
         }
         if (state.micOn) MicNotice(state)
         micNotice?.let { Notice(it) }
-        if (state.webUrls.isNotEmpty()) IPhoneCard(state.webUrls)
-        state.anywhereUrl?.let { AnywhereCard(it) }
-        Crowd(state.listeners)
-        GradientButton("End the party", actions.onStop, Modifier.fillMaxWidth(), icon = Icons.Rounded.Stop, brush = Party.Stop, glow = Party.Coral)
-        return
     }
+    YouTubeCard(actions.onPlayVideo, playing = video != null)
+
+    // 2. Songs from this phone.
+    if (video == null) {
+        SongsCard(state, actions)
+        state.songError?.let { Notice(it) }
+        notice?.let { Notice(it) }
+        if (state.micOn) MicNotice(state)
+        if (!checkCardShown) micNotice?.let { Notice(it) } // otherwise the sound check card shows it
+        if (state.muted) {
+            Notice(
+                "Muted on this phone: another app took over the sound, or your headphones disconnected. " +
+                    "Everyone else is still playing.",
+                icon = Icons.AutoMirrored.Rounded.VolumeOff,
+            ) {
+                Spacer(Modifier.height(10.dp))
+                GhostButton("Unmute", actions.onUnmute, height = 44.dp)
+            }
+        }
+        if (state.queue.isNotEmpty()) Queue(state, actions)
+        if (checkCardShown) SoundCheckCard(state, actions.onSoundCheck, micNotice)
+    }
+
+    // 3. How other phones join.
+    if (state.webUrls.isNotEmpty()) IPhoneCard(state.webUrls)
+    state.anywhereUrl?.let { AnywhereCard(it) }
+
+    // 4. The party itself.
+    LiveCard(state)
+    Crowd(state.listeners)
+    GradientButton("End the party", actions.onStop, Modifier.fillMaxWidth(), icon = Icons.Rounded.Stop, brush = Party.Stop, glow = Party.Coral)
+}
+
+/** What plays from this phone: the song and its controls, or a way to add some. */
+@Composable
+private fun SongsCard(state: HostUiState, actions: DjActions) {
     val song = state.queue.getOrNull(state.current)
-    GlassCard(lit = true) {
-        HeroRow(
-            Icons.Rounded.GraphicEq, active = true, level = state.level,
-            title = "You're live!",
-            body = if (state.queue.isEmpty()) "Add songs from this phone to get the party going." else "Every phone plays this in sync, this one too.",
-        )
+    GlassCard(lit = song != null && state.playing) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.LibraryMusic, null, tint = Party.Lime)
+            Spacer(Modifier.width(10.dp))
+            Text("Songs from this phone", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = Color.White)
+        }
         if (song != null) {
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
             Text(song.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 when {
@@ -422,57 +457,45 @@ internal fun HostLive(state: HostUiState, actions: DjActions, micNotice: String?
                 MicButton(state.micOn, state.micLevel, actions.onMicDown, actions.onMicUp)
             }
         } else {
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(6.dp))
+            Text("Every phone plays them in sync, this one too.", style = MaterialTheme.typography.bodyMedium, color = Party.InkSoft)
+            Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 GradientButton("Add songs", actions.onAddSongs, Modifier.weight(1f), icon = Icons.Rounded.LibraryMusic)
                 Spacer(Modifier.width(12.dp))
                 MicButton(state.micOn, state.micLevel, actions.onMicDown, actions.onMicUp) // announcements need no music
             }
         }
+    }
+}
+
+/** The party is on: how many phones, and what the automatic tuning picked. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LiveCard(state: HostUiState) {
+    GlassCard(lit = true) {
+        HeroRow(
+            Icons.Rounded.GraphicEq, active = true, level = state.level,
+            title = "You're live!",
+            body = when (val n = state.listeners.size) {
+                0 -> "Waiting for phones to join."
+                1 -> "1 phone is in, playing in sync with this one."
+                else -> "$n phones are in, playing in sync with this one."
+            },
+        )
         Spacer(Modifier.height(14.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            for (address in state.addresses) {
-                InfoPill(if (state.port == Proto.PORT) address else "$address:${state.port}", Icons.Rounded.Wifi)
-            }
             InfoPill("Auto · ${state.bitrate / 1000} kbps · ${state.playoutDelayMs} ms", Icons.Rounded.AutoAwesome)
             if (state.outputIsBluetooth) InfoPill(state.outputName.removePrefix("Bluetooth: "), Icons.Rounded.Bluetooth)
         }
     }
-
-    state.songError?.let { Notice(it) }
-    notice?.let { Notice(it) }
-    if (state.micOn) MicNotice(state)
-    val checkCardShown = state.suggestSoundCheck || state.soundCheck.running || state.soundCheck.message != null
-    if (!checkCardShown) micNotice?.let { Notice(it) } // otherwise the sound check card shows it
-
-    if (state.muted) {
-        Notice(
-            "Muted on this phone: another app took over the sound, or your headphones disconnected. " +
-                "Everyone else is still playing.",
-            icon = Icons.AutoMirrored.Rounded.VolumeOff,
-        ) {
-            Spacer(Modifier.height(10.dp))
-            GhostButton("Unmute", actions.onUnmute, height = 44.dp)
-        }
-    }
-
-    if (state.queue.isNotEmpty()) Queue(state, actions)
-
-    YouTubeCard(actions.onPlayVideo)
-
-    if (checkCardShown) SoundCheckCard(state, actions.onSoundCheck, micNotice)
-
-    if (state.webUrls.isNotEmpty()) IPhoneCard(state.webUrls)
-    state.anywhereUrl?.let { AnywhereCard(it) }
-    Crowd(state.listeners)
-
-    GradientButton("End the party", actions.onStop, Modifier.fillMaxWidth(), icon = Icons.Rounded.Stop, brush = Party.Stop, glow = Party.Coral)
 }
 
 /** Pick a YouTube video for every phone: paste a link, or share it from the YouTube app. */
 @Composable
-private fun YouTubeCard(onPlay: (String) -> Unit) {
+private fun YouTubeCard(onPlay: (String) -> Unit, playing: Boolean = false) {
     var link by rememberSaveable { mutableStateOf("") }
+    var searching by rememberSaveable { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     fun play() {
         val id = YouTubeLinks.videoId(link)
@@ -488,14 +511,27 @@ private fun YouTubeCard(onPlay: (String) -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Rounded.SmartDisplay, null, tint = Party.Coral)
             Spacer(Modifier.width(10.dp))
-            Text("Play from YouTube", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = Color.White)
+            Text(if (playing) "Play next from YouTube" else "Play from YouTube", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = Color.White)
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            "Every phone plays the video itself, over the internet, and Hearby keeps them in time. " +
-                "Paste a link, or in the YouTube app tap Share › Hearby.",
+            "Search YouTube right here and tap a video: every phone plays it, in time. " +
+                "Or paste a link, or in the YouTube app tap Share › Hearby.",
             style = MaterialTheme.typography.bodyMedium, color = Party.InkSoft,
         )
+        Spacer(Modifier.height(12.dp))
+        if (searching) {
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))) {
+                YouTubeSearch(onPick = { id ->
+                    searching = false
+                    onPlay(id)
+                })
+            }
+            Spacer(Modifier.height(10.dp))
+            GhostButton("Close search", { searching = false }, Modifier.fillMaxWidth(), icon = Icons.Rounded.Close, height = 44.dp)
+        } else {
+            GradientButton("Search YouTube", { searching = true }, Modifier.fillMaxWidth(), icon = Icons.Rounded.Search)
+        }
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
