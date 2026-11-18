@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # to publish the APK as a public download
 
 jobs:
   build:
@@ -35,3 +35,21 @@ jobs:
         with:
           name: ptt-radio-play-bundle
           path: walkie-talkie/app/build/outputs/bundle/release/*.aab
+      - name: Name the files
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/*.apk dist/ZeroBar.apk
+          cp app/build/outputs/bundle/release/*.aab dist/ZeroBar.aab
+      # One fixed public link, updated on every build: no GitHub sign-in needed, works on a phone
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: zerobar-latest
+          name: ZeroBar (latest test build)
+          prerelease: true
+          body: |
+            Latest test build of ZeroBar, built from commit ${{ github.sha }}.
+            On your phone: tap ZeroBar.apk to download, then open it to install.
+            ZeroBar.aab is the file for Google Play Console.
+          files: |
+            walkie-talkie/dist/ZeroBar.apk
+            walkie-talkie/dist/ZeroBar.aab
